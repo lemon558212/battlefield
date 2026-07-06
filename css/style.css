@@ -1,0 +1,41 @@
+/* 戰場 — UI 樣式 */
+* { box-sizing: border-box; margin: 0; }
+body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-serif; display:flex; justify-content:center; }
+#wrap { display:flex; gap:10px; padding:10px; }
+#game { background:#000; border:2px solid #3a4232; width:960px; height:600px; }
+
+#side { width:250px; background:#242b1f; border:1px solid #3a4232; padding:10px; display:none; overflow-y:auto; max-height:600px; }
+#side h3 { color:#cfe3a8; margin-bottom:6px; }
+#side button { display:block; width:100%; margin:5px 0; padding:7px; background:#39442e; color:#e8e6d8;
+  border:1px solid #55643f; cursor:pointer; font-family:inherit; }
+#side button:hover { background:#4a5a3a; }
+#side button.big { background:#5a7a3a; font-size:15px; font-weight:bold; }
+.cp { color:#ffd83d; font-size:20px; letter-spacing:2px; margin:6px 0; }
+.panel { background:#1e2419; border:1px solid #3a4232; padding:8px; margin:8px 0; font-size:13px; line-height:1.5; }
+.hint { background:#3d3a20; border:1px solid #8a7f34; padding:8px; margin:8px 0; font-size:12px; line-height:1.5; }
+#log { margin-top:8px; font-size:11px; color:#9aa88a; line-height:1.6; }
+.fine { font-size:11px; color:#8a967a; margin:6px 0; line-height:1.4; }
+
+.ulist .unitBtn { text-align:left; font-size:12px; line-height:1.35; position:relative; }
+.ulist .unitBtn span { color:#aebf95; font-size:11px; }
+.ulist .unitBtn em { position:absolute; right:8px; top:8px; color:#ffd83d; font-style:normal; }
+.ulist .unitBtn.on { outline:2px solid #ffd83d; }
+
+#menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:14px; background:rgba(15,18,12,0.93); z-index:5; }
+#menu h1 { font-size:52px; letter-spacing:18px; color:#cfe3a8; }
+#menu .sub { color:#9aa88a; }
+#menu .panel { width:340px; }
+#menu label { display:block; margin:6px 0; font-size:14px; }
+#menu select { width:170px; float:right; background:#39442e; color:#e8e6d8; border:1px solid #55643f; padding:3px; }
+#menu button { padding:10px 24px; background:#39442e; color:#e8e6d8; border:1px solid #55643f; cursor:pointer;
+  font-family:inherit; font-size:14px; width:100%; margin-top:6px; }
+#menu button.big { background:#5a7a3a; font-weight:bold; font-size:16px; }
+#menu button:hover { background:#4a5a3a; }
+
+#aim { position:absolute; left:50%; top:18%; transform:translateX(-50%); display:none; z-index:6;
+  background:#242b1f; border:2px solid #8a7f34; padding:12px; font-size:13px; line-height:1.6; min-width:230px; }
+#aim .parts { display:flex; gap:8px; margin:8px 0; }
+#aim button { flex:1; padding:8px; background:#39442e; color:#e8e6d8; border:1px solid #55643f; cursor:pointer; font-family:inherit; }
+#aim button:disabled { opacity:0.4; cursor:not-allowed; }
+#aim button:hover:not(:disabled) { background:#5a7a3a; }

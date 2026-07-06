@@ -1,0 +1,129 @@
+/* ============================================================
+ * combat.js — 命中/傷害/視線/掩體/警戒射擊
+ * 公式唯一權威：GDD/01-戰鬥系統.md §3~§4，改公式先改 GDD
+ * ============================================================ */
+"use strict";
+
+const Combat = {
+
+  /* 視線是否被 solid 阻擋 */
+  losBlocked(map, x1,y1,x2,y2){
+    return map.solids.some(s=>segRect(x1,y1,x2,y2,s));
+  },
+
+  inBush(map, u){
+    return map.bushes.some(b=> Math.hypot(u.x-b.x,u.y-b.y) <= b.r);
+  },
+
+  /* 目標是否吃到掩體（射線穿過沙包，且目標貼著該沙包 <=28px） */
+  coverFactor(map, sx,sy, t){
+    for (const sb of map.sandbags){
+      const nx=clamp(t.x,sb.x,sb.x+sb.w), ny=clamp(t.y,sb.y,sb.y+sb.h);
+      const near = Math.hypot(t.x-nx,t.y-ny) <= 28;
+      if (near && segRect(sx,sy,t.x,t.y,sb)) return 0.5;
+    }
+    return 1.0;
+  },
+
+  /* 隱蔽判定：目標在草叢且未暴露 → 看不見（除非近距/特性） */
+  canSee(map, viewer, t, turn){
+    if (!t.alive) return false;
+    if (this.losBlocked(map, viewer.x,viewer.y,t.x,t.y)) return false;
+    if (this.inBush(map,t) && !t.revealed){
+      let detect = 60;
+      if (NATIONS[t.nationId].trait.id==="jungle_craft") detect = 30;               // 泰國
+      if (t.cls==="specops") detect = 0;                                            // 特種兵草叢完全隱蔽
+      if (NATIONS[viewer.nationId].trait.id==="drone_recon" && turn<=3) return true; // 烏克蘭
+      return dist(viewer,t) < detect;
+    }
+    return true;
+  },
+
+  /* 命中率（GDD/01 §4）。part: "body"|"head"|"radiator" */
+  hitChance(map, shooter, t, part){
+    const w = shooter.weapon;
+    const d = dist(shooter,t);
+    if (d > w.range) return 0;
+    let c = w.acc;
+    if (NATIONS[shooter.nationId].trait.id==="marksmanship") c += 0.03; // 英國
+    c *= d/w.range <= 0.5 ? 1.0 : 1.0 - 0.45*((d/w.range)-0.5)/0.5;
+    c *= part==="head" ? 0.55 : part==="radiator" ? 0.75 : 1.0;
+    if (!w.arc){
+      if (this.losBlocked(map, shooter.x,shooter.y,t.x,t.y)) return 0;
+      c *= this.coverFactor(map, shooter.x,shooter.y,t);
+    } else {
+      c *= 0.7; // 拋物線武器
+    }
+    return clamp(c,0,0.99);
+  },
+
+  partMult(part){ return part==="head" ? 2.0 : part==="radiator" ? 3.0 : 1.0; },
+
+  /* 單發傷害 */
+  damage(shooter, t, part, interception){
+    const w = shooter.weapon;
+    if (w.antiTank && t.cls!=="tank") return Math.round(w.atk*0.6*this.partMult(part)); // 火箭打步兵
+    if (!w.antiTank && !w.arc && t.cls==="tank") return 1;                              // 槍械刮漆
+    let def = t.def;
+    if (NATIONS[t.nationId].trait.id==="island_defense" && Game.onOwnHalf(t)) def += 3; // 日本
+    let dmg = w.atk * this.partMult(part) * Math.max(0.1, 1 - def/w.atk*0.5);
+    if (interception) dmg *= 0.5;
+    if (NATIONS[t.nationId].trait.id==="homeland_defense" && t.side===1) dmg *= 0.9;    // 台灣
+    return Math.max(1, Math.round(dmg));
+  },
+
+  /* 開火：回傳事件陣列供渲染。part 僅第一目標，濺射一律 body */
+  fire(map, shooter, target, part, interception=false){
+    const w = shooter.weapon, ev = [];
+    let scatterX = target.x, scatterY = target.y;
+    if (w.arc){ // 迫砲/砲彈落點散布（GDD/01 §4）
+      let sc = dist(shooter,target)*0.08;
+      if (NATIONS[shooter.nationId].trait.id==="air_recon") sc *= 0.8; // 美國
+      const a = Math.random()*Math.PI*2, rr = Math.random()*sc;
+      scatterX += Math.cos(a)*rr; scatterY += Math.sin(a)*rr;
+    }
+    for (let i=0;i<w.shots;i++){
+      const chance = this.hitChance(map, shooter, target, part);
+      const hit = Math.random() < chance;
+      ev.push({type:"tracer", x1:shooter.x,y1:shooter.y, x2:scatterX+(Math.random()*8-4), y2:scatterY+(Math.random()*8-4), hit});
+      if (hit){
+        const dmg = this.damage(shooter, target, part, interception);
+        target.hp -= dmg;
+        ev.push({type:"hitfx", x:target.x, y:target.y, dmg});
+      }
+    }
+    if (w.splash>0){ // 濺射
+      ev.push({type:"boom", x:scatterX, y:scatterY, r:w.splash});
+      for (const u of Game.units){
+        if (!u.alive || u===target) continue;
+        if (Math.hypot(u.x-scatterX,u.y-scatterY) <= w.splash){
+          const dmg = Math.round(this.damage(shooter,u,"body",interception)*0.5);
+          u.hp -= dmg; ev.push({type:"hitfx", x:u.x,y:u.y, dmg});
+        }
+      }
+    }
+    // 開火暴露（伊朗不對稱作戰：火箭兵首次開火不暴露）
+    const iranStealth = NATIONS[shooter.nationId].trait.id==="asymmetric" && shooter.cls==="at" && !shooter.hasFired;
+    if (!iranStealth) shooter.revealed = true;
+    shooter.hasFired = true;
+    for (const u of Game.units){ if (u.alive && u.hp<=0){ u.alive=false; ev.push({type:"death", x:u.x,y:u.y, unit:u}); } }
+    return ev;
+  },
+
+  /* 警戒射擊（GDD/01 §3）：mover 移動中，敵方警戒單位檢查開火
+     回傳事件陣列。呼叫端負責節流（0.5s / 機槍 0.25s） */
+  interceptTick(map, mover, elapsed){
+    const ev = [];
+    for (const u of Game.units){
+      if (!u.alive || u.side===mover.side || !u.alert) continue;
+      const gap = u.cls==="mg" ? 0.25 : 0.5;
+      u._iceTimer = (u._iceTimer||0) + elapsed;
+      if (u._iceTimer < gap) continue;
+      if (dist(u,mover) > u.weapon.range*0.8) continue;
+      if (!this.canSee(map, u, mover, Game.turn)) continue;
+      u._iceTimer = 0;
+      ev.push(...this.fire(map, u, mover, "body", true));
+    }
+    return ev;
+  }
+};

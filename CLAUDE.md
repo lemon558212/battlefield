@@ -1,0 +1,38 @@
+# 專案《戰場》(Codename: BATTLEFIELD-VC)
+
+戰場女武神（Valkyria Chronicles）式 2D 戰術遊戲，使用真實各國軍事公開資料。
+零依賴 HTML5 Canvas，開瀏覽器即玩。全域工作守則見 `~/.claude/CLAUDE.md`（鐵律與 harness 路由）。
+
+## 鐵律（專案層）
+
+1. **GDD 是規格真相**：代碼與 `GDD/` 矛盾時，先改 GDD 取得共識再改碼。
+2. **零依賴**：禁止引入 npm 套件、框架、建置工具。`index.html` 直接開啟即可玩。
+3. **資料與邏輯分離**：國家/兵種/武器數值只准放 `data/`，引擎代碼不得寫死任何國家數值。
+4. **真實裝備以公開資訊為準**：武器型號查證紀錄在 `research/`，遊戲數值平衡在 `GDD/02`。
+5. **git 已於 2026-07-07 init**（本專案所有檔案由 Claude session 建立），改動以 commit 取代 .bak，commit 紀律見 harness/01 第 5 節。
+
+## 檔案路由
+
+| 路徑 | 內容 | 何時讀 |
+|------|------|--------|
+| `GDD/00-遊戲總覽.md` | 遊戲定位、核心循環、範圍 | 接手專案第一份必讀 |
+| `GDD/01-戰鬥系統.md` | BLiTZ 轉譯：CP/AP、警戒射擊、命中傷害公式 | 改戰鬥邏輯前 |
+| `GDD/02-兵種與武器.md` | 9 兵種規格、武器數值平衡表、剋制關係 | 改數值/加兵種前 |
+| `GDD/03-國家資料規格.md` | data/nations 的 schema 與新增國家 SOP | 加國家/改資料結構前 |
+| `research/各國軍備研究.md` | 14 國裝備查證紀錄（含來源） | 質疑某武器型號時 |
+| `js/` 各檔頭部註解 | 模組職責與依賴 | 改碼前先讀該檔頭 20 行 |
+
+## 目錄結構
+
+```
+index.html          入口（載入順序在此定義，勿亂動順序）
+css/style.css       UI 樣式
+js/data-*.js        （由 data/ 生成的）資料模組
+data/nations/*.js   各國資料（一國一檔）
+js/engine/          引擎核心（不含遊戲規則）
+js/game/            遊戲規則層
+```
+
+## 驗證方式
+
+`python -m http.server 8422` 或 Claude_Preview 啟動 → console 無紅字 → 可完成「選國家→部署→移動→射擊→擊殺→勝利」一輪。canvas 截圖陷阱見 `~/.claude/harness/lessons.md` L-001~L-003。
