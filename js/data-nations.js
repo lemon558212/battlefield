@@ -16,7 +16,7 @@ usa: {
     assault: { label:"突擊步兵", weapon:"M4A1 + M320榴彈器",  mods:{ atk:1 } },
     mg:      { label:"機槍兵",   weapon:"M240B 通用機槍",     mods:{} },
     mortar:  { label:"迫砲兵",   weapon:"M252 81mm迫擊砲",    mods:{} },
-    sniper:  { label:"狙擊手",   weapon:"M110 半自動狙擊系統", mods:{} },
+    sniper:  { label:"狙擊手",   weapon:"MK22 精準狙擊步槍", mods:{} },
     at:      { label:"反裝甲兵", weapon:"FGM-148 標槍飛彈",   mods:{ atk:20, cost:15 } },
     engineer:{ label:"戰鬥工兵", weapon:"M4 卡賓槍",          mods:{} },
     specops: { label:"三角洲部隊",weapon:"HK416",             mods:{ cost:10 } },
@@ -44,12 +44,12 @@ korea: {
   id:"korea", name:"南韓", flagColors:["#003478","#C60C30","#FFFFFF"], uniformColor:"#57604a",
   trait:{ id:"conscript_drill", desc:"精實操演：全員滿 AP +5%" },
   units:{
-    rifleman:{ label:"步槍兵",   weapon:"K2C1 突擊步槍",     mods:{} },
+    rifleman:{ label:"步槍兵",   weapon:"K2 突擊步槍",     mods:{} },
     assault: { label:"突擊步兵", weapon:"K1A 衝鋒卡賓槍",    mods:{ ap:8 } },
-    mg:      { label:"機槍兵",   weapon:"K12 通用機槍",      mods:{} },
+    mg:      { label:"機槍兵",   weapon:"K3 輕機槍",      mods:{} },
     mortar:  { label:"迫砲兵",   weapon:"KM187 81mm迫擊砲",  mods:{} },
     sniper:  { label:"狙擊手",   weapon:"K14 狙擊步槍",      mods:{} },
-    at:      { label:"反裝甲兵", weapon:"現弓 反坦克飛彈",   mods:{ atk:8 } },
+    at:      { label:"反裝甲兵", weapon:"鐵拳3 (Panzerfaust 3)",   mods:{ atk:8 } },
     engineer:{ label:"工兵",     weapon:"K2 摺疊托步槍",     mods:{} },
     specops: { label:"707特殊任務團",weapon:"HK416",         mods:{} },
     tank:    { label:"裝甲兵",   weapon:"K2 黑豹主戰坦克",   mods:{ ap:10, hp:-20 } }
@@ -62,12 +62,12 @@ japan: {
   units:{
     rifleman:{ label:"普通科隊員", weapon:"20式小銃",           mods:{ acc:0.03 } },
     assault: { label:"突擊隊員",   weapon:"89式小銃(摺托)",     mods:{} },
-    mg:      { label:"機關銃手",   weapon:"MINIMI 班用機槍",    mods:{ ap:8 } },
+    mg:      { label:"機關銃手",   weapon:"62式 7.62mm機槍",    mods:{ ap:8 } },
     mortar:  { label:"迫擊砲手",   weapon:"L16 81mm迫擊砲",     mods:{} },
     sniper:  { label:"狙擊手",     weapon:"M24 狙擊步槍",       mods:{} },
     at:      { label:"對戰車兵",   weapon:"01式輕對戰車誘導彈", mods:{ acc:0.05 } },
     engineer:{ label:"施設科隊員", weapon:"89式小銃",           mods:{ ap:10 } },
-    specops: { label:"特殊作戰群", weapon:"HK416 ※",           mods:{} },
+    specops: { label:"特殊作戰群", weapon:"HK416",           mods:{} },
     tank:    { label:"機甲科",     weapon:"10式戰車",           mods:{ ap:16, hp:-40, cost:-10 } }
   }
 },
@@ -80,7 +80,7 @@ taiwan: {
     assault: { label:"突擊步兵",   weapon:"XT112 突擊步槍",    mods:{ atk:1 } },
     mg:      { label:"機槍兵",     weapon:"T74 排用機槍",      mods:{} },
     mortar:  { label:"迫砲兵",     weapon:"T75 60mm迫擊砲",    mods:{ ap:10, atk:-4 } },
-    sniper:  { label:"狙擊手",     weapon:"T93K1 狙擊槍",      mods:{} },
+    sniper:  { label:"狙擊手",     weapon:"T93 狙擊步槍",      mods:{} },
     at:      { label:"火箭兵",     weapon:"紅隼反裝甲火箭",    mods:{ cost:-10 } },
     engineer:{ label:"工兵",       weapon:"T91 短管型",        mods:{} },
     specops: { label:"涼山特勤隊", weapon:"XT112",             mods:{} },
@@ -92,14 +92,14 @@ china: {
   id:"china", name:"中國", flagColors:["#DE2910","#FFDE00","#8a1a0a"], uniformColor:"#66603f",
   trait:{ id:"mass_infantry", desc:"人海：步兵/突擊兵 cost -10%" },
   units:{
-    rifleman:{ label:"步兵",       weapon:"QBZ-191 突擊步槍",  mods:{ cost:-8 } },
-    assault: { label:"突擊步兵",   weapon:"QBZ-191 短管型",    mods:{ cost:-11 } },
-    mg:      { label:"機槍兵",     weapon:"QJY-201 通用機槍",  mods:{} },
-    mortar:  { label:"迫砲兵",     weapon:"PP-93 60mm迫擊砲",  mods:{} },
-    sniper:  { label:"狙擊手",     weapon:"QBU-191 精準步槍",  mods:{ atk:-8, cost:-10 } },
+    rifleman:{ label:"步兵",       weapon:"QBZ-95-1 自動步槍",  mods:{ cost:-8 } },
+    assault: { label:"突擊步兵",   weapon:"QBZ-95B 短步槍",    mods:{ cost:-11 } },
+    mg:      { label:"機槍兵",     weapon:"QJB-95 班用機槍",  mods:{} },
+    mortar:  { label:"迫砲兵",     weapon:"PP89 82mm迫擊砲",  mods:{} },
+    sniper:  { label:"狙擊手",     weapon:"QBU-88 狙擊步槍",  mods:{ atk:-8, cost:-10 } },
     at:      { label:"火箭兵",     weapon:"PF-98 120mm火箭筒", mods:{ atk:8, acc:-0.05 } },
     engineer:{ label:"工兵",       weapon:"QBZ-95B",           mods:{} },
-    specops: { label:"蛟龍突擊隊", weapon:"QBZ-191",           mods:{} },
+    specops: { label:"蛟龍突擊隊", weapon:"QBZ-95-1",           mods:{} },
     tank:    { label:"裝甲兵",     weapon:"99A式 主戰坦克",    mods:{ atk:10, hp:-30 } }
   }
 },
@@ -108,12 +108,12 @@ thailand: {
   id:"thailand", name:"泰國", flagColors:["#A51931","#2D2A4A","#F4F5F8"], uniformColor:"#5d5a41",
   trait:{ id:"jungle_craft", desc:"叢林戰：草叢內單位被發現距離減半" },
   units:{
-    rifleman:{ label:"步兵",         weapon:"11式步槍(TAR-21)",  mods:{} },
+    rifleman:{ label:"步兵",         weapon:"TAR-21 突擊步槍",  mods:{} },
     assault: { label:"突擊步兵",     weapon:"M4A1 卡賓槍",       mods:{} },
     mg:      { label:"機槍兵",       weapon:"FN MAG 通用機槍",   mods:{} },
     mortar:  { label:"迫砲兵",       weapon:"M29 81mm迫擊砲",    mods:{} },
-    sniper:  { label:"狙擊手",       weapon:"SR-25 ※",          mods:{} },
-    at:      { label:"火箭兵",       weapon:"卡爾古斯塔夫 M3",   mods:{ shots:0, cost:-8 } },
+    sniper:  { label:"狙擊手",       weapon:"巴雷特 M82",          mods:{} },
+    at:      { label:"火箭兵",       weapon:"拖式飛彈 (BGM-71 TOW)",   mods:{ shots:0, cost:-8 } },
     engineer:{ label:"工兵",         weapon:"M4 卡賓槍",         mods:{ cost:-5 } },
     specops: { label:"海軍海豹部隊", weapon:"M4A1",              mods:{ cost:-10 } },
     tank:    { label:"裝甲兵",       weapon:"VT-4 主戰坦克",     mods:{ cost:-25, hp:-40 } }
@@ -129,7 +129,7 @@ vietnam: {
     mg:      { label:"機槍兵",   weapon:"PKM 通用機槍",      mods:{ atk:1 } },
     mortar:  { label:"迫砲兵",   weapon:"82mm 迫擊砲",       mods:{ atk:3, acc:-0.04 } },
     sniper:  { label:"狙擊手",   weapon:"SVD 德拉古諾夫",    mods:{ atk:-6, cost:-12 } },
-    at:      { label:"火箭兵",   weapon:"RPG-29",            mods:{ cost:-12, acc:-0.05 } },
+    at:      { label:"火箭兵",   weapon:"9M113 反坦克飛彈",   mods:{ cost:-12, acc:-0.05 } },
     engineer:{ label:"工兵",     weapon:"AKM 突擊步槍",      mods:{} },
     specops: { label:"特工部隊", weapon:"Galil ACE",         mods:{ cost:-15 } },
     tank:    { label:"裝甲兵",   weapon:"T-90S 主戰坦克",    mods:{ cost:-20, hp:-50 } }
@@ -172,12 +172,12 @@ iran: {
   id:"iran", name:"伊朗", flagColors:["#239F40","#DA0000","#FFFFFF"], uniformColor:"#5c5c44",
   trait:{ id:"asymmetric", desc:"不對稱作戰：火箭兵警戒不觸發敵反擊（首次開火不暴露）" },
   units:{
-    rifleman:{ label:"步兵",     weapon:"KL-7.62 (AKM仿)",   mods:{ cost:-8, acc:-0.04 } },
-    assault: { label:"突擊步兵", weapon:"KH-2002 ※",        mods:{ cost:-8 } },
+    rifleman:{ label:"步兵",     weapon:"G3A6 戰鬥步槍",   mods:{ cost:-8, acc:-0.04 } },
+    assault: { label:"突擊步兵", weapon:"KH-2002 海白爾",        mods:{ cost:-8 } },
     mg:      { label:"機槍兵",   weapon:"PKM 仿製型",        mods:{ cost:-6 } },
-    mortar:  { label:"迫砲兵",   weapon:"81mm 迫擊砲(仿)",   mods:{} },
-    sniper:  { label:"狙擊手",   weapon:"Sayyad 狙擊槍 ※",  mods:{ cost:-8 } },
-    at:      { label:"火箭兵",   weapon:"Toophan 反坦克飛彈",mods:{ atk:6 } },
+    mortar:  { label:"迫砲兵",   weapon:"HM-16 81mm迫擊砲",   mods:{} },
+    sniper:  { label:"狙擊手",   weapon:"Nakhjir 狙擊步槍",  mods:{ cost:-8 } },
+    at:      { label:"火箭兵",   weapon:"Ghadir 火箭筒 (RPG-29仿)",mods:{ atk:6 } },
     engineer:{ label:"工兵",     weapon:"AKM",               mods:{} },
     specops: { label:"聖城軍",   weapon:"AK-103",            mods:{ cost:-12 } },
     tank:    { label:"裝甲兵",   weapon:"Karrar 主戰坦克",   mods:{ cost:-30, hp:-40, atk:-8 } }
@@ -191,9 +191,9 @@ israel: {
     rifleman:{ label:"步兵",           weapon:"Tavor X95",        mods:{ acc:0.03 } },
     assault: { label:"突擊步兵",       weapon:"X95 短管型",       mods:{} },
     mg:      { label:"機槍兵",         weapon:"Negev NG7",        mods:{ ap:8 } },
-    mortar:  { label:"迫砲兵",         weapon:"Soltam K6 ※",     mods:{} },
-    sniper:  { label:"狙擊手",         weapon:"HTR-2000 ※",      mods:{} },
-    at:      { label:"火箭兵",         weapon:"MATADOR / 長釘",   mods:{ acc:0.05, cost:8 } },
+    mortar:  { label:"迫砲兵",         weapon:"81mm 迫擊砲",     mods:{} },
+    sniper:  { label:"狙擊手",         weapon:"M24 狙擊步槍",      mods:{} },
+    at:      { label:"火箭兵",         weapon:"長釘飛彈 (Spike-MR)",   mods:{ acc:0.05, cost:8 } },
     engineer:{ label:"戰鬥工兵",       weapon:"X95",              mods:{ ap:8 } },
     specops: { label:"總參偵察部隊",   weapon:"X95 消音型",       mods:{ cost:-24 } },
     tank:    { label:"裝甲兵",         weapon:"梅卡瓦 Mk4",       mods:{ hp:70, ap:-20, cost:25 } }
@@ -204,15 +204,15 @@ germany: {
   id:"germany", name:"德國", flagColors:["#000000","#DD0000","#FFCE00"], uniformColor:"#4a4f42",
   trait:{ id:"panzer_doctrine", desc:"裝甲教條：坦克 CP 消耗 2→1（每回合首次）" },
   units:{
-    rifleman:{ label:"擲彈兵",     weapon:"G95 (HK416A8)",     mods:{ acc:0.03 } },
+    rifleman:{ label:"擲彈兵",     weapon:"G95A1 突擊步槍",     mods:{ acc:0.03 } },
     assault: { label:"突擊步兵",   weapon:"G95K 短管型",       mods:{} },
     mg:      { label:"機槍兵",     weapon:"MG5 通用機槍",      mods:{ atk:1 } },
-    mortar:  { label:"迫砲兵",     weapon:"120mm Tampella ※", mods:{ atk:5, ap:-10 } },
-    sniper:  { label:"狙擊手",     weapon:"G22A2 狙擊步槍",    mods:{} },
+    mortar:  { label:"迫砲兵",     weapon:"Tampella 120mm迫擊砲", mods:{ atk:5, ap:-10 } },
+    sniper:  { label:"狙擊手",     weapon:"G28 狙擊步槍",    mods:{} },
     at:      { label:"火箭兵",     weapon:"鐵拳3 (Pzf 3)",     mods:{} },
     engineer:{ label:"裝甲工兵",   weapon:"G95K",              mods:{} },
     specops: { label:"KSK 特種部隊",weapon:"G95K",             mods:{} },
-    tank:    { label:"裝甲兵",     weapon:"豹2A7V",            mods:{ hp:30, atk:6, cost:35 } }
+    tank:    { label:"裝甲兵",     weapon:"豹2A8",            mods:{ hp:30, atk:6, cost:35 } }
   }
 },
 
@@ -222,13 +222,13 @@ france: {
   units:{
     rifleman:{ label:"步兵",           weapon:"HK416F",            mods:{} },
     assault: { label:"突擊步兵",       weapon:"HK416F 短管型",     mods:{ ap:8 } },
-    mg:      { label:"機槍兵",         weapon:"FN MAG 58",         mods:{} },
-    mortar:  { label:"迫砲兵",         weapon:"LLR 81mm迫擊砲",    mods:{} },
-    sniper:  { label:"狙擊手",         weapon:"PGM Hécate II",     mods:{ atk:10, ap:-10, cost:10 } },
-    at:      { label:"火箭兵",         weapon:"Akeron MP 飛彈",    mods:{ acc:0.04, cost:6 } },
+    mg:      { label:"機槍兵",         weapon:"FN Minimi 輕機槍",         mods:{} },
+    mortar:  { label:"迫砲兵",         weapon:"MEPAC 120mm迫砲",    mods:{} },
+    sniper:  { label:"狙擊手",         weapon:"FR-F2 狙擊步槍",    mods:{} },
+    at:      { label:"火箭兵",         weapon:"Akeron MP (MMP) 飛彈",    mods:{ acc:0.04, cost:6 } },
     engineer:{ label:"工兵",           weapon:"HK416F 短管型",     mods:{} },
     specops: { label:"第1海陸傘兵團",  weapon:"HK416F",            mods:{ ap:10 } },
-    tank:    { label:"裝甲兵",         weapon:"勒克萊爾 主戰坦克", mods:{ ap:14, hp:-30 } }
+    tank:    { label:"裝甲兵",         weapon:"勒克萊爾 XLR", mods:{ ap:14, hp:-30 } }
   }
 }
 };
