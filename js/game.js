@@ -281,11 +281,12 @@ const Game = {
       }
       const p=this.curPlan, mult=Math.pow(0.7,p.unit.actedCount);
       p.unit.ap = p.unit.maxap*mult; p.unit.actedCount++;
-      p.fired=false; p.stuck=0;
+      p.fired=false; p.stuck=0; p.age=0; p.detourT=0;
       for (const e of this.units) e._iceTimer=0;
     }
     const p=this.curPlan, u=p.unit;
     if (!u.alive){ this.curPlan=null; return; }
+    if ((p.age+=dt) > 15) u.ap = 0; // 計畫超時保險：任何情況下敵回合必然終止
     const d = Math.hypot(p.destX-u.x, p.destY-u.y);
     const target = p.targetId ? this.units.find(t=>t.id===p.targetId&&t.alive) : null;
     const repair = p.repairId ? this.units.find(t=>t.id===p.repairId&&t.alive) : null;
@@ -294,10 +295,17 @@ const Game = {
     // 已到預定點卻打不到（視線被擋）→ 改直接朝目標推進，繞出射界
     if (d<=8 && target && !canShoot && u.ap>5 && !p.fired){ p.destX=target.x; p.destY=target.y; return; }
     if (d>8 && u.ap>1 && !(canShoot && dist(u,target)<=u.weapon.range*0.7)){
-      const moved=this.moveUnit(u,(p.destX-u.x)/d,(p.destY-u.y)/d,dt);
-      if (!moved && (p.stuck+=dt)>0.7){ p.stuck=0; // 卡住：橫向繞行
-        const a=Math.atan2(p.destY-u.y,p.destX-u.x)+Math.PI/2;
-        if(!this.moveUnit(u,Math.cos(a),Math.sin(a),dt)) u.ap=0;
+      if (p.detourT>0){ // 迂迴模式：持續側移 0.5 秒繞過阻塞
+        p.detourT-=dt;
+        if (!this.moveUnit(u,Math.cos(p.detourA),Math.sin(p.detourA),dt)) p.detourT=0;
+      } else {
+        const moved=this.moveUnit(u,(p.destX-u.x)/d,(p.destY-u.y)/d,dt);
+        if (!moved && (p.stuck+=dt)>0.3){ p.stuck=0; // 卡住：進入迂迴模式
+          const side = (p.detourSign = -(p.detourSign||1)); // 左右輪替嘗試
+          p.detourA = Math.atan2(p.destY-u.y,p.destX-u.x) + side*Math.PI/2;
+          p.detourT = 0.5;
+          if (!this.moveUnit(u,Math.cos(p.detourA),Math.sin(p.detourA),dt)) p.detourT=0.25;
+        }
       }
       this.pushFx(Combat.interceptTick(this.map,u,dt)); // 我方警戒射擊敵人
       this.checkVictory();
