@@ -27,10 +27,65 @@ const UI = {
     this.el("menu").style.display="flex";
     this.el("selAtk").value="china"; this.el("selDef").value="taiwan";
     this.el("btnTutorial").onclick = ()=>{ const f=MAPS.tutorial.fixedNations; Game.startBattle("tutorial", f.atk, f.def, f.playerSide); };
+    const mpBtn=document.createElement("button"); mpBtn.className="big";
+    mpBtn.textContent="🌐 連線對戰（跨裝置）"; mpBtn.style.marginTop="6px";
+    mpBtn.onclick=()=>this.showConnect();
+    this.el("menu").appendChild(mpBtn);
     this.el("btnSkirmish").onclick = ()=>{
       const a=this.el("selAtk").value, d=this.el("selDef").value;
       Game.startBattle(this.el("selMap").value, a, d, parseInt(this.el("selSide").value,10));
     };
+  },
+
+  /* ---------- 連線對戰介面 ---------- */
+  showConnect(){
+    this.hideAll();
+    const natOpts = Object.values(NATIONS).map(n=>`<option value="${n.id}">${n.name}</option>`).join("");
+    const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}</option>`).join("");
+    const M=this.el("menu"); M.style.display="flex";
+    M.innerHTML=`
+      <h1 style="font-size:28px">🌐 連線對戰</h1>
+      <p class="sub">兩台裝置直連。一人「主持」、一人「加入」，用任何聊天軟體互傳連線碼即可。</p>
+      <div class="panel">
+        <h3>① 我是主持方</h3>
+        <label>地圖 <select id="mpMap">${mapOpts}</select></label>
+        <label>我方(先手) <select id="mpAtk">${natOpts}</select></label>
+        <label>對手 <select id="mpDef">${natOpts}</select></label>
+        <button id="mpGenInvite">產生邀請碼</button>
+        <p class="fine">把下面整段「邀請碼」傳給朋友：</p>
+        <textarea id="mpInvite" rows="2" style="width:100%" readonly placeholder="按上面按鈕產生"></textarea>
+        <p class="fine">貼上朋友回傳的「回應碼」，再按開始：</p>
+        <textarea id="mpAnswer" rows="2" style="width:100%" placeholder="貼上回應碼"></textarea>
+        <button id="mpConnect" class="big">完成連線並開始</button>
+      </div>
+      <div class="panel">
+        <h3>② 我是加入方</h3>
+        <p class="fine">貼上朋友給的「邀請碼」：</p>
+        <textarea id="mpInvIn" rows="2" style="width:100%" placeholder="貼上邀請碼"></textarea>
+        <button id="mpGenAnswer">產生回應碼</button>
+        <p class="fine">把下面整段「回應碼」傳回主持方，然後等待開局：</p>
+        <textarea id="mpAnsOut" rows="2" style="width:100%" readonly></textarea>
+      </div>
+      <button id="mpBack">返回主選單</button>
+      <div id="mpStatus" class="hint" style="display:none"></div>`;
+    const st=(m)=>{ const e=this.el("mpStatus"); e.style.display="block"; e.textContent=m; };
+    Net.onState = d=>Game.applyNetState(d);
+    Net.onClose = ()=>st("⚠ 連線中斷，請返回重連");
+    Net.onReady = ()=>{
+      if (Net.myside===0){ st("✅ 已連線！開始對戰"); Game.startMP(this.el("mpMap").value, this.el("mpAtk").value, this.el("mpDef").value); }
+      else { st("✅ 已連線！等待主持方開局…"); }
+    };
+    this.el("mpGenInvite").onclick = async ()=>{ st("產生邀請碼中…（約 1–4 秒）");
+      try{ this.el("mpInvite").value = await Net.host(); st("邀請碼已產生，傳給朋友。"); }
+      catch(e){ st("產生失敗："+e.message); } };
+    this.el("mpConnect").onclick = async ()=>{ const code=this.el("mpAnswer").value.trim();
+      if(!code){ st("請先貼上朋友的回應碼"); return; }
+      try{ await Net.accept(code); st("連線中…（等對方就緒）"); }catch(e){ st("連線失敗："+e.message); } };
+    this.el("mpGenAnswer").onclick = async ()=>{ const code=this.el("mpInvIn").value.trim();
+      if(!code){ st("請先貼上主持方的邀請碼"); return; } st("產生回應碼中…");
+      try{ this.el("mpAnsOut").value = await Net.join(code); st("回應碼已產生，傳回主持方，等待開局…"); }
+      catch(e){ st("產生失敗："+e.message); } };
+    this.el("mpBack").onclick = ()=>{ Net.reset(); this.showMenu(); };
   },
 
   /* ---------- 部署 ---------- */
@@ -92,7 +147,8 @@ const UI = {
 
   refreshHud(){
     if (!this.el("hudTurn")) return;
-    this.el("hudTurn").textContent = `第 ${Game.turn}/30 回合 — ${Game.state==="enemy"?"敵方階段":"我方階段"}`;
+    const _ph = Net.connected ? (Net.myside===Game.turnOwner?"你的回合 ▶":"對方回合…") : (Game.state==="enemy"?"敵方階段":"我方階段");
+    this.el("hudTurn").textContent = `第 ${Game.turn}/30 回合 — ${_ph}`;
     this.el("hudCp").innerHTML = "CP "+"●".repeat(Game.cp)+"○".repeat(Math.max(0,Game.cpMax-Game.cp));
     this.refreshActBar();
   },

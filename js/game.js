@@ -16,6 +16,7 @@ const Game = {
   selFired:false,      // 該次行動是否已用掉開火機會
   aimTarget:null,
   moveTarget:null,
+  turnOwner:null,        // 連線對戰：目前輪到哪一方（0/1）
   plans:[], curPlan:null, enemyCpLeft:0, germanyTankDiscountUsed:false,
   budgetLeft:0, deployCls:null,
   keys:{}, lastTs:0, over:null, hintIdx:0,
@@ -140,6 +141,57 @@ const Game = {
     return Math.min(10, 6 + tanks);
   },
 
+  /* ---------- 連線對戰（net.js） ---------- */
+  // 主機：設定並自動布署雙方預設軍隊，立即開打，廣播初始狀態
+  startMP(mapId, atkNation, defNation){
+    this.startBattle(mapId, atkNation, defNation, 0); // 主機固定 side 0
+    this.aiDeploy(0);                                 // startBattle 已布署 side 1，這裡補 side 0
+    this.playerSide = 0; this.turnOwner = 0;
+    this.state = "cmd";
+    Fog.exploreAll(); Fog.recompute();
+    this.beginTurn(0);
+    UI.showBattle();
+    Net.sendState();
+    UI.log("—— 連線對戰開始，你先手 ——");
+  },
+
+  // 連線版換手：不跑 AI，翻面 + 廣播，讓對方接手
+  mpEndTurn(){
+    this.turnOwner = 1 - this.turnOwner;
+    if (this.turnOwner===0) this.turn++;
+    if (this.turn>30 && !this.over){ this.over={winner:1, why:"撐過 30 回合"}; }
+    this.state = "cmd";
+    if (!this.over) this.beginTurn(this.turnOwner);
+    if (this.over){ this.state="over"; UI.showEnd(); }
+    Net.sendState();
+    UI.refreshHud();
+    UI.log(this.turnOwner===Net.myside ? "—— 換你行動 ——" : "—— 等待對方行動 ——");
+  },
+
+  // 收到對方廣播的權威狀態，重建本機遊戲
+  applyNetState(d){
+    if (!MAPS[d.map]) return;
+    this.map = MAPS[d.map]; this.enrichMap(this.map); this._bg = null;
+    this.nations = d.nations;
+    this.turn = d.turn; this.cp = d.cp; this.cpMax = d.cpMax; this.over = d.over || null;
+    this.turnOwner = d.turnOwner;
+    this.playerSide = Net.myside;
+    let maxid = 0;
+    this.units = d.units.map(su=>{
+      const u = makeUnit(su.nationId, su.cls, su.side, su.x, su.y);
+      u.id=su.id; u.hp=su.hp; u.ap=su.ap; u.alive=su.alive; u.facing=su.facing;
+      u.actedCount=su.actedCount; u.revealed=su.revealed;
+      if (su.id>maxid) maxid=su.id;
+      return u;
+    });
+    UNIT_SEQ = Math.max(UNIT_SEQ||1, maxid+1);
+    this.sel=null; this.aimTarget=null; this.moveTarget=null;
+    this.state = this.over ? "over" : "cmd";
+    Fog.exploreAll(); Fog.recompute();
+    if (this.over) UI.showEnd(); else UI.showBattle();
+    UI.refreshHud();
+  },
+
   beginTurn(side){
     this.cp = this.cpMax = this.cpFor(side);
     this.germanyTankDiscountUsed = false;
@@ -193,6 +245,7 @@ const Game = {
   },
 
   cmdClick(x,y){
+    if (Net.connected && Net.myside!==this.turnOwner){ UI.log("等待對方行動…"); return; }
     const u = this.unitAt(x,y,this.playerSide);
     if (!u) return;
     let cost = (u.cls==="tank" || u.big || u.domain==="air") ? 2 : 1; // 坦克/大艦/戰機花 2 CP
@@ -220,6 +273,7 @@ const Game = {
     this.sel=null; this.aimTarget=null; this.moveTarget=null; UI.hideAim();
     this.state="cmd";
     this.checkVictory();
+    if (Net.connected && !this.over) Net.sendState();
     if (!this.over && this.cp<=0) this.endTurn();
     UI.refreshHud();
   },
@@ -227,6 +281,7 @@ const Game = {
   endTurn(){
     this.sel=null; this.aimTarget=null; UI.hideAim();
     if (this.over) return;
+    if (Net.connected){ if(Net.myside===this.turnOwner) this.mpEndTurn(); return; }
     this.state="enemy";
     this.beginTurn(1-this.playerSide);
     this.plans = AI.planTurn(this.map, 1-this.playerSide);
@@ -235,6 +290,7 @@ const Game = {
   },
 
   actClick(x,y){
+    if (Net.connected && Net.myside!==this.turnOwner) return;
     const foe = this.unitAt(x,y);
     if (foe && foe.side!==this.playerSide && Combat.canSee(this.map,this.sel,foe,this.turn)){
       this.aimTarget = foe; UI.showAim(this.sel, foe); return;

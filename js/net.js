@@ -78,7 +78,7 @@ const Net = {
   serialize(){
     const g = Game;
     return {
-      map: g.map.id, nations: g.nations, turn: g.turn, cp: g.cp, cpMax: g.cpMax,
+      map: g.map.id, nations: g.nations, turn: g.turn, cp: g.cp, cpMax: g.cpMax, turnOwner: g.turnOwner,
       over: g.over,
       units: g.units.map(u=>({
         id:u.id, side:u.side, nationId:u.nationId, cls:u.cls,
