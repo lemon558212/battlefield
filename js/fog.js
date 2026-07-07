@@ -16,6 +16,16 @@ const Fog = {
 
   reset(){ this.visible.clear(); this.explored.clear(); },
 
+  /* 開局把整張地圖標為已探索：地形全程可見（戰場女武神式），
+     迷霧只體現在「敵人未偵察到就不顯示」，而非遮黑地形 */
+  exploreAll(){
+    this._cols = Math.ceil(960 / FOG_CELL);
+    this._rows = Math.ceil(600 / FOG_CELL);
+    for (let cx = 0; cx < this._cols; cx++)
+      for (let cy = 0; cy < this._rows; cy++)
+        this.explored.add(this.key(cx, cy));
+  },
+
   /* 依當前我方單位重算可見格（GDD/05 §3）。移動每 0.1s 或回合切換時呼叫 */
   recompute(){
     if (!Game.map) return;
@@ -63,14 +73,16 @@ const Fog = {
     return false;
   },
 
-  /* 渲染迷霧遮罩層（在敵單位之後、我方單位之前呼叫） */
+  /* 渲染迷霧遮罩層（在敵單位之後、我方單位之前呼叫）
+     設計原則：地形永遠看得清（戰場女武神式），迷霧只做「未偵察」的淡暗提示，
+     真正的資訊隱藏是「敵人不顯示」（由 Game.enemyVisible 負責），不是遮黑地形 */
   render(ctx){
     if (!this.enabled) return;
     for (let cx = 0; cx < this._cols; cx++){
       for (let cy = 0; cy < this._rows; cy++){
         const s = this.state(cx * FOG_CELL, cy * FOG_CELL);
         if (s === 2) continue;
-        ctx.fillStyle = s === 1 ? "rgba(8,10,14,0.45)" : "rgba(4,6,10,0.86)";
+        ctx.fillStyle = s === 1 ? "rgba(10,14,20,0.12)" : "rgba(8,12,20,0.34)";
         ctx.fillRect(cx * FOG_CELL, cy * FOG_CELL, FOG_CELL, FOG_CELL);
       }
     }

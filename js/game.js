@@ -15,6 +15,7 @@ const Game = {
   sel:null,            // 行動模式中的單位
   selFired:false,      // 該次行動是否已用掉開火機會
   aimTarget:null,
+  moveTarget:null,
   plans:[], curPlan:null, enemyCpLeft:0, germanyTankDiscountUsed:false,
   budgetLeft:0, deployCls:null,
   keys:{}, lastTs:0, over:null, hintIdx:0,
@@ -26,6 +27,8 @@ const Game = {
     window.addEventListener("keydown", e=>{ this.keys[e.key.toLowerCase()]=true; });
     window.addEventListener("keyup",   e=>{ this.keys[e.key.toLowerCase()]=false; });
     this.canvas.addEventListener("mousedown", e=>this.onClick(e));
+    // 手機觸控：touch 轉為點擊（部署放置／下令／行動移動與開火）
+    this.canvas.addEventListener("touchstart", e=>{ if(e.cancelable) e.preventDefault(); const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0); }, {passive:false});
     this.canvas.addEventListener("contextmenu", e=>e.preventDefault());
     UI.showMenu();
     const raf = ts=>{ this.loop(ts); requestAnimationFrame(raf); };
@@ -93,6 +96,7 @@ const Game = {
   finishDeploy(){
     if (!this.units.some(u=>u.side===this.playerSide)){ UI.log("至少部署一名單位"); return; }
     this.state="cmd";
+    Fog.exploreAll();   // 地形全程可見，迷霧只隱藏未偵察的敵人
     Fog.recompute();
     this.beginTurn(this.playerSide);
     UI.showBattle();
@@ -119,11 +123,12 @@ const Game = {
   },
 
   /* ---------- 輸入 ---------- */
-  onClick(e){
+  onClick(e){ this.onClickXY(e.clientX, e.clientY, e.button||0); },
+  onClickXY(clientX, clientY, button){
     const rect = this.canvas.getBoundingClientRect();
-    const x = (e.clientX-rect.left) * (this.canvas.width/rect.width);
-    const y = (e.clientY-rect.top) * (this.canvas.height/rect.height);
-    if (this.state==="deploy") return this.deployClick(x,y,e.button);
+    const x = (clientX-rect.left) * (this.canvas.width/rect.width);
+    const y = (clientY-rect.top) * (this.canvas.height/rect.height);
+    if (this.state==="deploy") return this.deployClick(x,y,button);
     if (this.state==="cmd")    return this.cmdClick(x,y);
     if (this.state==="act")    return this.actClick(x,y);
   },
@@ -169,7 +174,7 @@ const Game = {
   },
 
   enterAction(u){
-    this.sel = u; this.selFired = false; this.state="act";
+    this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null;
     let mult = Math.pow(0.7, u.actedCount);
     if (NATIONS[u.nationId].trait.id==="rapid_reaction" && this.turn===1) mult *= 1.2; // 法國
     u.ap = u.maxap * mult;
@@ -180,7 +185,7 @@ const Game = {
   },
 
   endAction(){
-    this.sel=null; this.aimTarget=null; UI.hideAim();
+    this.sel=null; this.aimTarget=null; this.moveTarget=null; UI.hideAim();
     this.state="cmd";
     this.checkVictory();
     if (!this.over && this.cp<=0) this.endTurn();
@@ -209,6 +214,11 @@ const Game = {
       this.selFired = true;
       this.fx.push({type:"hitfx", x:foe.x,y:foe.y, dmg:"+300", t:0, heal:true});
       UI.log(`${this.sel.label} 修理了 ${foe.label}（+300）`);
+      return;
+    }
+    // 點空地：設移動目標，單位自動走過去（手機無鍵盤時的主要移動方式；桌面 WASD 仍可用）
+    if (!foe){
+      this.moveTarget = { x: clamp(x, this.sel.r, 960-this.sel.r), y: clamp(y, this.sel.r, 600-this.sel.r) };
     }
   },
 
@@ -297,6 +307,13 @@ const Game = {
     if (this.keys["s"]||this.keys["arrowdown"]) dy+=1;
     if (this.keys["a"]||this.keys["arrowleft"]) dx-=1;
     if (this.keys["d"]||this.keys["arrowright"]) dx+=1;
+    if (dx||dy) this.moveTarget=null;               // 鍵盤操作時取消點擊移動目標
+    // 點擊移動：朝目標點前進（手機主要移動方式）
+    if (!dx && !dy && this.moveTarget){
+      const mx=this.moveTarget.x-u.x, my=this.moveTarget.y-u.y, d=Math.hypot(mx,my);
+      if (d<8 || u.ap<2){ this.moveTarget=null; }
+      else { dx=mx/d; dy=my/d; }
+    }
     if (dx||dy){
       const n=Math.hypot(dx,dy);
       const moved = this.moveUnit(u,dx/n,dy/n,dt);
@@ -414,10 +431,25 @@ const Game = {
       c.beginPath(); c.arc(this.sel.x,this.sel.y,this.sel.weapon.range,0,7); c.stroke(); c.setLineDash([]);
     }
     for (const f of this.fx) this.drawFx(c,f);
+    this.drawHint(c);
+  },
+
+  /* 畫面底部操作提示條（新手引導） */
+  drawHint(c){
+    let tip = null;
+    if (this.state==="deploy") tip = "部署：① 右側面板點兵種 → ② 點藍色虛線框內放置 → ③ 點「開始戰鬥」";
+    else if (this.state==="cmd") tip = "你的回合：點選我方部隊（藍圈）下令行動　·　打完點「結束回合」交給敵方";
+    else if (this.state==="act") tip = "行動中：WASD／方向鍵移動　·　點敵人開火　·　按 E 或「結束行動」結束";
+    else if (this.state==="enemy") tip = "敵方行動中…";
+    if (!tip) return;
+    c.fillStyle="rgba(0,0,0,0.6)"; c.fillRect(0,572,960,28);
+    c.fillStyle="#ffe9a8"; c.font="14px 'Microsoft JhengHei',sans-serif"; c.textAlign="center"; c.textBaseline="middle";
+    c.fillText(tip, 480, 587); c.textBaseline="alphabetic";
   },
 
   /* 敵方單位是否對我方可見（迷霧 + 視線 + 隱蔽） */
   enemyVisible(u){
+    if (this.state==="deploy") return true;   // 部署階段看得到敵軍佈署，才好佈署對策
     if (Fog.enabled && !Fog.visibleAt(u.x,u.y)) return false;
     return this.units.some(o=>o.alive && o.side===this.playerSide && Combat.canSee(this.map,o,u,this.turn));
   },

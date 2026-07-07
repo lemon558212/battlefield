@@ -1,10 +1,11 @@
 /* 戰場 — UI 樣式 */
 * { box-sizing: border-box; margin: 0; }
-body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-serif; display:flex; justify-content:center; }
-#wrap { display:flex; gap:10px; padding:10px; }
-#game { background:#000; border:2px solid #3a4232; width:960px; height:600px; }
+body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-serif; display:flex; justify-content:center; -webkit-text-size-adjust:100%; }
+#wrap { display:flex; flex-direction:column; align-items:center; gap:8px; padding:6px; width:100%; }
+#stage { position:relative; width:100%; max-width:960px; aspect-ratio:960/600; }
+#game { display:block; width:100%; height:100%; background:#000; border:2px solid #3a4232; touch-action:none; }
 
-#side { width:250px; background:#242b1f; border:1px solid #3a4232; padding:10px; display:none; overflow-y:auto; max-height:600px; }
+#side { width:100%; max-width:960px; background:#242b1f; border:1px solid #3a4232; padding:10px; display:none; overflow-y:auto; }
 #side h3 { color:#cfe3a8; margin-bottom:6px; }
 #side button { display:block; width:100%; margin:5px 0; padding:7px; background:#39442e; color:#e8e6d8;
   border:1px solid #55643f; cursor:pointer; font-family:inherit; }
