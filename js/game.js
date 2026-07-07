@@ -5,6 +5,8 @@
  * ============================================================ */
 "use strict";
 
+const ENEMY_SUBSTEPS = 6; // 敵方回合每幀推進的子步數（牆鐘壓縮，見 loop 註解）
+
 const Game = {
   canvas:null, ctx:null, state:"menu",
   map:null, units:[], fx:[],
@@ -212,7 +214,11 @@ const Game = {
   loop(ts){
     const dt = Math.min(0.05,(ts-this.lastTs)/1000||0.016); this.lastTs=ts;
     if (this.state==="act")   this.updateAct(dt);
-    if (this.state==="enemy") this.updateEnemy(dt);
+    if (this.state==="enemy"){
+      // 敵方回合逐幀單步會讓玩家枯等近一分鐘（見 lessons L-007）。
+      // 每個可見幀推進多個固定子步，把牆鐘壓到數秒，動畫仍連續。
+      for (let i=0;i<ENEMY_SUBSTEPS && this.state==="enemy"; i++) this.updateEnemy(0.033);
+    }
     this.fx = this.fx.filter(f=>(f.t+=dt) < (f.type==="tracer"?0.25:f.type==="boom"?0.5:0.9));
     this.render();
   },
@@ -286,7 +292,8 @@ const Game = {
     }
     const p=this.curPlan, u=p.unit;
     if (!u.alive){ this.curPlan=null; return; }
-    if ((p.age+=dt) > 15) u.ap = 0; // 計畫超時保險：任何情況下敵回合必然終止
+    // 走不到位就別讓玩家等：2.5 秒模擬時間內未到位即放棄移動，直接進開火/結束
+    if ((p.age+=dt) > 2.5) u.ap = 0;
     const d = Math.hypot(p.destX-u.x, p.destY-u.y);
     const target = p.targetId ? this.units.find(t=>t.id===p.targetId&&t.alive) : null;
     const repair = p.repairId ? this.units.find(t=>t.id===p.repairId&&t.alive) : null;
