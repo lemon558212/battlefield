@@ -37,6 +37,8 @@ const Net = {
     ch.onmessage = e=>{
       let m; try{ m=JSON.parse(e.data); }catch(_){ return; }
       if (m.t==="state" && this.onState) this.onState(m.d);
+      else if (m.t==="config" && Game.mpConfig) Game.mpConfig(m.d);
+      else if (m.t==="units" && Game.mpRecvUnits) Game.mpRecvUnits(m.d);
       else if (m.t==="hello" && this.onHello) this.onHello(m.d);
     };
   },
@@ -74,6 +76,9 @@ const Net = {
 
   // 廣播目前遊戲完整狀態（權威方呼叫）
   sendState(){ this.send("state", this.serialize()); },
+
+  serUnit(u){ return { id:u.id, side:u.side, nationId:u.nationId, cls:u.cls,
+    x:Math.round(u.x), y:Math.round(u.y), hp:u.hp, ap:u.ap, alive:u.alive, facing:u.facing }; },
 
   serialize(){
     const g = Game;

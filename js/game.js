@@ -18,6 +18,7 @@ const Game = {
   moveTarget:null,
   turnOwner:null,        // 連線對戰：目前輪到哪一方（0/1）
   _steer:null, _mouseDown:false,   // 拖曳操控移動狀態
+  _mpReady:false, _mpGuestUnits:null,   // 連線布署狀態
   plans:[], curPlan:null, enemyCpLeft:0, germanyTankDiscountUsed:false,
   budgetLeft:0, deployCls:null,
   keys:{}, lastTs:0, over:null, hintIdx:0,
@@ -133,6 +134,7 @@ const Game = {
 
   finishDeploy(){
     if (!this.units.some(u=>u.side===this.playerSide)){ UI.log("至少部署一名單位"); return; }
+    if (Net.connected){ this.mpReady(); return; }
     this.state="cmd";
     Fog.exploreAll();   // 地形全程可見，迷霧只隱藏未偵察的敵人
     Fog.recompute();
@@ -158,6 +160,60 @@ const Game = {
     UI.showBattle();
     Net.sendState();
     UI.log("—— 連線對戰開始，你先手 ——");
+  },
+
+  // 主機：連線成功後送設定給對方，雙方進入各自布署
+  mpHostBegin(mapId, nA, nD){
+    Net.send("config", { map:mapId, nA, nD });
+    this.startMPDeploy(mapId, nA, nD, 0);
+  },
+  // 加入方：收到主機設定 → 進入布署
+  mpConfig(d){ this.startMPDeploy(d.map, d.nA, d.nD, 1); },
+
+  // 連線布署：各自布署自己那一方（side = 自己）
+  startMPDeploy(mapId, nA, nD, myside){
+    this.map = MAPS[mapId]; this.enrichMap(this.map); this._bg = null;
+    this.nations = { 0:nA, 1:nD };
+    this.playerSide = myside;
+    this.units = []; this.fx = []; this.turn = 1; this.over = null; this.hintIdx = 0;
+    this.budgetLeft = this.map.budget; this.deployCls = null;
+    this._mpReady = false; this._mpGuestUnits = null;
+    Fog.reset();
+    this.state = "deploy";
+    UI.showDeploy();
+    UI.log(myside===0 ? "你是主持方，布署你的部隊後按「開始戰鬥」" : "你是加入方，布署你的部隊後按「開始戰鬥」");
+  },
+
+  // 按下「開始戰鬥」（連線版）：送出我方部隊、視情況開打
+  mpReady(){
+    this._mpReady = true;
+    Net.send("units", { units: this.units.filter(u=>u.side===this.playerSide).map(u=>Net.serUnit(u)) });
+    if (Net.myside===0){
+      if (this._mpGuestUnits) this._mpHostStart();
+      else UI.log("已就緒，等待對方布署完成…");
+    } else {
+      UI.log("已送出布署，等待主持方開始…");
+    }
+  },
+  // 收到對方部署的部隊
+  mpRecvUnits(d){
+    if (Net.myside!==0) return;              // 只有主機需要合併
+    this._mpGuestUnits = d.units;
+    if (this._mpReady) this._mpHostStart();
+  },
+  // 主機權威合併雙方部隊、開打並廣播
+  _mpHostStart(){
+    let maxid = 0; for (const u of this.units) if (u.id>maxid) maxid=u.id;
+    const opp = this._mpGuestUnits.map(su=>{
+      const u = makeUnit(su.nationId, su.cls, 1, su.x, su.y);
+      u.id = ++maxid; u.hp=su.hp; u.ap=su.ap; u.facing=su.facing; u.alive=su.alive;
+      return u;
+    });
+    this.units = this.units.filter(u=>u.side===0).concat(opp);
+    this.turnOwner = 0; this.playerSide = 0; this.state = "cmd";
+    Fog.exploreAll(); Fog.recompute(); this.beginTurn(0);
+    UI.showBattle(); Net.sendState();
+    UI.log("—— 雙方就緒，開戰！你先手 ——");
   },
 
   // 連線版換手：不跑 AI，翻面 + 廣播，讓對方接手

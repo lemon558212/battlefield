@@ -72,8 +72,8 @@ const UI = {
     Net.onState = d=>Game.applyNetState(d);
     Net.onClose = ()=>st("⚠ 連線中斷，請返回重連");
     Net.onReady = ()=>{
-      if (Net.myside===0){ st("✅ 已連線！開始對戰"); Game.startMP(this.el("mpMap").value, this.el("mpAtk").value, this.el("mpDef").value); }
-      else { st("✅ 已連線！等待主持方開局…"); }
+      if (Net.myside===0){ st("✅ 已連線！請布署你的部隊"); Game.mpHostBegin(this.el("mpMap").value, this.el("mpAtk").value, this.el("mpDef").value); }
+      else { st("✅ 已連線！等待主持方設定…"); }
     };
     this.el("mpGenInvite").onclick = async ()=>{ st("產生邀請碼中…（約 1–4 秒）");
       try{ this.el("mpInvite").value = await Net.host(); st("邀請碼已產生，傳給朋友。"); }
