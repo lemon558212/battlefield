@@ -30,9 +30,9 @@ const Sprites = {
   drawBody(ctx, u, isPlayer){
     const edge = isPlayer ? "#7db4ff" : "#ff9d8a";
     // 空中單位：先在地面畫投影
-    if (u.domain === "air"){
-      ctx.save(); ctx.globalAlpha = 0.22; ctx.fillStyle = "#000";
-      ctx.beginPath(); ctx.ellipse(u.x + 7, u.y + 12, u.r, u.r * 0.5, 0, 0, 7); ctx.fill(); ctx.restore();
+    { const air = u.domain==="air";        // 地面投影：帶出立體感（空中單位投影較遠）
+      ctx.save(); ctx.globalAlpha = air ? 0.22 : 0.30; ctx.fillStyle = "#000";
+      ctx.beginPath(); ctx.ellipse(u.x + (air?7:3), u.y + (air?12:5), u.r*(air?1:1.08), u.r*0.5, 0, 0, 7); ctx.fill(); ctx.restore();
     }
     const img = this.imgCache[u.nationId + "_" + u.cls];
     ctx.save(); ctx.translate(u.x, u.y); ctx.rotate(u.facing);
@@ -49,6 +49,7 @@ const Sprites = {
     // 身體
     ctx.fillStyle = c.uniform; ctx.strokeStyle = edge; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.ellipse(0, 0, R, R * 0.82, 0, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.ellipse(-R*0.22, -R*0.3, R*0.5, R*0.34, 0, 0, 7); ctx.fill();
     // 迷彩斑塊（以 id 為種子固定）
     const rnd = _srand(u.id + 7); ctx.fillStyle = c.dark;
     for (let i = 0; i < 3; i++){ const a = rnd() * 7, rr = rnd() * R * 0.5; ctx.beginPath(); ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, R * 0.3, 0, 7); ctx.fill(); }
@@ -76,7 +77,7 @@ const Sprites = {
   drawTank(ctx, u, edge){
     const c = this.colorsFor(u);
     ctx.fillStyle = c.uniform; ctx.strokeStyle = edge; ctx.lineWidth = 1.5;
-    ctx.fillRect(-16, -11, 32, 22); ctx.strokeRect(-16, -11, 32, 22);
+    ctx.fillRect(-16, -11, 32, 22); ctx.strokeRect(-16, -11, 32, 22); ctx.fillStyle="rgba(255,255,255,0.10)"; ctx.fillRect(-16,-11,32,7);
     ctx.fillStyle = c.dark; ctx.fillRect(-16, -12, 32, 3); ctx.fillRect(-16, 9, 32, 3); // 履帶
     ctx.fillStyle = c.metal; ctx.beginPath(); ctx.arc(0, 0, 8, 0, 7); ctx.fill();       // 砲塔
     ctx.lineWidth = 4; ctx.strokeStyle = c.metal; this._line(ctx, 0, 0, 26, 0);          // 砲管
