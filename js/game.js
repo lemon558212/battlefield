@@ -145,6 +145,7 @@ const Game = {
     if (c > this.budgetLeft){ UI.log("點數不足"); return; }
     if (this.deployCls==="tank" && this.units.filter(u=>u.side===this.playerSide&&u.cls==="tank").length>=2){ UI.log("坦克每隊最多 2 輛"); return; }
     if (CLASS_BASE[this.deployCls].big && this.units.filter(u=>u.side===this.playerSide&&CLASS_BASE[u.cls].big).length>=2){ UI.log("大型艦每隊最多 2 艘"); return; }
+    if (dom==="air" && this.units.filter(u=>u.side===this.playerSide&&u.domain==="air").length>=4){ UI.log("空軍每隊最多 4 架"); return; }
     this.budgetLeft -= c;
     this.units.push(makeUnit(this.nations[this.playerSide], this.deployCls, this.playerSide, x, y));
     UI.refreshDeploy();
