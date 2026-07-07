@@ -17,6 +17,7 @@ const Game = {
   aimTarget:null,
   moveTarget:null,
   turnOwner:null,        // 連線對戰：目前輪到哪一方（0/1）
+  _steer:null, _mouseDown:false,   // 拖曳操控移動狀態
   plans:[], curPlan:null, enemyCpLeft:0, germanyTankDiscountUsed:false,
   budgetLeft:0, deployCls:null,
   keys:{}, lastTs:0, over:null, hintIdx:0,
@@ -27,9 +28,13 @@ const Game = {
     this.ctx = this.canvas.getContext("2d");
     window.addEventListener("keydown", e=>{ this.keys[e.key.toLowerCase()]=true; });
     window.addEventListener("keyup",   e=>{ this.keys[e.key.toLowerCase()]=false; });
-    this.canvas.addEventListener("mousedown", e=>this.onClick(e));
+    this.canvas.addEventListener("mousedown", e=>{ this._mouseDown=true; this.onClick(e); });
+    window.addEventListener("mousemove", e=>{ if(this._mouseDown) this._pointerMove(e.clientX,e.clientY); });
+    window.addEventListener("mouseup", ()=>{ this._mouseDown=false; this._pointerUp(); });
     // 手機觸控：touch 轉為點擊（部署放置／下令／行動移動與開火）
     this.canvas.addEventListener("touchstart", e=>{ if(e.cancelable) e.preventDefault(); const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0); }, {passive:false});
+    this.canvas.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault(); const t=e.changedTouches[0]; if(t) this._pointerMove(t.clientX,t.clientY); }, {passive:false});
+    this.canvas.addEventListener("touchend", e=>{ if(e.cancelable) e.preventDefault(); this._pointerUp(); }, {passive:false});
     this.canvas.addEventListener("contextmenu", e=>e.preventDefault());
     UI.showMenu();
     const raf = ts=>{ this.loop(ts); requestAnimationFrame(raf); };
@@ -293,7 +298,7 @@ const Game = {
     if (Net.connected && Net.myside!==this.turnOwner) return;
     const foe = this.unitAt(x,y);
     if (foe && foe.side!==this.playerSide && Combat.canSee(this.map,this.sel,foe,this.turn)){
-      this.aimTarget = foe; UI.showAim(this.sel, foe); return;
+      this.aimTarget = foe; UI.showAim(this.sel, foe); this._steer=null; return;
     }
     // 工兵修理：點自己坦克
     if (this.sel.cls==="engineer" && foe && foe.side===this.playerSide && foe.cls==="tank"
@@ -304,10 +309,33 @@ const Game = {
       UI.log(`${this.sel.label} 修理了 ${foe.label}（+300）`);
       return;
     }
-    // 點空地：設移動目標，單位自動走過去（手機無鍵盤時的主要移動方式；桌面 WASD 仍可用）
+    // 點自己選中的部隊 → 立刻停止
+    if (foe===this.sel){ this.moveTarget=null; this._steer=null; return; }
+    // 空地：開始操控移動（按住拖曳持續操控、放開即停；快速輕點=走到該點）
     if (!foe){
       this.moveTarget = { x: clamp(x, this.sel.r, 960-this.sel.r), y: clamp(y, this.sel.r, 600-this.sel.r) };
+      this._steer = { t: Date.now(), sx:x, sy:y, moved:false };
     }
+  },
+
+  /* 拖曳操控：手指/滑鼠移動時持續更新移動目標 */
+  _pointerMove(clientX, clientY){
+    if (this.state!=="act" || !this._steer || !this.sel) return;
+    if (Net.connected && Net.myside!==this.turnOwner) return;
+    const [x,y]=this._toWorld(clientX,clientY);
+    if (Math.hypot(x-this._steer.sx, y-this._steer.sy)>10) this._steer.moved=true;
+    this.moveTarget = { x: clamp(x,this.sel.r,960-this.sel.r), y: clamp(y,this.sel.r,600-this.sel.r) };
+  },
+  /* 放開：長按/拖曳 → 立刻停；快速輕點 → 保留目標走到定點 */
+  _pointerUp(){
+    if (!this._steer) return;
+    const held=Date.now()-this._steer.t;
+    if (!(held<260 && !this._steer.moved)) this.moveTarget=null;
+    this._steer=null;
+  },
+  _toWorld(clientX, clientY){
+    const r=this.canvas.getBoundingClientRect();
+    return [ (clientX-r.left)*(this.canvas.width/r.width), (clientY-r.top)*(this.canvas.height/r.height) ];
   },
 
   /* 玩家在瞄準面板按下開火 */
@@ -573,7 +601,7 @@ const Game = {
     let tip = null;
     if (this.state==="deploy") tip = "部署：① 右側面板點兵種 → ② 點藍色虛線框內放置 → ③ 點「開始戰鬥」";
     else if (this.state==="cmd") tip = "你的回合：點選我方部隊（藍圈）下令行動　·　打完點「結束回合」交給敵方";
-    else if (this.state==="act") tip = "行動中：WASD／方向鍵移動　·　點敵人開火　·　按 E 或「結束行動」結束";
+    else if (this.state==="act") tip = "行動中：按住拖曳移動、放開即停（或點自己停）　·　點敵人開火　·　點「結束行動」";
     else if (this.state==="enemy") tip = "敵方行動中…";
     if (!tip) return;
     c.fillStyle="rgba(0,0,0,0.6)"; c.fillRect(0,572,960,28);
