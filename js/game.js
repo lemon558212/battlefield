@@ -39,6 +39,7 @@ const Game = {
     this.nations[0]=atkNation; this.nations[1]=defNation;
     this.playerSide = playerSide;
     this.units=[]; this.fx=[]; this.turn=1; this.over=null; this.hintIdx=0;
+    Fog.reset();
     this.budgetLeft = this.map.budget;
     this.deployCls = null;
     this.aiDeploy(1-playerSide);
@@ -47,32 +48,52 @@ const Game = {
     if (this.map.tutorial) UI.hint(this.map.hints[0]);
   },
 
-  /* 敵方自動部署：標準兵團（GDD/02 cost 合計 ≤ budget） */
+  /* 地圖允許的作戰域（預設純陸戰） */
+  mapAllow(){ return this.map.allow || ["land"]; },
+
+  /* 敵方自動部署：三軍預算配額制，各域平分預算避免單一軍種吃光（GDD/04 §1） */
   aiDeploy(side){
     const nation = this.nations[side];
-    const roster = ["tank","mg","at","sniper","assault","rifleman","rifleman","engineer","specops","mortar"];
-    let budget = this.map.budget;
+    const allow = this.mapAllow();
     const zone = this.map.deploy[side];
-    let i=0;
-    for (const cls of roster){
-      const c = unitCost(nation, cls);
-      if (c > budget) continue;
-      budget -= c;
-      let x = zone.x + 30 + (i%3)*50, y = zone.y + 40 + Math.floor(i/3)*90;
-      x = clamp(x,zone.x,zone.x+zone.w); y = clamp(y,zone.y,zone.y+zone.h);
-      // 避開水域與建築（出生在水裡會白耗 AP）
-      let guard=0;
-      const bad = ()=> this.map.waters.some(w=>ptInRect(x,y,w)) || this.map.solids.some(s=>circleRectHit(x,y,16,s))
-                    || this.units.some(o=>o.alive&&Math.hypot(o.x-x,o.y-y)<o.r+18);
-      while (guard++<12 && bad()){ x += 40; if (x>zone.x+zone.w){ x=zone.x+20; y+=45; } }
-      this.units.push(makeUnit(nation, cls, side, x, y));
-      i++;
+    const perDomain = {
+      land:["tank","mg","at","sniper","assault","rifleman","rifleman","engineer","sam"],
+      sea:["destroyer","missileboat","submarine","lst"],
+      air:["fighter","attacker","gunship"]
+    };
+    const doms = allow.filter(d=>perDomain[d]);
+    const quota = this.map.budget / doms.length;
+    for (const dom of doms){
+      let b = quota;
+      for (const cls of perDomain[dom]){
+        const c = unitCost(nation, cls);
+        if (c > b) continue;
+        const spot = this.findDeploySpot(dom, zone);
+        if (!spot) continue;
+        b -= c;
+        this.units.push(makeUnit(nation, cls, side, spot.x, spot.y));
+      }
     }
+  },
+
+  /* 在部署區找一個符合作戰域地形的生成點 */
+  findDeploySpot(domain, zone){
+    for (let t=0;t<100;t++){
+      const x = zone.x + 20 + Math.random()*Math.max(1,zone.w-40);
+      const y = zone.y + 20 + Math.random()*Math.max(1,zone.h-40);
+      if (this.map.solids.some(s=>circleRectHit(x,y,18,s))) continue;
+      if (this.units.some(o=>o.alive&&Math.hypot(o.x-x,o.y-y)<o.r+20)) continue;
+      if (domain==="sea" && !this.isWater(x,y)) continue;
+      if (domain==="land" && (this.inAny(this.map.waters,x,y)||this.inAny(this.map.deepwaters,x,y))) continue;
+      return {x,y};
+    }
+    return null;
   },
 
   finishDeploy(){
     if (!this.units.some(u=>u.side===this.playerSide)){ UI.log("至少部署一名單位"); return; }
     this.state="cmd";
+    Fog.recompute();
     this.beginTurn(this.playerSide);
     UI.showBattle();
     if (this.map.tutorial) UI.hint(this.map.hints[1]);
@@ -87,6 +108,7 @@ const Game = {
     this.cp = this.cpMax = this.cpFor(side);
     this.germanyTankDiscountUsed = false;
     for (const u of this.units){ if(u.side===side){ u.actedCount=0; } u._iceTimer=0; }
+    Fog.recompute();
     UI.refreshHud();
   },
 
@@ -116,9 +138,13 @@ const Game = {
     if (!this.deployCls) { UI.log("先在右側選擇兵種"); return; }
     if (!ptInRect(x,y,zone)) { UI.log("只能部署在我方藍框區域內"); return; }
     if (this.map.solids.some(s=>circleRectHit(x,y,14,s))) return;
+    const dom = CLASS_BASE[this.deployCls].domain;
+    if (dom==="sea" && !this.isWater(x,y)){ UI.log("艦艇只能部署在水域（藍色）"); return; }
+    if (dom==="land" && (this.inAny(this.map.waters,x,y)||this.inAny(this.map.deepwaters,x,y))){ UI.log("陸軍不能部署在深水，只能上陸或淺灘"); return; }
     const c = unitCost(this.nations[this.playerSide], this.deployCls);
     if (c > this.budgetLeft){ UI.log("點數不足"); return; }
     if (this.deployCls==="tank" && this.units.filter(u=>u.side===this.playerSide&&u.cls==="tank").length>=2){ UI.log("坦克每隊最多 2 輛"); return; }
+    if (CLASS_BASE[this.deployCls].big && this.units.filter(u=>u.side===this.playerSide&&CLASS_BASE[u.cls].big).length>=2){ UI.log("大型艦每隊最多 2 艘"); return; }
     this.budgetLeft -= c;
     this.units.push(makeUnit(this.nations[this.playerSide], this.deployCls, this.playerSide, x, y));
     UI.refreshDeploy();
@@ -131,7 +157,7 @@ const Game = {
   cmdClick(x,y){
     const u = this.unitAt(x,y,this.playerSide);
     if (!u) return;
-    let cost = u.cls==="tank" ? 2 : 1;
+    let cost = (u.cls==="tank" || u.big || u.domain==="air") ? 2 : 1; // 坦克/大艦/戰機花 2 CP
     if (u.cls==="tank" && NATIONS[u.nationId].trait.id==="panzer_doctrine" && !this.germanyTankDiscountUsed){
       cost = 1; // 德國：每回合首次坦克指令 1 CP
     }
@@ -223,32 +249,43 @@ const Game = {
     this.render();
   },
 
+  inAny(rects,x,y){ return rects && rects.some(r=>ptInRect(x,y,r)); },
+  isWater(x,y){ const m=this.map; return this.inAny(m.waters,x,y)||this.inAny(m.deepwaters,x,y)||this.inAny(m.shallows,x,y); },
+
   moveUnit(u, dx, dy, dt){
-    let speed = u.cls==="tank" ? 70 : 100; // px/s
+    let speed = u.domain==="air" ? 160 : u.domain==="sea" ? (u.big?60:95) : (u.cls==="tank"?70:100); // px/s
     if (this.state==="enemy") speed *= 2.5; // 敵方階段快轉（戰棋慣例，不影響規則）
     let nx = u.x + dx*speed*dt, ny = u.y + dy*speed*dt;
     nx = clamp(nx, u.r, 960-u.r); ny = clamp(ny, u.r, 600-u.r);
-    if (this.map.solids.some(s=>circleRectHit(nx,ny,u.r,s))){
+    // 作戰域地形限制（GDD/04 §1-2）
+    if (u.domain==="sea"){
+      if (!this.isWater(nx,ny)) return false;                                  // 艦艇不能上陸
+    } else if (u.domain==="land"){
+      if (this.inAny(this.map.waters,nx,ny)||this.inAny(this.map.deepwaters,nx,ny)) return false; // 陸軍只能涉淺灘
+    }
+    if (u.domain!=="air" && this.map.solids.some(s=>circleRectHit(nx,ny,u.r,s))){ // 空軍飛越地形
       if (!this.map.solids.some(s=>circleRectHit(nx,u.y,u.r,s))) ny=u.y;
       else if (!this.map.solids.some(s=>circleRectHit(u.x,ny,u.r,s))) nx=u.x;
       else return false;
     }
-    // 只擋「靠近碰撞對象」的移動；遠離方向放行（可自行脫離重疊死鎖）
-    const bump = (px,py)=> this.units.some(o=>o!==u&&o.alive
-      && Math.hypot(o.x-px,o.y-py)<o.r+u.r
-      && Math.hypot(o.x-px,o.y-py) < Math.hypot(o.x-u.x,o.y-u.y));
-    if (bump(nx,ny)){ // 撞到單位：沿軸滑行繞過
-      if (!bump(nx,u.y)) ny=u.y;
-      else if (!bump(u.x,ny)) nx=u.x;
-      else return false;
+    // 空中單位不互相碰撞（不同高度）；地面/海面單位同域碰撞繞行
+    if (u.domain!=="air"){
+      const bump = (px,py)=> this.units.some(o=>o!==u&&o.alive&&o.domain===u.domain
+        && Math.hypot(o.x-px,o.y-py)<o.r+u.r
+        && Math.hypot(o.x-px,o.y-py) < Math.hypot(o.x-u.x,o.y-u.y));
+      if (bump(nx,ny)){ // 撞到單位：沿軸滑行繞過
+        if (!bump(nx,u.y)) ny=u.y;
+        else if (!bump(u.x,ny)) nx=u.x;
+        else return false;
+      }
     }
     const moved = Math.hypot(nx-u.x, ny-u.y);
     let apCost = moved/3; // 1 AP = 3px（GDD/01 §2）
-    if (this.map.waters.some(w=>ptInRect(nx,ny,w))) apCost*=2;
+    if (u.domain==="land" && this.inAny(this.map.shallows,nx,ny)) apCost*=2; // 涉淺灘
     if (Combat.inBush(this.map,u) && NATIONS[u.nationId].trait.id==="tunnel_war") apCost*=0.5; // 越南
     if (u.ap < apCost) return false;
     u.ap -= apCost; u.x=nx; u.y=ny; u.facing=Math.atan2(dy,dx);
-    if (!Combat.inBush(this.map,u)) u.revealed = u.revealed; // 進草叢不自動重置暴露
+    if (this.state==="act" && u.side===this.playerSide){ this._fogT=(this._fogT||0)+dt; if(this._fogT>0.1){ this._fogT=0; Fog.recompute(); } }
     return moved>0;
   },
 
@@ -350,7 +387,10 @@ const Game = {
     c.clearRect(0,0,960,600);
     if (this.state==="menu"||!m) return;
     c.fillStyle=m.ground; c.fillRect(0,0,960,600);
-    for (const w of m.waters){ c.fillStyle="#4a7c9e"; c.fillRect(w.x,w.y,w.w,w.h); }
+    for (const w of (m.deepwaters||[])){ c.fillStyle="#2b5570"; c.fillRect(w.x,w.y,w.w,w.h); }
+    for (const w of (m.waters||[])){ c.fillStyle="#3f7391"; c.fillRect(w.x,w.y,w.w,w.h); }
+    for (const w of (m.shallows||[])){ c.fillStyle="#6ea3b8"; c.fillRect(w.x,w.y,w.w,w.h); }
+    for (const w of (m.reefs||[])){ c.fillStyle="#5a5f52"; c.fillRect(w.x,w.y,w.w,w.h); c.strokeStyle="#3f4438"; c.strokeRect(w.x,w.y,w.w,w.h); }
     for (const b of m.bushes){ c.fillStyle="rgba(40,90,35,0.85)"; c.beginPath(); c.arc(b.x,b.y,b.r,0,7); c.fill(); }
     for (const s of m.sandbags){ c.fillStyle="#b09761"; c.fillRect(s.x,s.y,s.w,s.h); c.strokeStyle="#7d6a44"; c.strokeRect(s.x,s.y,s.w,s.h); }
     for (const s of m.solids){ c.fillStyle="#6e6e6e"; c.fillRect(s.x,s.y,s.w,s.h); c.strokeStyle="#4a4a4a"; c.strokeRect(s.x,s.y,s.w,s.h); }
@@ -365,7 +405,9 @@ const Game = {
       c.strokeStyle="#2e6fd8"; c.setLineDash([6,4]); c.lineWidth=2;
       c.strokeRect(z.x,z.y,z.w,z.h); c.setLineDash([]); c.lineWidth=1;
     }
-    for (const u of this.units) if(u.alive) this.drawUnit(c,u);
+    for (const u of this.units) if(u.alive && u.side!==this.playerSide) this.drawUnit(c,u); // 敵方（迷霧內才現形）
+    Fog.render(c);                                                                          // 迷霧遮罩
+    for (const u of this.units) if(u.alive && u.side===this.playerSide) this.drawUnit(c,u);  // 我方（永遠可見）
     if (this.state==="act" && this.sel){ // 射程圈
       c.strokeStyle="rgba(255,255,255,0.35)"; c.setLineDash([4,6]);
       c.beginPath(); c.arc(this.sel.x,this.sel.y,this.sel.weapon.range,0,7); c.stroke(); c.setLineDash([]);
@@ -373,32 +415,26 @@ const Game = {
     for (const f of this.fx) this.drawFx(c,f);
   },
 
+  /* 敵方單位是否對我方可見（迷霧 + 視線 + 隱蔽） */
+  enemyVisible(u){
+    if (Fog.enabled && !Fog.visibleAt(u.x,u.y)) return false;
+    return this.units.some(o=>o.alive && o.side===this.playerSide && Combat.canSee(this.map,o,u,this.turn));
+  },
+
   drawUnit(c,u){
-    const hidden = Combat.inBush(this.map,u) && !u.revealed;
     const isPlayer = u.side===this.playerSide;
-    if (hidden && !isPlayer) return; // 敵隱蔽單位不畫
-    c.globalAlpha = hidden ? 0.55 : 1;
-    const col = NATIONS[u.nationId].uniformColor;
-    if (u.cls==="tank"){
-      c.fillStyle=col; c.fillRect(u.x-16,u.y-11,32,22);
-      c.fillStyle=isPlayer?"#2e6fd8":"#c23b22"; c.fillRect(u.x-7,u.y-6,14,12);
-      c.strokeStyle="#222"; c.beginPath(); c.moveTo(u.x,u.y);
-      c.lineTo(u.x+Math.cos(u.facing)*24,u.y+Math.sin(u.facing)*24); c.lineWidth=3; c.stroke(); c.lineWidth=1;
-      c.fillStyle="#e8c06a"; c.fillRect(u.x+10,u.y+6,5,5); // 散熱器示意
-    } else {
-      c.fillStyle=col; c.beginPath(); c.arc(u.x,u.y,u.r,0,7); c.fill();
-      c.strokeStyle=isPlayer?"#7db4ff":"#ff9d8a"; c.lineWidth=2; c.stroke(); c.lineWidth=1;
-      c.fillStyle="#fff"; c.font="9px sans-serif"; c.textAlign="center";
-      const letter={rifleman:"步",assault:"突",mg:"機",mortar:"迫",sniper:"狙",at:"火",engineer:"工",specops:"特"}[u.cls];
-      c.fillText(letter,u.x,u.y+3);
-    }
+    if (!isPlayer && !this.enemyVisible(u)) return;
+    const hidden = Combat.inBush(this.map,u) && !u.revealed && isPlayer;
+    c.globalAlpha = hidden ? 0.6 : 1;
+    Sprites.tryLoad(u);
+    Sprites.drawBody(c,u,isPlayer);
     // 血條/AP條
-    const w=u.cls==="tank"?32:22, x0=u.x-w/2, y0=u.y-u.r-9;
+    const w = u.big?34 : u.cls==="tank"?32 : 22, x0=u.x-w/2, y0=u.y-u.r-9;
     c.fillStyle="#222"; c.fillRect(x0,y0,w,3);
     c.fillStyle=u.hp>u.maxhp*0.3?"#4fd05e":"#e04b3a"; c.fillRect(x0,y0,w*clamp(u.hp/u.maxhp,0,1),3);
     if (this.sel===u){ c.fillStyle="#222"; c.fillRect(x0,y0+4,w,3);
       c.fillStyle="#ffd83d"; c.fillRect(x0,y0+4,w*clamp(u.ap/u.maxap,0,1),3);
-      c.strokeStyle="#ffd83d"; c.beginPath(); c.arc(u.x,u.y,u.r+5,0,7); c.stroke();
+      c.strokeStyle="#ffd83d"; c.lineWidth=2; c.beginPath(); c.arc(u.x,u.y,u.r+6,0,7); c.stroke(); c.lineWidth=1;
     }
     c.globalAlpha=1;
   },

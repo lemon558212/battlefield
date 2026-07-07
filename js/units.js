@@ -14,7 +14,7 @@ let UNIT_SEQ = 1;
 
 function makeUnit(nationId, clsKey, side, x, y){
   const nation = NATIONS[nationId], base = CLASS_BASE[clsKey], spec = nation.units[clsKey];
-  const w = Object.assign({}, WEAPON_BASE[base.wtype]);
+  const w = Object.assign({ type: base.wtype }, WEAPON_BASE[base.wtype]);
   const m = spec.mods || {};
   for (const k of Object.keys(m)){
     if (!MOD_KEYS.includes(k)){ console.error("未知 mod 鍵(GDD/03 §2):", nationId, clsKey, k); continue; }
@@ -23,13 +23,18 @@ function makeUnit(nationId, clsKey, side, x, y){
   w.range += (m.range||0); w.acc  = Math.min(0.99, w.acc + (m.acc||0));
   let hp = base.hp + (m.hp||0), ap = base.ap + (m.ap||0), def = base.def + (m.def||0), cost = base.cost + (m.cost||0);
   if (nation.trait.id === "conscript_drill") ap = Math.round(ap * 1.05);
+  const domain = base.domain || "land";
+  const radius = domain==="sea" ? (base.big?18:12) : domain==="air" ? 13 : (clsKey==="tank"?16:10);
   return {
     id: UNIT_SEQ++, side, nationId, cls: clsKey,
     label: spec.label, weaponName: spec.weapon, weapon: w,
-    x, y, r: clsKey === "tank" ? 16 : 10,
+    x, y, r: radius,
     hp, maxhp: hp, ap, maxap: ap, def, cost,
     alive: true, actedCount: 0, hasFired: false, revealed: false,
     alert: base.alert, canCap: base.canCap,
+    domain, sight: base.sight||120, airSight: base.airSight||0,
+    flying: domain==="air", stealth: !!base.stealth, big: !!base.big,
+    carried: [],           // lst 載運的 land 單位
     facing: side === 0 ? 0 : Math.PI
   };
 }

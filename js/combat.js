@@ -8,16 +8,16 @@ const Combat = {
 
   /* 視線是否被 solid 阻擋 */
   losBlocked(map, x1,y1,x2,y2){
-    return map.solids.some(s=>segRect(x1,y1,x2,y2,s));
+    return (map.solids||[]).some(s=>segRect(x1,y1,x2,y2,s));
   },
 
   inBush(map, u){
-    return map.bushes.some(b=> Math.hypot(u.x-b.x,u.y-b.y) <= b.r);
+    return (map.bushes||[]).some(b=> Math.hypot(u.x-b.x,u.y-b.y) <= b.r);
   },
 
-  /* 目標是否吃到掩體（射線穿過沙包，且目標貼著該沙包 <=28px） */
+  /* 目標是否吃到掩體（射線穿過沙包/礁石，且目標貼著它 <=28px） */
   coverFactor(map, sx,sy, t){
-    for (const sb of map.sandbags){
+    for (const sb of (map.sandbags||[]).concat(map.reefs||[])){
       const nx=clamp(t.x,sb.x,sb.x+sb.w), ny=clamp(t.y,sb.y,sb.y+sb.h);
       const near = Math.hypot(t.x-nx,t.y-ny) <= 28;
       if (near && segRect(sx,sy,t.x,t.y,sb)) return 0.5;
@@ -28,7 +28,10 @@ const Combat = {
   /* 隱蔽判定：目標在草叢且未暴露 → 看不見（除非近距/特性） */
   canSee(map, viewer, t, turn){
     if (!t.alive) return false;
-    if (this.losBlocked(map, viewer.x,viewer.y,t.x,t.y)) return false;
+    if (!t.flying && this.losBlocked(map, viewer.x,viewer.y,t.x,t.y)) return false;  // 空中單位無視地形遮蔽
+    if (t.stealth && !t.revealed){                                                    // 潛艦潛航：近距或驅逐艦反潛才可見
+      if (dist(viewer,t) > 80 && viewer.cls!=="destroyer") return false;
+    }
     if (this.inBush(map,t) && !t.revealed){
       let detect = 60;
       if (NATIONS[t.nationId].trait.id==="jungle_craft") detect = 30;               // 泰國
@@ -48,9 +51,10 @@ const Combat = {
     if (NATIONS[shooter.nationId].trait.id==="marksmanship") c += 0.03; // 英國
     c *= d/w.range <= 0.5 ? 1.0 : 1.0 - 0.45*((d/w.range)-0.5)/0.5;
     c *= part==="head" ? 0.55 : part==="radiator" ? 0.75 : 1.0;
+    if (this.domainMult(w,t)<=0) return 0;            // 武器打不到此域（如步槍打飛機）
     if (!w.arc){
-      if (this.losBlocked(map, shooter.x,shooter.y,t.x,t.y)) return 0;
-      c *= this.coverFactor(map, shooter.x,shooter.y,t);
+      if (!t.flying && this.losBlocked(map, shooter.x,shooter.y,t.x,t.y)) return 0; // 空中目標不被地形擋
+      if (!t.flying) c *= this.coverFactor(map, shooter.x,shooter.y,t);
     } else {
       c *= 0.7; // 拋物線武器
     }
@@ -60,13 +64,35 @@ const Combat = {
   partMult(part){ return part==="head" ? 2.0 : part==="radiator" ? 3.0 : 1.0; },
 
   /* 單發傷害 */
-  damage(shooter, t, part, interception){
+  /* 跨作戰域剋制倍率（GDD/04 §8）。回傳 0 = 此武器打不到該域目標 */
+  domainMult(w, t){
+    const dom = t.domain || "land";
+    if (w.antiAirOnly) return dom==="air" ? 1.0 : 0;          // SAM 只打空
+    if (w.seaOnly)     return dom==="sea" ? 1.0 : 0;          // 魚雷只打海
+    if (dom==="air")   return (w.antiAir!=null ? w.antiAir : 0); // 打空需具對空能力
+    if (dom==="sea"){
+      const heavyNaval = w.antiShip || ["naval_gun","torpedo","agm","rocket_pod"].includes(w.type);
+      if (t.big) return w.antiShip ? w.antiShip : (heavyNaval ? 1.0 : 0.06); // 大艦：輕武器刮漆
+      return w.antiShip ? w.antiShip : 1.0;                   // 小艇：誰都能傷
+    }
+    let mm = 1.0;                                             // land
+    if (w.antiGround) mm *= w.antiGround;
+    if (w.airToGround!=null) mm *= w.airToGround;             // 戰機對地弱
+    return mm;
+  },
+
+  damage(shooter, t, part, interception=false){
     const w = shooter.weapon;
-    if (w.antiTank && t.cls!=="tank") return Math.round(w.atk*0.6*this.partMult(part)); // 火箭打步兵
-    if (!w.antiTank && !w.arc && t.cls==="tank") return 1;                              // 槍械刮漆
+    let mult = this.domainMult(w, t);
+    if (mult<=0) return 0;                                    // 打不到此域
+    if ((t.domain||"land")==="land"){                         // 陸戰坦克剋制（沿用 v1）
+      if (!w.antiTank && !w.arc && !w.antiGround && t.cls==="tank") return 1; // 槍械刮漆坦克
+      if (w.antiTank && t.cls!=="tank") mult *= 0.6;          // 火箭打步兵濺傷減半
+    }
     let def = t.def;
     if (NATIONS[t.nationId].trait.id==="island_defense" && Game.onOwnHalf(t)) def += 3; // 日本
-    let dmg = w.atk * this.partMult(part) * Math.max(0.1, 1 - def/w.atk*0.5);
+    const effAtk = w.atk * mult;
+    let dmg = effAtk * this.partMult(part) * Math.max(0.1, 1 - def/Math.max(1,effAtk)*0.5);
     if (interception) dmg *= 0.5;
     if (NATIONS[t.nationId].trait.id==="homeland_defense" && t.side===1) dmg *= 0.9;    // 台灣
     return Math.max(1, Math.round(dmg));
@@ -120,6 +146,7 @@ const Combat = {
       u._iceTimer = (u._iceTimer||0) + elapsed;
       if (u._iceTimer < gap) continue;
       if (dist(u,mover) > u.weapon.range*0.8) continue;
+      if (this.domainMult(u.weapon, mover)<=0) continue;   // 只在打得到該域時攔截（步兵不空放對空、SAM 不打地面）
       if (!this.canSee(map, u, mover, Game.turn)) continue;
       u._iceTimer = 0;
       ev.push(...this.fire(map, u, mover, "body", true));

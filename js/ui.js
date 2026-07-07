@@ -11,7 +11,7 @@ const UI = {
   showMenu(){
     this.hideAll();
     const natOpts = Object.values(NATIONS).map(n=>`<option value="${n.id}">${n.name}</option>`).join("");
-    const mapOpts = ["plain","town","beach"].map(k=>`<option value="${k}">${MAPS[k].name}</option>`).join("");
+    const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}（${(m.allow||["land"]).map(d=>({land:"陸",sea:"海",air:"空"}[d])).join("")}）</option>`).join("");
     this.el("menu").innerHTML = `
       <h1>戰　場</h1><p class="sub">真實軍備 × 戰場女武神式戰術</p>
       <button id="btnTutorial" class="big">教學關：台海防衛</button>
@@ -41,18 +41,27 @@ const UI = {
   },
   refreshDeploy(){
     const nat = NATIONS[Game.nations[Game.playerSide]];
-    const rows = Object.keys(CLASS_BASE).map(k=>{
-      const c = unitCost(nat.id,k), u=nat.units[k];
-      const on = Game.deployCls===k?" on":"";
-      return `<button class="unitBtn${on}" data-cls="${k}">
-        <b>${CLASS_BASE[k].zh}</b>｜${u.label}<br><span>${u.weapon}</span><em>${c} 點</em></button>`;
-    }).join("");
+    const allow = Game.mapAllow();
+    const groups = { land:"🪖 陸軍", sea:"⚓ 海軍", air:"✈ 空軍" };
+    let rows = "";
+    for (const dom of ["land","sea","air"]){
+      if (!allow.includes(dom)) continue;
+      const keys = Object.keys(CLASS_BASE).filter(k=>CLASS_BASE[k].domain===dom);
+      rows += `<div class="grpHead">${groups[dom]}</div>`;
+      rows += keys.map(k=>{
+        const c = unitCost(nat.id,k), u=nat.units[k];
+        const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
+        const on = Game.deployCls===k?" on":"";
+        return `<button class="unitBtn${on}" data-cls="${k}">
+          <b>${CLASS_BASE[k].zh}</b>｜${u.label}<br><span>${u.weapon}</span><em>${c}點·${cp}CP</em></button>`;
+      }).join("");
+    }
     this.el("side").innerHTML = `
       <h3>部署（${nat.name}）</h3>
       <p>剩餘點數 <b id="bud">${Game.budgetLeft}</b> / ${Game.map.budget}</p>
       <p class="fine">特性：${nat.trait.desc}</p>
       <div class="ulist">${rows}</div>
-      <p class="fine">左鍵放置於藍框區、右鍵移除。坦克上限 2。</p>
+      <p class="fine">左鍵放置於藍框（艦艇需放水域）、右鍵移除。坦克/大艦上限各 2。</p>
       <button id="btnGo" class="big">開始戰鬥 ▶</button>
       <button id="btnBack">返回主選單</button>
       <div id="log"></div>`;
@@ -108,7 +117,9 @@ const UI = {
   /* ---------- 瞄準面板 ---------- */
   showAim(shooter, t){
     const box=this.el("aim");
-    const parts = t.cls==="tank" ? [["body","車體 ×1"],["radiator","散熱器 ×3"]] : [["body","軀幹 ×1"],["head","頭部 ×2"]];
+    const parts = t.cls==="tank" ? [["body","車體 ×1"],["radiator","散熱器 ×3"]]
+      : t.domain==="land" ? [["body","軀幹 ×1"],["head","頭部 ×2"]]
+      : [["body","命中 ×1"]];  // 艦艇/飛機無部位弱點
     const btns = parts.map(([p,label])=>{
       const ch=Math.round(Combat.hitChance(Game.map,shooter,t,p)*100);
       return `<button data-part="${p}" ${ch===0?"disabled":""}>${label}<br>命中 ${ch}%</button>`;

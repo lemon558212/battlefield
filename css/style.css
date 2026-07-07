@@ -20,6 +20,7 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .ulist .unitBtn span { color:#aebf95; font-size:11px; }
 .ulist .unitBtn em { position:absolute; right:8px; top:8px; color:#ffd83d; font-style:normal; }
 .ulist .unitBtn.on { outline:2px solid #ffd83d; }
+.grpHead { color:#cfe3a8; font-size:12px; font-weight:bold; margin:8px 0 3px; border-bottom:1px solid #3a4232; padding-bottom:2px; }
 
 #menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
   gap:14px; background:rgba(15,18,12,0.93); z-index:5; }
