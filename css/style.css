@@ -41,3 +41,19 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #aim button { flex:1; padding:8px; background:#39442e; color:#e8e6d8; border:1px solid #55643f; cursor:pointer; font-family:inherit; }
 #aim button:disabled { opacity:0.4; cursor:not-allowed; }
 #aim button:hover:not(:disabled) { background:#5a7a3a; }
+
+/* ---- 手機橫式：橫向時畫面填滿、控制面板移到右側；直向時提示橫置 ---- */
+@media (orientation:landscape) and (max-height:600px){
+  #wrap{ flex-direction:row; align-items:center; justify-content:center; gap:6px; height:100vh; width:100%; padding:4px; }
+  #stage{ height:94vh; width:auto; max-width:62vw; }
+  #side{ width:36vw; max-width:340px; max-height:96vh; overflow-y:auto; font-size:12px; padding:6px; }
+  #menu{ font-size:12px; padding:12px; max-height:96vh; overflow-y:auto; }
+  #menu h1{ font-size:22px; }
+}
+#rotateHint{ display:none; }
+@media (orientation:portrait) and (max-width:860px){
+  #rotateHint{ display:flex; position:fixed; inset:0; z-index:100; background:#12160f; color:#e8e6d8;
+    flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:14px; padding:30px;
+    font-size:24px; font-weight:bold; }
+  #rotateHint .sub{ font-size:15px; font-weight:normal; color:#9fb07f; }
+}
