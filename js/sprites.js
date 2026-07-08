@@ -15,16 +15,20 @@ const Sprites = {
     return { uniform: n.uniformColor, accent: n.flagColors[1] || "#8a8a8a", metal: "#6d726a", dark: "#23271f", steel: "#8a9099" };
   },
 
-  /* 選擇性預載圖片；沒有圖也完全不影響（fallback 向量） */
-  tryLoad(u){
-    const key = u.nationId + "_" + u.cls;
-    if (key in this.imgCache) return this.imgCache[key];
+  /* 選擇性預載圖片；沒有圖也完全不影響（fallback 向量）。
+     優先序：assets/units/{國別}_{兵種}.png > assets/units/{兵種}.png（共用）> 向量 */
+  _load(key, src){
+    if (key in this.imgCache) return;
+    this.imgCache[key] = false;
     const img = new Image();
     img.onload = () => { this.imgCache[key] = img; };
     img.onerror = () => { this.imgCache[key] = false; };
-    img.src = "assets/units/" + key + ".png";
-    this.imgCache[key] = false; // 先設 false，載入成功後 onload 覆蓋
-    return false;
+    img.src = src;
+  },
+  tryLoad(u){
+    const nk = u.nationId + "_" + u.cls, ck = u.cls;
+    this._load(nk, "assets/units/" + nk + ".png");   // 國別專屬（可選）
+    this._load(ck, "assets/units/" + ck + ".png");   // 兵種共用（放 17 張即覆蓋全國）
   },
 
   drawBody(ctx, u, isPlayer){
@@ -34,7 +38,7 @@ const Sprites = {
       ctx.save(); ctx.globalAlpha = air ? 0.22 : 0.30; ctx.fillStyle = "#000";
       ctx.beginPath(); ctx.ellipse(u.x + (air?7:3), u.y + (air?12:5), u.r*(air?1:1.08), u.r*0.5, 0, 0, 7); ctx.fill(); ctx.restore();
     }
-    const img = this.imgCache[u.nationId + "_" + u.cls];
+    const img = this.imgCache[u.nationId + "_" + u.cls] || this.imgCache[u.cls];
     ctx.save(); ctx.translate(u.x, u.y); ctx.rotate(u.facing);
     if (img){ ctx.drawImage(img, -u.r - 4, -u.r - 4, (u.r + 4) * 2, (u.r + 4) * 2); ctx.restore(); return; }
     if (u.domain === "sea") this.drawShip(ctx, u, edge);
