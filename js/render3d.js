@@ -1,0 +1,262 @@
+/* ============================================================
+ * render3d.js — 行動模式(act)偽 3D 場景渲染（權威：GDD/07 P2）
+ * 職責：只在 state==="act" 時，用 Camera3D 把現有 2D 世界(960×600 平面)
+ *   繪成第三人稱偽 3D 畫面。指令/部署/敵方回合維持俯視（不經此檔）。
+ * 不含任何遊戲規則：可見性沿用 Game.enemyVisible、座標/HP 全用現有欄位。
+ *   立繪為 P2 佔位（程式化站姿剪影），P5 再接美術素材。
+ * 依賴：Camera3D（投影）、Sprites.colorsFor（配色）、NATIONS、Game（唯讀狀態）。
+ * ============================================================ */
+"use strict";
+
+const Render3D = {
+  SKY_TOP: "#7fb0dc", SKY_HOR: "#d3e3ef",
+  GRID: 80,                       // 地面格線間距（世界單位）
+
+  draw(ctx, G){
+    const cam = Camera3D, m = G.map;
+    if (!G.sel) return;
+    cam.update(G.sel);
+    const W = cam.W, H = cam.H;
+    const hy = Math.max(0, Math.min(H, cam.horizonY()));
+
+    // 天空
+    const sky = ctx.createLinearGradient(0, 0, 0, Math.max(1, hy));
+    sky.addColorStop(0, this.SKY_TOP); sky.addColorStop(1, this.SKY_HOR);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, hy);
+    // 地面底色
+    ctx.fillStyle = m.ground || "#7a8f5a"; ctx.fillRect(0, hy, W, H - hy);
+    // 地面接地平線的大氣霧化
+    const fog = ctx.createLinearGradient(0, hy, 0, hy + 130);
+    fog.addColorStop(0, "rgba(211,227,239,0.6)"); fog.addColorStop(1, "rgba(211,227,239,0)");
+    ctx.fillStyle = fog; ctx.fillRect(0, hy, W, 130);
+
+    // 地面格線（透視縱深提示）
+    ctx.strokeStyle = "rgba(255,255,255,0.09)"; ctx.lineWidth = 1;
+    for (let x = 0; x <= 960; x += this.GRID) this._seg(ctx, cam, x, 0, x, 600, 0);
+    for (let y = 0; y <= 600; y += this.GRID) this._seg(ctx, cam, 0, y, 960, y, 0);
+
+    // 地面貼附裝飾（平面，畫在立體物件之下）
+    this._decals(ctx, cam, m);
+    if (G.sel.weapon) this._rangeRing(ctx, cam, G.sel);
+
+    // 立體物件（建築盒 + 單位立繪 + 主堡），依深度由遠到近排序
+    const draws = [];
+    for (const s of (m.solids || [])){
+      const d = cam.depthOf(s.x + s.w / 2, s.y + s.h / 2, 0);
+      draws.push({ d, fn: () => this._box(ctx, cam, s) });
+    }
+    for (const b of m.bases){
+      const d = cam.depthOf(b.x, b.y, 0);
+      draws.push({ d, fn: () => this._base(ctx, cam, b, G) });
+    }
+    for (const u of G.units){
+      if (!u.alive) continue;
+      const isP = u.side === G.playerSide;
+      if (!isP && !G.enemyVisible(u)) continue;
+      const d = cam.depthOf(u.x, u.y, 0);
+      if (d <= cam.nearZ) continue;
+      draws.push({ d, fn: () => this._unit(ctx, cam, u, isP, G) });
+    }
+    draws.sort((a, b) => b.d - a.d);
+    for (const it of draws) it.fn();
+
+    // 特效（畫在最上層）
+    for (const f of G.fx) this._fx(ctx, cam, f);
+
+    // 準心
+    this._crosshair(ctx, W, H, hy);
+  },
+
+  /* 世界線段 → 螢幕，對 nearZ 裁剪（避免相機後方點爆掉） */
+  _seg(ctx, cam, ax, ay, bx, by, z){
+    let da = cam.depthOf(ax, ay, z), db = cam.depthOf(bx, by, z);
+    const n = cam.nearZ + 0.5;
+    if (da < n && db < n) return;
+    if (da < n){ const t = (n - da) / (db - da); ax += (bx - ax) * t; ay += (by - ay) * t; }
+    else if (db < n){ const t = (n - db) / (da - db); bx += (ax - bx) * t; by += (ay - by) * t; }
+    const A = cam.project(ax, ay, z), B = cam.project(bx, by, z);
+    if (!A || !B) return;
+    ctx.beginPath(); ctx.moveTo(A.sx, A.sy); ctx.lineTo(B.sx, B.sy); ctx.stroke();
+  },
+
+  /* 投影多邊形（所有角需在前方，否則回 null） */
+  _projPoly(cam, pts, z){
+    const out = [];
+    for (const p of pts){ const s = cam.project(p[0], p[1], z); if (!s) return null; out.push(s); }
+    return out;
+  },
+  _fillPoly(ctx, sp){
+    ctx.beginPath(); ctx.moveTo(sp[0].sx, sp[0].sy);
+    for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].sx, sp[i].sy);
+    ctx.closePath(); ctx.fill();
+  },
+
+  /* 地面平面裝飾：水域、礁石、樹叢、沙包 */
+  _decals(ctx, cam, m){
+    const quad = (r, fill) => { const sp = this._projPoly(cam, [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]], 0); if (sp){ ctx.fillStyle = fill; this._fillPoly(ctx, sp); } };
+    for (const w of (m.deepwaters || [])) quad(w, "#244b66");
+    for (const w of (m.waters || [])) quad(w, "#356782");
+    for (const w of (m.shallows || [])) quad(w, "#6ea3b8");
+    for (const w of (m.reefs || [])) quad(w, "#5a5f52");
+    for (const s of (m.sandbags || [])) quad(s, "#a8905c");
+    for (const b of (m.bushes || [])){
+      const c = cam.project(b.x, b.y, 0); if (!c) continue;
+      ctx.fillStyle = "rgba(47,82,40,0.9)";
+      ctx.beginPath(); ctx.ellipse(c.sx, c.sy, b.r * c.scale, b.r * c.scale * 0.5, 0, 0, 7); ctx.fill();
+    }
+  },
+
+  /* 射程圈：沿地面取樣成環 */
+  _rangeRing(ctx, cam, u){
+    ctx.strokeStyle = "rgba(255,255,255,0.32)"; ctx.setLineDash([5, 6]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); let started = false;
+    for (let i = 0; i <= 48; i++){
+      const a = i / 48 * Math.PI * 2, x = u.x + Math.cos(a) * u.weapon.range, y = u.y + Math.sin(a) * u.weapon.range;
+      if (cam.depthOf(x, y, 0) <= cam.nearZ){ started = false; continue; }
+      const s = cam.project(x, y, 0); if (!s){ started = false; continue; }
+      if (!started){ ctx.moveTo(s.sx, s.sy); started = true; } else ctx.lineTo(s.sx, s.sy);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  },
+
+  /* 建築 → 擠出成 3D 盒 */
+  _box(ctx, cam, s){
+    const HB = 42; // 建築高度（世界單位）
+    const bc = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]];
+    const bot = this._projPoly(cam, bc, 0), top = this._projPoly(cam, bc, HB);
+    if (!bot || !top) return;
+    // 落地陰影
+    ctx.fillStyle = "rgba(0,0,0,0.22)"; this._fillPoly(ctx, bot);
+    // 四面牆（不透明，畫序由遠到近）
+    const wallShade = ["#5c5952", "#666259", "#726d63", "#615d55"];
+    const order = [0, 1, 2, 3].sort((i, j) =>
+      ((cam.depthOf((bc[(i + 1) % 4][0] + bc[i][0]) / 2, (bc[(i + 1) % 4][1] + bc[i][1]) / 2, 0))) -
+      ((cam.depthOf((bc[(j + 1) % 4][0] + bc[j][0]) / 2, (bc[(j + 1) % 4][1] + bc[j][1]) / 2, 0))));
+    for (let k = order.length - 1; k >= 0; k--){ const i = order[k], j = (i + 1) % 4;
+      ctx.fillStyle = wallShade[i]; this._fillPoly(ctx, [bot[i], bot[j], top[j], top[i]]);
+    }
+    // 頂面
+    ctx.fillStyle = "#7f7a70"; this._fillPoly(ctx, top);
+    ctx.strokeStyle = "#403d38"; ctx.lineWidth = 1.5; this._fillPathStroke(ctx, top);
+  },
+  _fillPathStroke(ctx, sp){ ctx.beginPath(); ctx.moveTo(sp[0].sx, sp[0].sy); for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].sx, sp[i].sy); ctx.closePath(); ctx.stroke(); },
+
+  /* 主堡：地面圓 + 旗桿 */
+  _base(ctx, cam, b, G){
+    const g = cam.project(b.x, b.y, 0), topf = cam.project(b.x, b.y, 40);
+    if (!g) return;
+    const col = b.side === G.playerSide ? "#2e6fd8" : "#c23b22";
+    ctx.fillStyle = col; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.ellipse(g.sx, g.sy, 16 * g.scale, 16 * g.scale * 0.5, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    if (topf){ ctx.strokeStyle = "#cfcfcf"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(g.sx, g.sy); ctx.lineTo(topf.sx, topf.sy); ctx.stroke();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(topf.sx, topf.sy); ctx.lineTo(topf.sx + 18 * g.scale, topf.sy + 4 * g.scale); ctx.lineTo(topf.sx, topf.sy + 9 * g.scale); ctx.fill(); }
+  },
+
+  /* 單位 billboard（面向相機的站姿剪影，P2 佔位；P5 換立繪） */
+  _unit(ctx, cam, u, isP, G){
+    const air = u.domain === "air" ? 52 : 0;
+    const ground = cam.project(u.x, u.y, 0);
+    const baseA = cam.project(u.x, u.y, air);
+    const figH = u.cls === "tank" ? 16 : u.domain === "sea" ? 12 : u.domain === "air" ? 11 : 21;
+    const topA = cam.project(u.x, u.y, air + figH);
+    if (!baseA || !topA) return;
+    const h = Math.max(7, baseA.sy - topA.sy), sc = baseA.scale;
+    const c = Sprites.colorsFor(u), edge = isP ? "#5b9bff" : "#ff6f5a";
+
+    // 地面陰影（空中單位陰影在正下方地面）
+    if (ground){ ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.ellipse(ground.sx, ground.sy, u.r * ground.scale, u.r * ground.scale * 0.45, 0, 0, 7); ctx.fill();
+      if (air && baseA){ ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(ground.sx, ground.sy); ctx.lineTo(baseA.sx, baseA.sy); ctx.stroke(); } }
+
+    const cx = baseA.sx, by = baseA.sy; // 立繪底部中心
+    ctx.save();
+    if (u.cls === "tank") this._bbTank(ctx, cx, by, h, c, edge);
+    else if (u.domain === "sea") this._bbShip(ctx, cx, by, h, c, edge);
+    else if (u.domain === "air") this._bbAir(ctx, cx, by, h, c, edge);
+    else this._bbSoldier(ctx, cx, by, h, c, edge, u);
+    ctx.restore();
+
+    // 血條（立繪頂上）
+    const bw = Math.max(14, (u.cls === "tank" ? 30 : 20) * sc * 0.5), bx = cx - bw / 2, y0 = topA.sy - 6;
+    ctx.fillStyle = "#222"; ctx.fillRect(bx, y0, bw, 3);
+    ctx.fillStyle = u.hp > u.maxhp * 0.3 ? "#4fd05e" : "#e04b3a"; ctx.fillRect(bx, y0, bw * Math.max(0, Math.min(1, u.hp / u.maxhp)), 3);
+    if (G.sel === u){ ctx.strokeStyle = "#ffd83d"; ctx.lineWidth = 2; ctx.strokeRect(bx - 1, y0 - 1, bw + 2, 5); }
+    // 選中/瞄準標記
+    if (G.aimTarget === u && ground){ ctx.strokeStyle = "#ff5a4a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, (topA.sy + by) / 2, h * 0.6, 0, 7); ctx.stroke(); }
+  },
+
+  _bbSoldier(ctx, cx, by, h, c, edge, u){
+    const w = h * 0.42;
+    // 腿
+    ctx.fillStyle = c.dark; ctx.fillRect(cx - w * 0.32, by - h * 0.42, w * 0.24, h * 0.42); ctx.fillRect(cx + w * 0.08, by - h * 0.42, w * 0.24, h * 0.42);
+    // 身體
+    ctx.fillStyle = c.uniform; ctx.strokeStyle = edge; ctx.lineWidth = 1.4;
+    this._roundRect(ctx, cx - w / 2, by - h * 0.78, w, h * 0.42, w * 0.22); ctx.fill(); ctx.stroke();
+    // 頭 + 頭盔
+    ctx.fillStyle = "#d9b48a"; ctx.beginPath(); ctx.arc(cx, by - h * 0.83, h * 0.11, 0, 7); ctx.fill();
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.arc(cx, by - h * 0.86, h * 0.12, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = c.accent; ctx.fillRect(cx - h * 0.05, by - h * 0.90, h * 0.10, h * 0.03);
+    // 武器（右手持，橫向）
+    ctx.strokeStyle = c.metal; ctx.lineCap = "round";
+    const gunL = (u.cls === "sniper" || u.cls === "at" || u.cls === "mg") ? w * 1.0 : w * 0.7;
+    ctx.lineWidth = u.cls === "mg" || u.cls === "at" ? 3 : 2;
+    ctx.beginPath(); ctx.moveTo(cx - w * 0.1, by - h * 0.5); ctx.lineTo(cx + gunL, by - h * 0.52); ctx.stroke();
+    // 兵種字
+    ctx.fillStyle = "#fff"; ctx.font = Math.max(8, h * 0.22).toFixed(0) + "px sans-serif"; ctx.textAlign = "center";
+    const L = { rifleman: "步", assault: "突", mg: "機", mortar: "迫", sniper: "狙", at: "火", engineer: "工", specops: "特", sam: "防" }[u.cls] || "";
+    ctx.fillText(L, cx, by - h * 0.55);
+  },
+
+  _bbTank(ctx, cx, by, h, c, edge){
+    const w = h * 2.0;
+    ctx.fillStyle = c.uniform; ctx.strokeStyle = edge; ctx.lineWidth = 1.5;
+    // 履帶帶
+    ctx.fillStyle = c.dark; ctx.fillRect(cx - w / 2, by - h * 0.5, w, h * 0.5);
+    // 車體
+    ctx.fillStyle = c.uniform; this._roundRect(ctx, cx - w * 0.45, by - h * 0.85, w * 0.9, h * 0.5, 3); ctx.fill(); ctx.stroke();
+    // 砲塔 + 砲管（朝右）
+    ctx.fillStyle = c.metal; ctx.beginPath(); ctx.arc(cx, by - h * 0.85, h * 0.32, 0, 7); ctx.fill();
+    ctx.strokeStyle = c.metal; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, by - h * 0.9); ctx.lineTo(cx + w * 0.5, by - h * 0.95); ctx.stroke();
+  },
+
+  _bbShip(ctx, cx, by, h, c, edge){
+    const w = h * 2.6;
+    ctx.fillStyle = c.steel; ctx.strokeStyle = edge; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(cx - w / 2, by - h * 0.4); ctx.lineTo(cx + w / 2, by - h * 0.4); ctx.lineTo(cx + w * 0.36, by); ctx.lineTo(cx - w * 0.42, by); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = c.dark; ctx.fillRect(cx - w * 0.12, by - h * 0.9, w * 0.24, h * 0.5);
+  },
+
+  _bbAir(ctx, cx, by, h, c, edge){
+    const w = h * 2.2;
+    ctx.fillStyle = c.steel; ctx.strokeStyle = edge; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.ellipse(cx, by - h * 0.5, w * 0.16, h * 0.5, 0, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = c.uniform; ctx.beginPath(); ctx.moveTo(cx - w / 2, by - h * 0.5); ctx.lineTo(cx + w / 2, by - h * 0.5); ctx.lineTo(cx, by - h * 0.75); ctx.closePath(); ctx.fill();
+  },
+
+  _roundRect(ctx, x, y, w, h, r){ ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); },
+
+  /* 特效投影（tracer/boom/hitfx/death） */
+  _fx(ctx, cam, f){
+    if (f.type === "tracer"){
+      const A = cam.project(f.x1, f.y1, 6), B = cam.project(f.x2, f.y2, 6); if (!A || !B) return;
+      const k = 1 - f.t / 0.25; ctx.strokeStyle = (f.hit ? "rgba(255,225,120," : "rgba(210,210,210,") + k.toFixed(2) + ")"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(A.sx, A.sy); ctx.lineTo(B.sx, B.sy); ctx.stroke();
+    } else if (f.type === "boom"){
+      const s = cam.project(f.x, f.y, 6); if (!s) return; const k = f.t / 0.5;
+      ctx.fillStyle = "rgba(255,120,40," + ((1 - k) * 0.75).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(s.sx, s.sy, f.r * (0.5 + k * 0.5) * s.scale, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,235,150," + (1 - k).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(s.sx, s.sy, f.r * 0.3 * (1 - k) * s.scale, 0, 7); ctx.fill();
+    } else if (f.type === "hitfx"){
+      const s = cam.project(f.x, f.y, 14); if (!s) return;
+      ctx.fillStyle = f.heal ? "#5eff8a" : "#ffe08a"; ctx.font = "bold 13px sans-serif"; ctx.textAlign = "center";
+      ctx.globalAlpha = 1 - f.t / 0.9; ctx.fillText(f.heal ? f.dmg : "-" + f.dmg, s.sx, s.sy - f.t * 22); ctx.globalAlpha = 1;
+    }
+  },
+
+  /* 畫面中央準心（瞄準用，P3 接開火） */
+  _crosshair(ctx, W, H, hy){
+    const cx = W / 2, cy = (hy + H) / 2 - 30;
+    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(cx - 10, cy); ctx.lineTo(cx - 3, cy); ctx.moveTo(cx + 3, cy); ctx.lineTo(cx + 10, cy);
+    ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy - 3); ctx.moveTo(cx, cy + 3); ctx.lineTo(cx, cy + 10); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, 1.5, 0, 7); ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.fill();
+  }
+};

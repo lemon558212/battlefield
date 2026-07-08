@@ -276,7 +276,12 @@ const Game = {
     const y = (clientY-rect.top) * (this.canvas.height/rect.height);
     if (this.state==="deploy") return this.deployClick(x,y,button);
     if (this.state==="cmd")    return this.cmdClick(x,y);
-    if (this.state==="act")    return this.actClick(x,y);
+    if (this.state==="act"){
+      // 3D：把螢幕點反投影成地面世界座標（沿用 actClick 的 unitAt/moveTarget 邏輯）
+      const w = (typeof Camera3D!=="undefined") ? Camera3D.unproject(x,y) : [x,y];
+      if (!w) return;                 // 點到地平線以上（天空）→ 忽略
+      return this.actClick(w[0], w[1]);
+    }
   },
 
   deployClick(x,y,btn){
@@ -379,7 +384,10 @@ const Game = {
   _pointerMove(clientX, clientY){
     if (this.state!=="act" || !this._steer || !this.sel) return;
     if (Net.connected && Net.myside!==this.turnOwner) return;
-    const [x,y]=this._toWorld(clientX,clientY);
+    const [cx,cy]=this._toWorld(clientX,clientY);           // 螢幕(canvas)座標
+    const w = (typeof Camera3D!=="undefined") ? Camera3D.unproject(cx,cy) : [cx,cy];
+    if (!w) return;                                         // 拖到天空 → 不更新
+    const [x,y]=w;
     if (Math.hypot(x-this._steer.sx, y-this._steer.sy)>10) this._steer.moved=true;
     this.moveTarget = { x: clamp(x,this.sel.r,960-this.sel.r), y: clamp(y,this.sel.r,600-this.sel.r) };
   },
@@ -629,6 +637,10 @@ const Game = {
     const c=this.ctx, m=this.map;
     c.clearRect(0,0,960,600);
     if (this.state==="menu"||!m) return;
+    // 行動模式：偽 3D 第三人稱渲染（GDD/07 P2）。其餘狀態維持俯視。
+    if (this.state==="act" && this.sel && typeof Render3D!=="undefined"){
+      Render3D.draw(c, this); this.drawHint(c); return;
+    }
     if (!this._bg || this._bgMap!==m) this.buildTerrain(m);
     c.drawImage(this._bg, 0, 0);
     for (const b of m.bases){

@@ -14,11 +14,11 @@ const Camera3D = {
   // 螢幕（canvas 邏輯尺寸，與 index.html 一致）
   W: 960, H: 600,
 
-  // 可調參數（GDD/07 §架構：D≈70,H≈90 待調）
-  dist: 78,          // 相機在單位後方的水平距離 D
-  height: 96,        // 相機離地高度 H
-  pitch: 0.62,       // 俯角（弧度，約 35.5°）
-  focal: 520,        // 焦距（決定 FOV；960 寬 → 視角約 85°）
+  // 可調參數（GDD/07 §架構：D≈70,H≈90 待調 → P2 視覺調校後定值）
+  dist: 84,          // 相機在單位後方的水平距離 D
+  height: 104,       // 相機離地高度 H
+  pitch: 0.36,       // 俯角（弧度，約 20.6°）— 使地平線落在畫面上 1/5，露出天空
+  focal: 470,        // 焦距（決定 FOV；960 寬 → 視角約 91°）
   nearZ: 1,          // 近裁剪：深度 <= nearZ 視為在相機後方/太近，剔除
 
   // 目前相機狀態（由 update() 設定）
@@ -63,6 +63,35 @@ const Camera3D = {
     return { sx, sy: sy2, depth, scale };
   },
 
+  /* 只算前向深度（供 render3d 對線段做 nearZ 裁剪，不需完整投影）。 */
+  depthOf(wx, wy, wz){
+    const dx = wx - this.cx, dy = wy - this.cy, dz = (wz || 0) - this.ch;
+    const fwd = dx * Math.cos(this.yaw) + dy * Math.sin(this.yaw);
+    return fwd * Math.cos(this.pitch) - dz * Math.sin(this.pitch);
+  },
+
+  /* 地平線螢幕 y（無窮遠地面點的投影，只依 pitch/focal）。上方為天空、下方為地面。 */
+  horizonY(){ return this.H / 2 - Math.tan(this.pitch) * this.focal; },
+
+  /* 螢幕點 → 地面世界座標（wz=0 的反投影）。回傳 [wx,wy] 或 null（點在地平線以上/相機後方）。
+   * 供 act 模式輸入：把觸控點還原成地面座標，沿用現有 moveTarget / unitAt。 */
+  unproject(sx, sy){
+    const a = (sx - this.W / 2) / this.focal;   // = side/depth
+    const b = (this.H / 2 - sy) / this.focal;   // = up/depth
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    const dz = -this.ch;                          // 地面 wz=0
+    const denom = sp - b * cp;
+    if (denom <= 1e-6) return null;               // 地平線以上，無地面交點
+    const fwd = -dz * (b * sp + cp) / denom;
+    if (fwd <= this.nearZ) return null;
+    const depth = fwd * cp - dz * sp;
+    const side = a * depth;
+    const cyaw = Math.cos(this.yaw), syaw = Math.sin(this.yaw);
+    const dx = fwd * cyaw - side * syaw;
+    const dy = fwd * syaw + side * cyaw;
+    return [this.cx + dx, this.cy + dy];
+  },
+
   /* ---- 單元測試校正（GDD/07 §驗證判準 P1）----
    * 設一個已知相機：單位在 (480,300) 面向 +x。
    * 斷言：正前方地面點落畫面中央附近、正右方點落右側、相機後方點回 null。
@@ -91,6 +120,12 @@ const Camera3D = {
     const near = this.project(560, 300, 0), far = this.project(760, 300, 0);
     ok("近大遠小", near && far && near.scale > far.scale,
        near && far && `near=${near.scale.toFixed(2)} far=${far.scale.toFixed(2)}`);
+
+    // 5) 反投影往復：project 後 unproject 應還原地面點
+    const p = this.project(620, 340, 0);
+    const back = p && this.unproject(p.sx, p.sy);
+    ok("反投影往復", back && Math.hypot(back[0] - 620, back[1] - 340) < 0.5,
+       back && `(${back[0].toFixed(1)},${back[1].toFixed(1)})`);
 
     this.set(save.cx, save.cy, save.ch, save.yaw); // 還原
     const allPass = results.every(r => r.pass);
