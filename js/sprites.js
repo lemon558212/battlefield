@@ -40,7 +40,14 @@ const Sprites = {
     }
     const img = this.imgCache[u.nationId + "_" + u.cls] || this.imgCache[u.cls];
     ctx.save(); ctx.translate(u.x, u.y); ctx.rotate(u.facing);
-    if (img){ ctx.drawImage(img, -u.r - 4, -u.r - 4, (u.r + 4) * 2, (u.r + 4) * 2); ctx.restore(); return; }
+    if (img){
+      // 圖片模式無向量 edge stroke，補一圈側色識別環（藍=我方 / 紅=敵方），環不隨面向旋轉
+      ctx.save(); ctx.rotate(-u.facing);
+      ctx.strokeStyle = isPlayer ? "#5b9bff" : "#ff6f5a"; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(0, 0, u.r + 2, 0, 7); ctx.stroke();
+      ctx.restore();
+      ctx.drawImage(img, -u.r - 4, -u.r - 4, (u.r + 4) * 2, (u.r + 4) * 2); ctx.restore(); return;
+    }
     if (u.domain === "sea") this.drawShip(ctx, u, edge);
     else if (u.domain === "air") this.drawAir(ctx, u, edge);
     else if (u.cls === "tank") this.drawTank(ctx, u, edge);

@@ -15,6 +15,20 @@
 ## 圖片要求
 - 48×48 透明背景 PNG、俯視、**正面朝右**（引擎依單位面向自動旋轉）
 
+## 已掛載素材（2026-07-08，兵種共用圖）
+
+陸戰兵種與坦克已改用 Kenney CC0 俯視素材（其餘國別/海空維持向量 fallback）：
+
+| 兵種 key | 來源檔（Kenney） | 備註 |
+|----------|------------------|------|
+| rifleman/assault/mg/mortar/sniper/at/engineer/sam | Topdown Shooter — Soldier 1（軍綠，各姿勢） | 已朝右，直接縮放至 48×48 |
+| specops | Topdown Shooter — Hitman 1 silencer（黑衣消音） | 特種識別 |
+| tank | Top-down Tanks — tankGreen + barrelGreen 合成 | 原朝上，旋轉 90° 使砲口朝右 |
+
+- 來源包：`kenney.nl/assets/top-down-shooter`、`kenney.nl/assets/top-down-tanks`，授權 **CC0**（免署名可商用）。
+- 海空兵種（destroyer/missileboat/lst/submarine/fighter/attacker/gunship）Kenney 無合適俯視素材，維持程式化向量。
+- 圖片模式無向量 edge stroke，`sprites.js` 於圖片下方補「側色識別環」（藍=我方/紅=敵方）維持敵我辨識。
+
 ## 免費可商用素材來源（CC0）
 - Kenney.nl（https://kenney.nl）：Top-down Tanks、Topdown Shooter 等，CC0 免署名可商用（風格化，非照片級）
 - OpenGameArt.org 篩 CC0
