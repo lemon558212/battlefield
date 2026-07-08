@@ -37,6 +37,7 @@ const Game = {
     this.canvas.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault(); const t=e.changedTouches[0]; if(t) this._pointerMove(t.clientX,t.clientY); }, {passive:false});
     this.canvas.addEventListener("touchend", e=>{ if(e.cancelable) e.preventDefault(); this._pointerUp(); }, {passive:false});
     this.canvas.addEventListener("contextmenu", e=>e.preventDefault());
+    if (typeof Camera3D !== "undefined") Camera3D.selfTest(); // P1 投影校正（GDD/07），console 應見 PASS
     UI.showMenu();
     const raf = ts=>{ this.loop(ts); requestAnimationFrame(raf); };
     requestAnimationFrame(raf);
