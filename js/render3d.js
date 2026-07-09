@@ -19,16 +19,26 @@ const Render3D = {
     const W = cam.W, H = cam.H;
     const hy = Math.max(0, Math.min(H, cam.horizonY()));
 
-    // 天空
-    const sky = ctx.createLinearGradient(0, 0, 0, Math.max(1, hy));
-    sky.addColorStop(0, this.SKY_TOP); sky.addColorStop(1, this.SKY_HOR);
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, hy);
+    // 天空：上藍→暖霧三段漸層
+    if (hy > 0){
+      const sky = ctx.createLinearGradient(0, 0, 0, hy);
+      sky.addColorStop(0, "#5f97cf"); sky.addColorStop(0.55, "#9ec2e0"); sky.addColorStop(1, "#ecdfc4");
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, hy);
+      // 太陽光暈（右上）
+      const sun = ctx.createRadialGradient(W * 0.74, hy * 0.42, 3, W * 0.74, hy * 0.42, Math.max(80, hy * 1.4));
+      sun.addColorStop(0, "rgba(255,246,218,0.6)"); sun.addColorStop(1, "rgba(255,246,218,0)");
+      ctx.fillStyle = sun; ctx.fillRect(0, 0, W, hy);
+    }
     // 地面底色
     ctx.fillStyle = m.ground || "#7a8f5a"; ctx.fillRect(0, hy, W, H - hy);
-    // 地面接地平線的大氣霧化
-    const fog = ctx.createLinearGradient(0, hy, 0, hy + 130);
-    fog.addColorStop(0, "rgba(211,227,239,0.6)"); fog.addColorStop(1, "rgba(211,227,239,0)");
-    ctx.fillStyle = fog; ctx.fillRect(0, hy, W, 130);
+    // 地面縱深光影：遠處偏暗、前景落陰（增加立體）
+    const gg = ctx.createLinearGradient(0, hy, 0, H);
+    gg.addColorStop(0, "rgba(55,62,44,0.30)"); gg.addColorStop(0.28, "rgba(0,0,0,0)"); gg.addColorStop(1, "rgba(0,0,0,0.20)");
+    ctx.fillStyle = gg; ctx.fillRect(0, hy, W, H - hy);
+    // 地平線暖色大氣霧化
+    const fog = ctx.createLinearGradient(0, hy, 0, hy + 120);
+    fog.addColorStop(0, "rgba(236,223,196,0.65)"); fog.addColorStop(1, "rgba(236,223,196,0)");
+    ctx.fillStyle = fog; ctx.fillRect(0, hy, W, 120);
 
     // 地面格線（透視縱深提示）
     ctx.strokeStyle = "rgba(255,255,255,0.09)"; ctx.lineWidth = 1;
@@ -68,6 +78,11 @@ const Render3D = {
 
     // 特效（畫在最上層）
     for (const f of G.fx) this._fx(ctx, cam, f);
+
+    // 邊角壓暗（電影感 vignette）
+    const vig = ctx.createRadialGradient(W / 2, H * 0.52, H * 0.42, W / 2, H * 0.52, H * 0.95);
+    vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(0,0,0,0.26)");
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
 
     // 準心（僅行動模式）
     if (act) this._crosshair(ctx, W, H, hy);
