@@ -276,7 +276,7 @@ const Game = {
     const y = (clientY-rect.top) * (this.canvas.height/rect.height);
     if (this.state==="menu"||!this.map) return;
     // 全程 3D：把螢幕點反投影成地面世界座標（相機依狀態 overview/follow）
-    const w = (typeof Camera3D!=="undefined") ? (Camera3D.applyFor(this), Camera3D.unproject(x,y)) : [x,y];
+    const w = (typeof Camera3D!=="undefined") ? (Camera3D.applyFor(this,true), Camera3D.unproject(x,y)) : [x,y];
     if (this.state==="deploy"){ if (w) this.deployClick(w[0],w[1],button); return; }
     if (this.state==="cmd"){    if (w) this.cmdClick(w[0],w[1]); return; }
     if (this.state==="act"){

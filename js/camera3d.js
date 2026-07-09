@@ -24,39 +24,57 @@ const Camera3D = {
   pitch: 0.36, focal: 470, nearZ: 1,
   mode: "overview",
 
-  // 目前相機狀態
+  // 目前生效相機狀態（project/unproject 讀這些）
   cx: 0, cy: 0, ch: 0, yaw: 0,
+  // 目標狀態（applyFor 每幀朝此平滑內插 = P4 進出轉場）
+  t: { cx: 0, cy: 0, ch: 0, yaw: 0, pitch: 0.36, focal: 470, mode: "overview" },
+  _init: false, easeK: 0.16,
 
-  /* 依遊戲狀態自動選相機模式：行動且有選中單位→follow，其餘→overview */
-  applyFor(G){
-    if (G.state === "act" && G.sel) this.update(G.sel);
-    else this.setOverview(G.map, G.playerSide);
+  /* 依遊戲狀態算目標相機並平滑靠近（instant=true 立即到位，供點擊反投影精準） */
+  applyFor(G, instant){
+    if (G.state === "act" && G.sel) this.update(G.sel, this.t);
+    else this.setOverview(G.map, G.playerSide, this.t);
+    if (instant || !this._init){ this._snap(); this._init = true; }
+    else this._ease();
     return this;
   },
 
-  /* follow：相機退到選中單位後上方，yaw = 單位面向 */
-  update(u){
+  _snap(){
+    const t = this.t; this.cx = t.cx; this.cy = t.cy; this.ch = t.ch;
+    this.yaw = t.yaw; this.pitch = t.pitch; this.focal = t.focal; this.mode = t.mode;
+  },
+  _ease(){
+    const t = this.t, k = this.easeK;
+    this.cx += (t.cx - this.cx) * k; this.cy += (t.cy - this.cy) * k; this.ch += (t.ch - this.ch) * k;
+    this.pitch += (t.pitch - this.pitch) * k; this.focal += (t.focal - this.focal) * k;
+    let d = t.yaw - this.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+    this.yaw += d * k;
+    this.mode = t.mode; // 模式（準心/射程門檻）立即切換，相機再平滑追上
+  },
+
+  /* follow：相機退到選中單位後上方，yaw = 單位面向。寫入 out（預設 this=立即） */
+  update(u, out){
+    out = out || this;
     const f = (u && typeof u.facing === "number") ? u.facing : 0;
-    this.mode = "follow";
-    this.pitch = this.fPitch; this.focal = this.fFocal;
-    this.yaw = f;
-    this.cx = u.x - Math.cos(f) * this.fDist;
-    this.cy = u.y - Math.sin(f) * this.fDist;
-    this.ch = this.fHeight;
-    return this;
+    out.mode = "follow"; out.pitch = this.fPitch; out.focal = this.fFocal;
+    out.yaw = f;
+    out.cx = u.x - Math.cos(f) * this.fDist;
+    out.cy = u.y - Math.sin(f) * this.fDist;
+    out.ch = this.fHeight;
+    return out;
   },
 
-  /* overview：從玩家一側斜角高空俯瞰全場（玩家部隊在近景、敵方在遠景） */
-  setOverview(map, playerSide){
-    this.mode = "overview";
-    this.pitch = this.oPitch; this.focal = this.oFocal;
+  /* overview：從玩家一側斜角高空俯瞰全場。寫入 out（預設 this=立即） */
+  setOverview(map, playerSide, out){
+    out = out || this;
+    out.mode = "overview"; out.pitch = this.oPitch; out.focal = this.oFocal;
     const base = map && (map.bases || []).find(b => b.side === playerSide);
     const lookPlus = base ? base.x < 480 : true;   // 玩家在左半 → 面向 +x
-    this.yaw = lookPlus ? 0 : Math.PI;
-    this.ch = this.oHeight;
-    this.cx = lookPlus ? -this.oBack : 960 + this.oBack; // 退到玩家邊界外
-    this.cy = 300;
-    return this;
+    out.yaw = lookPlus ? 0 : Math.PI;
+    out.ch = this.oHeight;
+    out.cx = lookPlus ? -this.oBack : 960 + this.oBack; // 退到玩家邊界外
+    out.cy = 300;
+    return out;
   },
 
   /* 允許外部（測試/轉場）直接設定相機姿態 */
