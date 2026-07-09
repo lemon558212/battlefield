@@ -47,6 +47,10 @@ const Render3D = {
       const d = cam.depthOf(s.x + s.w / 2, s.y + s.h / 2, 0);
       draws.push({ d, fn: () => this._box(ctx, cam, s) });
     }
+    for (const b of (m.bunkers || [])){
+      const d = cam.depthOf(b.x + b.w / 2, b.y + b.h / 2, 0);
+      draws.push({ d, fn: () => this._bunker(ctx, cam, b) });
+    }
     for (const b of m.bases){
       const d = cam.depthOf(b.x, b.y, 0);
       draws.push({ d, fn: () => this._base(ctx, cam, b, G) });
@@ -112,6 +116,12 @@ const Render3D = {
     for (const w of (m.shallows || [])) quad(w, "#6ea3b8");
     for (const w of (m.reefs || [])) quad(w, "#5a5f52");
     for (const s of (m.sandbags || [])) quad(s, "#a8905c");
+    // 工事（地面平面）
+    for (const t of (m.trenches || [])){ quad({ x: t.x - 2, y: t.y - 2, w: t.w + 4, h: t.h + 4 }, "#6a5c44"); quad(t, "#332c1f"); }
+    for (const w of (m.wires || [])) quad(w, "rgba(45,45,45,0.85)");
+    const pit = (h, fill) => { const c = cam.project(h.x, h.y, 0); if (!c) return; ctx.fillStyle = fill; ctx.beginPath(); ctx.ellipse(c.sx, c.sy, h.r * c.scale, h.r * c.scale * 0.5, 0, 0, 7); ctx.fill(); };
+    for (const h of (m.craters || [])){ pit(h, "rgba(0,0,0,0.30)"); pit({ x: h.x, y: h.y, r: h.r * 0.7 }, "#4a3d2c"); }
+    for (const h of (m.foxholes || [])) pit({ x: h.x, y: h.y, r: h.r }, "#3f3626");
     for (const b of (m.bushes || [])){
       const c = cam.project(b.x, b.y, 0); if (!c) continue;
       ctx.fillStyle = "rgba(47,82,40,0.9)";
@@ -153,6 +163,26 @@ const Render3D = {
     ctx.strokeStyle = "#403d38"; ctx.lineWidth = 1.5; this._fillPathStroke(ctx, top);
   },
   _fillPathStroke(ctx, sp){ ctx.beginPath(); ctx.moveTo(sp[0].sx, sp[0].sy); for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].sx, sp[i].sy); ctx.closePath(); ctx.stroke(); },
+
+  /* 碉堡：低矮混凝土盒 + 射口帶（可進入掩蔽） */
+  _bunker(ctx, cam, b){
+    const HB = 26;
+    const bc = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]];
+    const bot = this._projPoly(cam, bc, 0), top = this._projPoly(cam, bc, HB);
+    const mid = this._projPoly(cam, bc, HB * 0.5);
+    if (!bot || !top) return;
+    ctx.fillStyle = "rgba(0,0,0,0.22)"; this._fillPoly(ctx, bot);
+    const wall = ["#8a877d", "#949187", "#9c998f", "#807d74"];
+    const order = [0, 1, 2, 3].sort((i, j) =>
+      cam.depthOf((bc[(i + 1) % 4][0] + bc[i][0]) / 2, (bc[(i + 1) % 4][1] + bc[i][1]) / 2, 0) -
+      cam.depthOf((bc[(j + 1) % 4][0] + bc[j][0]) / 2, (bc[(j + 1) % 4][1] + bc[j][1]) / 2, 0));
+    for (let k = order.length - 1; k >= 0; k--){ const i = order[k], j = (i + 1) % 4;
+      ctx.fillStyle = wall[i]; this._fillPoly(ctx, [bot[i], bot[j], top[j], top[i]]);
+      if (mid){ ctx.strokeStyle = "#2a2723"; ctx.lineWidth = 3; this._line(ctx, mid[i].sx, mid[i].sy, mid[j].sx, mid[j].sy); } // 射口帶
+    }
+    ctx.fillStyle = "#a6a399"; this._fillPoly(ctx, top);
+    ctx.strokeStyle = "#4a473f"; ctx.lineWidth = 1.5; this._fillPathStroke(ctx, top);
+  },
 
   /* 主堡：地面圓 + 旗桿 */
   _base(ctx, cam, b, G){

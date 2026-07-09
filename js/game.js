@@ -487,7 +487,11 @@ const Game = {
     }
     const moved = Math.hypot(nx-u.x, ny-u.y);
     let apCost = moved/3; // 1 AP = 3px（GDD/01 §2）
-    if (u.domain==="land" && this.inAny(this.map.shallows,nx,ny)) apCost*=2; // 涉淺灘
+    if (u.domain==="land"){
+      if (this.inAny(this.map.shallows,nx,ny)) apCost*=2;          // 涉淺灘
+      if (this.inAny(this.map.wires,nx,ny))    apCost*=2.5;        // 鐵絲網受阻（GDD/04 §2b）
+      else if (this.inAny(this.map.trenches,nx,ny)) apCost*=1.5;  // 下壕溝較慢
+    }
     if (Combat.inBush(this.map,u) && NATIONS[u.nationId].trait.id==="tunnel_war") apCost*=0.5; // 越南
     if (u.ap < apCost) return false;
     u.ap -= apCost; u.x=nx; u.y=ny; if (setFacing) u.facing=Math.atan2(dy,dx);
@@ -616,6 +620,29 @@ const Game = {
     for(const w of (m.reefs||[])){ c.fillStyle="#5a5f52"; c.fillRect(w.x,w.y,w.w,w.h);
       c.fillStyle="#6b7062"; c.beginPath(); c.arc(w.x+w.w*0.5,w.y+w.h*0.5,w.w*0.35,0,7); c.fill();
       c.strokeStyle="#3f4438"; c.strokeRect(w.x,w.y,w.w,w.h); }
+    // 陣地工事（GDD/04 §2b）
+    for(const t of (m.craters||[])){ // 彈坑：焦黑凹坑
+      c.fillStyle="rgba(0,0,0,0.28)"; c.beginPath(); c.ellipse(t.x,t.y,t.r,t.r*0.8,0,0,7); c.fill();
+      c.fillStyle="#5c4d3a"; c.beginPath(); c.ellipse(t.x,t.y,t.r*0.8,t.r*0.62,0,0,7); c.fill();
+      c.fillStyle="#3a2f22"; c.beginPath(); c.ellipse(t.x,t.y,t.r*0.45,t.r*0.34,0,0,7); c.fill();
+    }
+    for(const t of (m.trenches||[])){ // 壕溝：凹陷土溝＋護牆
+      c.fillStyle="#6a5c44"; c.fillRect(t.x-2,t.y-2,t.w+4,t.h+4);           // 護牆(土堆)
+      c.fillStyle="#3f3626"; c.fillRect(t.x,t.y,t.w,t.h);                    // 溝底(陰影)
+      c.fillStyle="#4e4531"; c.fillRect(t.x+2,t.y+2,Math.max(0,t.w-4),Math.max(0,t.h-4));
+    }
+    for(const t of (m.foxholes||[])){ // 散兵坑：小圓坑
+      c.fillStyle="#6a5c44"; c.beginPath(); c.arc(t.x,t.y,t.r+2,0,7); c.fill();
+      c.fillStyle="#3f3626"; c.beginPath(); c.arc(t.x,t.y,t.r,0,7); c.fill();
+    }
+    for(const t of (m.wires||[])){ // 鐵絲網：X 交錯鐵刺
+      c.strokeStyle="rgba(60,60,60,0.85)"; c.lineWidth=1.5;
+      const horiz=t.w>=t.h, len=horiz?t.w:t.h, cxm=t.x+t.w/2, cym=t.y+t.h/2;
+      for(let s=0;s<len;s+=10){ const px=horiz?t.x+s:cxm, py=horiz?cym:t.y+s;
+        c.beginPath(); c.moveTo(px-5,py-5); c.lineTo(px+5,py+5); c.moveTo(px+5,py-5); c.lineTo(px-5,py+5); c.stroke(); }
+      c.strokeStyle="rgba(40,40,40,0.7)"; c.beginPath();
+      if(horiz){ c.moveTo(t.x,cym); c.lineTo(t.x+t.w,cym); } else { c.moveTo(cxm,t.y); c.lineTo(cxm,t.y+t.h); } c.stroke();
+    }
     // 樹叢：陰影 + 三層樹冠
     for(const b of m.bushes){
       c.fillStyle="rgba(0,0,0,0.18)"; c.beginPath(); c.ellipse(b.x+5,b.y+7,b.r,b.r*0.7,0,0,7); c.fill();
@@ -640,6 +667,14 @@ const Game = {
       c.strokeStyle="#403d38"; c.lineWidth=2; c.strokeRect(s.x,s.y,s.w,s.h); c.lineWidth=1;
       c.fillStyle="rgba(28,28,32,0.5)";
       for(let wx=s.x+8;wx<s.x+s.w-8;wx+=18) for(let wy=s.y+12;wy<s.y+s.h-8;wy+=18) c.fillRect(wx,wy,7,9);
+    }
+    // 碉堡：混凝土塊 + 射口（可進入掩蔽）
+    for(const b of (m.bunkers||[])){
+      c.fillStyle="rgba(0,0,0,0.28)"; c.fillRect(b.x+3,b.y+4,b.w,b.h);
+      c.fillStyle="#8d8a80"; c.fillRect(b.x,b.y,b.w,b.h);                  // 混凝土
+      c.fillStyle="#a3a096"; c.fillRect(b.x,b.y,b.w,5);
+      c.strokeStyle="#4a473f"; c.lineWidth=2; c.strokeRect(b.x,b.y,b.w,b.h); c.lineWidth=1;
+      c.fillStyle="#2a2723"; c.fillRect(b.x+b.w*0.2,b.y+b.h*0.42,b.w*0.6,Math.max(4,b.h*0.16)); // 射口(embrasure)
     }
   },
 

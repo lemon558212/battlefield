@@ -6,23 +6,30 @@
 
 const Combat = {
 
-  /* 視線是否被 solid 阻擋 */
+  /* 視線是否被 solid/bunker 阻擋。
+     規則：blocker 若「包含目標點」則對該目標不生效（碉堡內佔員可經射口被看見/射擊）。 */
   losBlocked(map, x1,y1,x2,y2){
-    return (map.solids||[]).some(s=>segRect(x1,y1,x2,y2,s));
+    const blockers = (map.solids||[]).concat(map.bunkers||[]);
+    return blockers.some(s => !ptInRect(x2,y2,s) && segRect(x1,y1,x2,y2,s));
   },
 
   inBush(map, u){
     return (map.bushes||[]).some(b=> Math.hypot(u.x-b.x,u.y-b.y) <= b.r);
   },
 
-  /* 目標是否吃到掩體（射線穿過沙包/礁石，且目標貼著它 <=28px） */
+  /* 目標命中倍率（越小越受保護）。取所有掩體最佳者。
+     沙包/礁石：方向性（射線穿過且貼身 ≤28px）。工事：站進去即生效（角度無關）。 */
   coverFactor(map, sx,sy, t){
+    let f = 1.0;
     for (const sb of (map.sandbags||[]).concat(map.reefs||[])){
       const nx=clamp(t.x,sb.x,sb.x+sb.w), ny=clamp(t.y,sb.y,sb.y+sb.h);
-      const near = Math.hypot(t.x-nx,t.y-ny) <= 28;
-      if (near && segRect(sx,sy,t.x,t.y,sb)) return 0.5;
+      if (Math.hypot(t.x-nx,t.y-ny)<=28 && segRect(sx,sy,t.x,t.y,sb)){ f=Math.min(f,0.5); break; }
     }
-    return 1.0;
+    for (const b of (map.bunkers||[]))  if (ptInRect(t.x,t.y,b))  { f=Math.min(f,0.3); break; } // 碉堡：重掩體
+    for (const tr of (map.trenches||[])) if (ptInRect(t.x,t.y,tr)) { f=Math.min(f,0.4); break; } // 壕溝
+    for (const h of (map.foxholes||[]).concat(map.craters||[]))
+      if (Math.hypot(t.x-h.x,t.y-h.y)<=h.r) { f=Math.min(f,0.5); break; }                        // 散兵坑/彈坑
+    return f;
   },
 
   /* 隱蔽判定：目標在草叢且未暴露 → 看不見（除非近距/特性） */
