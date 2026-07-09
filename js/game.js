@@ -274,13 +274,16 @@ const Game = {
     const rect = this.canvas.getBoundingClientRect();
     const x = (clientX-rect.left) * (this.canvas.width/rect.width);
     const y = (clientY-rect.top) * (this.canvas.height/rect.height);
-    if (this.state==="deploy") return this.deployClick(x,y,button);
-    if (this.state==="cmd")    return this.cmdClick(x,y);
+    if (this.state==="menu"||!this.map) return;
+    // 全程 3D：把螢幕點反投影成地面世界座標（相機依狀態 overview/follow）
+    const w = (typeof Camera3D!=="undefined") ? (Camera3D.applyFor(this), Camera3D.unproject(x,y)) : [x,y];
+    if (this.state==="deploy"){ if (w) this.deployClick(w[0],w[1],button); return; }
+    if (this.state==="cmd"){    if (w) this.cmdClick(w[0],w[1]); return; }
     if (this.state==="act"){
-      // 3D：把螢幕點反投影成地面世界座標（沿用 actClick 的 unitAt/moveTarget 邏輯）
-      const w = (typeof Camera3D!=="undefined") ? Camera3D.unproject(x,y) : [x,y];
-      if (!w) return;                 // 點到地平線以上（天空）→ 忽略
-      return this.actClick(w[0], w[1]);
+      // 行動模式相對操控：按下先記步（拖曳=轉向/前進、快速輕點=瞄準/停）
+      if (Net.connected && Net.myside!==this.turnOwner) return;
+      this._steer3d = { sx:x, sy:y, wx:(w?w[0]:null), wy:(w?w[1]:null), fwd:0, turn:0, moved:false, t:Date.now() };
+      return;
     }
   },
 
@@ -326,7 +329,7 @@ const Game = {
   },
 
   enterAction(u){
-    this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null;
+    this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null; this._steer3d = null;
     let mult = Math.pow(0.7, u.actedCount);
     if (NATIONS[u.nationId].trait.id==="rapid_reaction" && this.turn===1) mult *= 1.2; // 法國
     u.ap = u.maxap * mult;
@@ -337,7 +340,7 @@ const Game = {
   },
 
   endAction(){
-    this.sel=null; this.aimTarget=null; this.moveTarget=null; UI.hideAim();
+    this.sel=null; this.aimTarget=null; this.moveTarget=null; this._steer3d=null; UI.hideAim();
     this.state="cmd";
     this.checkVictory();
     if (Net.connected && !this.over) Net.sendState();
@@ -381,22 +384,33 @@ const Game = {
   },
 
   /* 拖曳操控：手指/滑鼠移動時持續更新移動目標 */
+  /* 行動模式相對操控：拖曳的垂直分量=前進/後退、水平分量=轉向（沿用相機 yaw，穩定不甩） */
   _pointerMove(clientX, clientY){
-    if (this.state!=="act" || !this._steer || !this.sel) return;
+    if (this.state!=="act" || !this._steer3d || !this.sel) return;
     if (Net.connected && Net.myside!==this.turnOwner) return;
     const [cx,cy]=this._toWorld(clientX,clientY);           // 螢幕(canvas)座標
-    const w = (typeof Camera3D!=="undefined") ? Camera3D.unproject(cx,cy) : [cx,cy];
-    if (!w) return;                                         // 拖到天空 → 不更新
-    const [x,y]=w;
-    if (Math.hypot(x-this._steer.sx, y-this._steer.sy)>10) this._steer.moved=true;
-    this.moveTarget = { x: clamp(x,this.sel.r,960-this.sel.r), y: clamp(y,this.sel.r,600-this.sel.r) };
+    const dxs = cx - this._steer3d.sx, dys = this._steer3d.sy - cy; // 上為正
+    if (Math.hypot(dxs,dys) > 8) this._steer3d.moved = true;
+    this._steer3d.fwd  = clamp(dys/70, -1, 1);              // 拖上→前進、拖下→後退
+    this._steer3d.turn = clamp(dxs/110, -1, 1);             // 拖右→右轉、拖左→左轉
   },
-  /* 放開：長按/拖曳 → 立刻停；快速輕點 → 保留目標走到定點 */
+  /* 放開：快速輕點=瞄準/停；拖曳=結束操控（停止移動） */
   _pointerUp(){
-    if (!this._steer) return;
-    const held=Date.now()-this._steer.t;
-    if (!(held<260 && !this._steer.moved)) this.moveTarget=null;
-    this._steer=null;
+    if (!this._steer3d) return;
+    const held = Date.now() - this._steer3d.t;
+    if (held < 260 && !this._steer3d.moved){
+      // 輕點：點到敵人立繪 → 瞄準；否則視為停止
+      const wx=this._steer3d.wx, wy=this._steer3d.wy;
+      if (wx!=null && this.sel){
+        const foe = this.unitAt(wx,wy);
+        if (foe && foe.side!==this.playerSide && Combat.canSee(this.map,this.sel,foe,this.turn)){
+          this.aimTarget=foe; UI.showAim(this.sel,foe);
+        } else if (foe && foe.side===this.playerSide && foe.cls==="tank" && this.sel.cls==="engineer"){
+          this.actClick(wx,wy);   // 工兵修理沿用原邏輯
+        }
+      }
+    }
+    this._steer3d = null;   // 放開即停
   },
   _toWorld(clientX, clientY){
     const r=this.canvas.getBoundingClientRect();
@@ -444,7 +458,7 @@ const Game = {
   inAny(rects,x,y){ return rects && rects.some(r=>ptInRect(x,y,r)); },
   isWater(x,y){ const m=this.map; return this.inAny(m.waters,x,y)||this.inAny(m.deepwaters,x,y)||this.inAny(m.shallows,x,y); },
 
-  moveUnit(u, dx, dy, dt){
+  moveUnit(u, dx, dy, dt, setFacing=true){
     let speed = u.domain==="air" ? 160 : u.domain==="sea" ? (u.big?60:95) : (u.cls==="tank"?70:100); // px/s
     if (this.state==="enemy") speed *= 2.5; // 敵方階段快轉（戰棋慣例，不影響規則）
     let nx = u.x + dx*speed*dt, ny = u.y + dy*speed*dt;
@@ -476,28 +490,24 @@ const Game = {
     if (u.domain==="land" && this.inAny(this.map.shallows,nx,ny)) apCost*=2; // 涉淺灘
     if (Combat.inBush(this.map,u) && NATIONS[u.nationId].trait.id==="tunnel_war") apCost*=0.5; // 越南
     if (u.ap < apCost) return false;
-    u.ap -= apCost; u.x=nx; u.y=ny; u.facing=Math.atan2(dy,dx);
+    u.ap -= apCost; u.x=nx; u.y=ny; if (setFacing) u.facing=Math.atan2(dy,dx);
     if (this.state==="act" && u.side===this.playerSide){ this._fogT=(this._fogT||0)+dt; if(this._fogT>0.1){ this._fogT=0; Fog.recompute(); } }
     return moved>0;
   },
 
   updateAct(dt){
     const u=this.sel; if(!u||!u.alive){ this.endAction(); return; }
-    let dx=0,dy=0;
-    if (this.keys["w"]||this.keys["arrowup"]) dy-=1;
-    if (this.keys["s"]||this.keys["arrowdown"]) dy+=1;
-    if (this.keys["a"]||this.keys["arrowleft"]) dx-=1;
-    if (this.keys["d"]||this.keys["arrowright"]) dx+=1;
-    if (dx||dy) this.moveTarget=null;               // 鍵盤操作時取消點擊移動目標
-    // 點擊移動：朝目標點前進（手機主要移動方式）
-    if (!dx && !dy && this.moveTarget){
-      const mx=this.moveTarget.x-u.x, my=this.moveTarget.y-u.y, d=Math.hypot(mx,my);
-      if (d<8 || u.ap<2){ this.moveTarget=null; }
-      else { dx=mx/d; dy=my/d; }
-    }
-    if (dx||dy){
-      const n=Math.hypot(dx,dy);
-      const moved = this.moveUnit(u,dx/n,dy/n,dt);
+    // 相對相機操控（GDD/07 P3）：前進沿面向、轉向改面向 → 相機 yaw 跟著平滑，不左右亂甩
+    let fwd=0, turn=0;
+    if (this.keys["w"]||this.keys["arrowup"])   fwd+=1;
+    if (this.keys["s"]||this.keys["arrowdown"]) fwd-=1;
+    if (this.keys["a"]||this.keys["arrowleft"]) turn-=1;
+    if (this.keys["d"]||this.keys["arrowright"])turn+=1;
+    if (this._steer3d){ fwd+=this._steer3d.fwd; turn+=this._steer3d.turn; }
+    fwd=clamp(fwd,-1,1); turn=clamp(turn,-1,1);
+    if (turn) u.facing += turn * 2.2 * dt;          // 轉向速率 2.2 rad/s
+    if (Math.abs(fwd)>0.02){
+      const moved = this.moveUnit(u, Math.cos(u.facing)*fwd, Math.sin(u.facing)*fwd, dt, false); // false=不由移動覆寫面向
       if (moved){
         this.pushFx(Combat.interceptTick(this.map,u,dt)); // 敵方警戒射擊
         if (!u.alive || u.hp<=0){ this.endAction(); return; }
@@ -637,10 +647,9 @@ const Game = {
     const c=this.ctx, m=this.map;
     c.clearRect(0,0,960,600);
     if (this.state==="menu"||!m) return;
-    // 行動模式：偽 3D 第三人稱渲染（GDD/07 P2）。其餘狀態維持俯視。
-    if (this.state==="act" && this.sel && typeof Render3D!=="undefined"){
-      Render3D.draw(c, this); this.drawHint(c); return;
-    }
+    // 全程偽 3D 斜角戰場（GDD/07）：部署/指令/敵方=俯瞰、行動=第三人稱。
+    if (typeof Render3D!=="undefined"){ Render3D.draw(c, this); this.drawHint(c); return; }
+    // 後備：Render3D 未載入時回到俯視（零依賴保險）
     if (!this._bg || this._bgMap!==m) this.buildTerrain(m);
     c.drawImage(this._bg, 0, 0);
     for (const b of m.bases){

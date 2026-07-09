@@ -14,23 +14,48 @@ const Camera3D = {
   // 螢幕（canvas 邏輯尺寸，與 index.html 一致）
   W: 960, H: 600,
 
-  // 可調參數（GDD/07 §架構：D≈70,H≈90 待調 → P2 視覺調校後定值）
-  dist: 84,          // 相機在單位後方的水平距離 D
-  height: 104,       // 相機離地高度 H
-  pitch: 0.36,       // 俯角（弧度，約 20.6°）— 使地平線落在畫面上 1/5，露出天空
-  focal: 470,        // 焦距（決定 FOV；960 寬 → 視角約 91°）
-  nearZ: 1,          // 近裁剪：深度 <= nearZ 視為在相機後方/太近，剔除
+  // 兩種相機模式的參數
+  // follow：跟隨選中單位的第三人稱（行動模式）
+  fDist: 84, fHeight: 104, fPitch: 0.36, fFocal: 470,
+  // overview：斜角俯瞰整個戰場（部署/指令/敵方回合）—露出天空與前景地面
+  oPitch: 0.50, oFocal: 430, oHeight: 430, oBack: 400,
 
-  // 目前相機狀態（由 update() 設定）
+  // 目前生效的投影參數（project/unproject/horizonY/depthOf 皆讀這些）
+  pitch: 0.36, focal: 470, nearZ: 1,
+  mode: "overview",
+
+  // 目前相機狀態
   cx: 0, cy: 0, ch: 0, yaw: 0,
 
-  /* 依選中單位設定相機（yaw = 單位面向；相機退到其後上方） */
+  /* 依遊戲狀態自動選相機模式：行動且有選中單位→follow，其餘→overview */
+  applyFor(G){
+    if (G.state === "act" && G.sel) this.update(G.sel);
+    else this.setOverview(G.map, G.playerSide);
+    return this;
+  },
+
+  /* follow：相機退到選中單位後上方，yaw = 單位面向 */
   update(u){
     const f = (u && typeof u.facing === "number") ? u.facing : 0;
+    this.mode = "follow";
+    this.pitch = this.fPitch; this.focal = this.fFocal;
     this.yaw = f;
-    this.cx = u.x - Math.cos(f) * this.dist;
-    this.cy = u.y - Math.sin(f) * this.dist;
-    this.ch = this.height;
+    this.cx = u.x - Math.cos(f) * this.fDist;
+    this.cy = u.y - Math.sin(f) * this.fDist;
+    this.ch = this.fHeight;
+    return this;
+  },
+
+  /* overview：從玩家一側斜角高空俯瞰全場（玩家部隊在近景、敵方在遠景） */
+  setOverview(map, playerSide){
+    this.mode = "overview";
+    this.pitch = this.oPitch; this.focal = this.oFocal;
+    const base = map && (map.bases || []).find(b => b.side === playerSide);
+    const lookPlus = base ? base.x < 480 : true;   // 玩家在左半 → 面向 +x
+    this.yaw = lookPlus ? 0 : Math.PI;
+    this.ch = this.oHeight;
+    this.cx = lookPlus ? -this.oBack : 960 + this.oBack; // 退到玩家邊界外
+    this.cy = 300;
     return this;
   },
 

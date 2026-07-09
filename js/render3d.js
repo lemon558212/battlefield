@@ -14,8 +14,8 @@ const Render3D = {
 
   draw(ctx, G){
     const cam = Camera3D, m = G.map;
-    if (!G.sel) return;
-    cam.update(G.sel);
+    cam.applyFor(G);                       // 依狀態選 follow / overview 相機
+    const act = (cam.mode === "follow");
     const W = cam.W, H = cam.H;
     const hy = Math.max(0, Math.min(H, cam.horizonY()));
 
@@ -37,7 +37,9 @@ const Render3D = {
 
     // 地面貼附裝飾（平面，畫在立體物件之下）
     this._decals(ctx, cam, m);
-    if (G.sel.weapon) this._rangeRing(ctx, cam, G.sel);
+    // 部署階段：畫出我方部署區（地面藍色虛線框）
+    if (G.state === "deploy" && m.deploy){ const z = m.deploy[G.playerSide]; if (z) this._deployZone(ctx, cam, z); }
+    if (act && G.sel && G.sel.weapon) this._rangeRing(ctx, cam, G.sel);
 
     // 立體物件（建築盒 + 單位立繪 + 主堡），依深度由遠到近排序
     const draws = [];
@@ -63,8 +65,19 @@ const Render3D = {
     // 特效（畫在最上層）
     for (const f of G.fx) this._fx(ctx, cam, f);
 
-    // 準心
-    this._crosshair(ctx, W, H, hy);
+    // 準心（僅行動模式）
+    if (act) this._crosshair(ctx, W, H, hy);
+  },
+
+  /* 部署區：地面矩形虛線框 */
+  _deployZone(ctx, cam, z){
+    const sp = this._projPoly(cam, [[z.x, z.y], [z.x + z.w, z.y], [z.x + z.w, z.y + z.h], [z.x, z.y + z.h]], 0);
+    if (!sp) return;
+    ctx.strokeStyle = "#2e6fd8"; ctx.setLineDash([8, 6]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sp[0].sx, sp[0].sy);
+    for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].sx, sp[i].sy);
+    ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(46,111,216,0.10)"; this._fillPoly(ctx, sp);
   },
 
   /* 世界線段 → 螢幕，對 nearZ 裁剪（避免相機後方點爆掉） */
