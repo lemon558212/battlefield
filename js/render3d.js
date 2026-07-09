@@ -180,12 +180,18 @@ const Render3D = {
     if (ground){ ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.ellipse(ground.sx, ground.sy, u.r * ground.scale, u.r * ground.scale * 0.45, 0, 0, 7); ctx.fill();
       if (air && baseA){ ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(ground.sx, ground.sy); ctx.lineTo(baseA.sx, baseA.sy); ctx.stroke(); } }
 
+    // 視角：由「單位面向 vs 相機看向」決定 前/後/側（自機相機在其後 → 顯示背面）
+    let rel = (((u.facing - cam.yaw) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI; // [-π,π]
+    const va = Math.abs(rel);
+    const view = va < Math.PI * 0.4 ? "back" : va > Math.PI * 0.6 ? "front" : "side";
+    const sside = rel > 0 ? 1 : -1;   // 側面時武器/朝向的左右
+
     const cx = baseA.sx, by = baseA.sy; // 立繪底部中心
     ctx.save();
-    if (u.cls === "tank") this._bbTank(ctx, cx, by, h, c, edge);
+    if (u.cls === "tank") this._bbTank(ctx, cx, by, h, c, edge, view, sside);
     else if (u.domain === "sea") this._bbShip(ctx, cx, by, h, c, edge);
     else if (u.domain === "air") this._bbAir(ctx, cx, by, h, c, edge);
-    else this._bbSoldier(ctx, cx, by, h, c, edge, u);
+    else this._bbSoldier(ctx, cx, by, h, c, edge, u, view, sside);
     ctx.restore();
 
     // 血條（立繪頂上）
@@ -197,38 +203,85 @@ const Render3D = {
     if (G.aimTarget === u && ground){ ctx.strokeStyle = "#ff5a4a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, (topA.sy + by) / 2, h * 0.6, 0, 7); ctx.stroke(); }
   },
 
-  _bbSoldier(ctx, cx, by, h, c, edge, u){
-    const w = h * 0.42;
+  /* 士兵立繪：依 view(front/back/side) 畫向，自機在相機後方 → back */
+  _bbSoldier(ctx, cx, by, h, c, edge, u, view, sside){
+    const w = h * 0.44, dir = sside || 1;
+    const skin = "#d9b48a";
     // 腿
-    ctx.fillStyle = c.dark; ctx.fillRect(cx - w * 0.32, by - h * 0.42, w * 0.24, h * 0.42); ctx.fillRect(cx + w * 0.08, by - h * 0.42, w * 0.24, h * 0.42);
-    // 身體
+    ctx.fillStyle = c.dark;
+    ctx.fillRect(cx - w * 0.30, by - h * 0.40, w * 0.22, h * 0.40);
+    ctx.fillRect(cx + w * 0.08, by - h * 0.40, w * 0.22, h * 0.40);
+    // 身體（軀幹）
     ctx.fillStyle = c.uniform; ctx.strokeStyle = edge; ctx.lineWidth = 1.4;
-    this._roundRect(ctx, cx - w / 2, by - h * 0.78, w, h * 0.42, w * 0.22); ctx.fill(); ctx.stroke();
+    const bodyW = view === "side" ? w * 0.66 : w;
+    this._roundRect(ctx, cx - bodyW / 2, by - h * 0.80, bodyW, h * 0.44, bodyW * 0.24); ctx.fill(); ctx.stroke();
+    // 軀幹亮面（立體感）
+    ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.fillRect(cx - bodyW / 2, by - h * 0.80, bodyW, h * 0.14);
+
+    const gunL = (u.cls === "sniper" || u.cls === "at" || u.cls === "mg") ? w * 1.05 : w * 0.75;
+    const gunW = (u.cls === "mg" || u.cls === "at") ? 3 : 2;
+    ctx.lineCap = "round";
+
+    if (view === "back"){
+      // 背包 + 背帶（背面辨識）
+      ctx.fillStyle = c.dark; this._roundRect(ctx, cx - bodyW * 0.32, by - h * 0.74, bodyW * 0.64, h * 0.30, 2); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 1.4;
+      this._line(ctx, cx - bodyW * 0.22, by - h * 0.80, cx - bodyW * 0.22, by - h * 0.44);
+      this._line(ctx, cx + bodyW * 0.22, by - h * 0.80, cx + bodyW * 0.22, by - h * 0.44);
+      // 槍口從肩側微露
+      ctx.strokeStyle = c.metal; ctx.lineWidth = gunW;
+      this._line(ctx, cx + bodyW * 0.4, by - h * 0.66, cx + bodyW * 0.4, by - h * 0.30);
+    } else if (view === "front"){
+      // 胸前裝備 + 武器橫持
+      ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1.4;
+      this._line(ctx, cx - bodyW * 0.22, by - h * 0.78, cx + bodyW * 0.22, by - h * 0.50);
+      ctx.strokeStyle = c.metal; ctx.lineWidth = gunW;
+      this._line(ctx, cx - w * 0.5, by - h * 0.52, cx + w * 0.2, by - h * 0.60);
+    } else {
+      // 側面：武器朝 dir
+      ctx.strokeStyle = c.metal; ctx.lineWidth = gunW;
+      this._line(ctx, cx, by - h * 0.54, cx + dir * gunL, by - h * 0.56);
+    }
+
     // 頭 + 頭盔
-    ctx.fillStyle = "#d9b48a"; ctx.beginPath(); ctx.arc(cx, by - h * 0.83, h * 0.11, 0, 7); ctx.fill();
-    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.arc(cx, by - h * 0.86, h * 0.12, Math.PI, 0); ctx.fill();
-    ctx.fillStyle = c.accent; ctx.fillRect(cx - h * 0.05, by - h * 0.90, h * 0.10, h * 0.03);
-    // 武器（右手持，橫向）
-    ctx.strokeStyle = c.metal; ctx.lineCap = "round";
-    const gunL = (u.cls === "sniper" || u.cls === "at" || u.cls === "mg") ? w * 1.0 : w * 0.7;
-    ctx.lineWidth = u.cls === "mg" || u.cls === "at" ? 3 : 2;
-    ctx.beginPath(); ctx.moveTo(cx - w * 0.1, by - h * 0.5); ctx.lineTo(cx + gunL, by - h * 0.52); ctx.stroke();
-    // 兵種字
-    ctx.fillStyle = "#fff"; ctx.font = Math.max(8, h * 0.22).toFixed(0) + "px sans-serif"; ctx.textAlign = "center";
+    const hy = by - h * 0.86;
+    if (view !== "back"){ ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(cx + (view === "side" ? dir * h * 0.03 : 0), hy + h * 0.03, h * 0.10, 0, 7); ctx.fill(); }
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.arc(cx, hy, h * 0.12, Math.PI, 0); ctx.fill();      // 頭盔罩
+    ctx.fillRect(cx - h * 0.12, hy, h * 0.24, h * 0.03);                                              // 帽簷
+    ctx.fillStyle = c.accent; ctx.fillRect(cx - h * 0.05, hy - h * 0.03, h * 0.10, h * 0.03);         // 兵種色標
+
+    // 兵種字（在頭上方）
+    ctx.fillStyle = "#fff"; ctx.font = "bold " + Math.max(8, h * 0.2).toFixed(0) + "px sans-serif"; ctx.textAlign = "center";
     const L = { rifleman: "步", assault: "突", mg: "機", mortar: "迫", sniper: "狙", at: "火", engineer: "工", specops: "特", sam: "防" }[u.cls] || "";
-    ctx.fillText(L, cx, by - h * 0.55);
+    if (h > 26) ctx.fillText(L, cx, by - h * 1.02);   // 夠大才標字，避免遠處雜亂
   },
 
-  _bbTank(ctx, cx, by, h, c, edge){
-    const w = h * 2.0;
-    ctx.fillStyle = c.uniform; ctx.strokeStyle = edge; ctx.lineWidth = 1.5;
-    // 履帶帶
-    ctx.fillStyle = c.dark; ctx.fillRect(cx - w / 2, by - h * 0.5, w, h * 0.5);
+  /* 坦克立繪：依 view 畫車體與砲管朝向 */
+  _bbTank(ctx, cx, by, h, c, edge, view, sside){
+    const w = h * 2.0, dir = sside || 1;
+    ctx.strokeStyle = edge; ctx.lineWidth = 1.5;
+    // 履帶
+    ctx.fillStyle = c.dark; ctx.fillRect(cx - w / 2, by - h * 0.52, w, h * 0.52);
+    ctx.fillStyle = "#1c1f19"; for (let gx = -w / 2; gx < w / 2; gx += w * 0.12) ctx.fillRect(cx + gx, by - h * 0.52, w * 0.05, h * 0.52);
     // 車體
-    ctx.fillStyle = c.uniform; this._roundRect(ctx, cx - w * 0.45, by - h * 0.85, w * 0.9, h * 0.5, 3); ctx.fill(); ctx.stroke();
-    // 砲塔 + 砲管（朝右）
-    ctx.fillStyle = c.metal; ctx.beginPath(); ctx.arc(cx, by - h * 0.85, h * 0.32, 0, 7); ctx.fill();
-    ctx.strokeStyle = c.metal; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, by - h * 0.9); ctx.lineTo(cx + w * 0.5, by - h * 0.95); ctx.stroke();
+    ctx.fillStyle = c.uniform; this._roundRect(ctx, cx - w * 0.46, by - h * 0.86, w * 0.92, h * 0.42, 3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.fillRect(cx - w * 0.46, by - h * 0.86, w * 0.92, h * 0.12);
+    // 砲塔
+    ctx.fillStyle = c.metal; ctx.beginPath(); ctx.arc(cx, by - h * 0.86, h * 0.34, 0, 7); ctx.fill();
+    ctx.strokeStyle = c.metal; ctx.lineWidth = 3.5;
+    if (view === "back"){
+      // 尾部：排氣柵 + 無砲管朝前（砲管朝遠方，僅露短段）
+      ctx.fillStyle = "#3a3f36"; ctx.fillRect(cx - w * 0.3, by - h * 0.56, w * 0.6, h * 0.10);
+      ctx.strokeStyle = c.metal; ctx.beginPath(); ctx.moveTo(cx, by - h * 0.92); ctx.lineTo(cx, by - h * 1.02); ctx.stroke();
+    } else if (view === "front"){
+      // 車頭：頭燈 + 砲管朝觀者（短）
+      ctx.beginPath(); ctx.moveTo(cx, by - h * 0.90); ctx.lineTo(cx, by - h * 1.05); ctx.stroke();
+      ctx.fillStyle = "#e8e0a0"; ctx.beginPath(); ctx.arc(cx - w * 0.34, by - h * 0.5, h * 0.06, 0, 7); ctx.arc(cx + w * 0.34, by - h * 0.5, h * 0.06, 0, 7); ctx.fill();
+    } else {
+      // 側面：砲管朝 dir
+      ctx.beginPath(); ctx.moveTo(cx, by - h * 0.92); ctx.lineTo(cx + dir * w * 0.5, by - h * 0.96); ctx.stroke();
+    }
+    ctx.fillStyle = "#e8c06a"; ctx.fillRect(cx - w * 0.42, by - h * 0.44, h * 0.14, h * 0.14); // 弱點
   },
 
   _bbShip(ctx, cx, by, h, c, edge){
@@ -246,6 +299,7 @@ const Render3D = {
   },
 
   _roundRect(ctx, x, y, w, h, r){ ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); },
+  _line(ctx, x1, y1, x2, y2){ ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
 
   /* 特效投影（tracer/boom/hitfx/death） */
   _fx(ctx, cam, f){
