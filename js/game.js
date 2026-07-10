@@ -38,6 +38,7 @@ const Game = {
     this.canvas.addEventListener("touchend", e=>{ if(e.cancelable) e.preventDefault(); this._pointerUp(); }, {passive:false});
     this.canvas.addEventListener("contextmenu", e=>e.preventDefault());
     if (typeof Camera3D !== "undefined") Camera3D.selfTest(); // P1 投影校正（GDD/07），console 應見 PASS
+    if (typeof Engine3D !== "undefined") Engine3D.init();      // 真 3D（GDD/08）；失敗自動回退偽 3D
     UI.showMenu();
     const raf = ts=>{ this.loop(ts); requestAnimationFrame(raf); };
     requestAnimationFrame(raf);
@@ -727,7 +728,15 @@ const Game = {
     const c=this.ctx, m=this.map;
     c.clearRect(0,0,960,600);
     if (this.state==="menu"||!m) return;
-    // 全程偽 3D 斜角戰場（GDD/07）：部署/指令/敵方=俯瞰、行動=第三人稱。
+    // 真 3D（GDD/08）：WebGL 畫世界、2D canvas 疊 HUD
+    if (typeof Engine3D!=="undefined" && Engine3D.ok){
+      Camera3D.applyFor(this);
+      Engine3D.render(this);
+      Engine3D.overlay(c, this);
+      this.drawHint(c);
+      return;
+    }
+    // 後備：偽 3D 斜角戰場（GDD/07）
     if (typeof Render3D!=="undefined"){ Render3D.draw(c, this); this.drawHint(c); return; }
     // 後備：Render3D 未載入時回到俯視（零依賴保險）
     if (!this._bg || this._bgMap!==m) this.buildTerrain(m);
