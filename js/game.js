@@ -623,6 +623,26 @@ const Game = {
       c.fillStyle="rgba(0,0,0,"+(0.03+rnd()*0.05).toFixed(3)+")"; c.beginPath(); c.ellipse(x,y,r,r*0.7,0,0,7); c.fill(); }
     for (let i=0;i<260;i++){ const x=rnd()*960,y=rnd()*600;
       c.strokeStyle="rgba(255,255,255,0.045)"; c.beginPath(); c.moveTo(x,y); c.lineTo(x+rnd()*3-1.5,y-2-rnd()*3); c.stroke(); }
+    // 大片地貌色斑帶（乾草/深綠/土斑），打破單色感
+    for (let i=0;i<7;i++){ const x=rnd()*960,y=rnd()*600,r=60+rnd()*120,a=rnd()*7;
+      const hues=["rgba(150,140,80,0.10)","rgba(60,80,40,0.12)","rgba(130,105,70,0.10)","rgba(160,155,110,0.09)"];
+      c.fillStyle=hues[i%hues.length]; c.beginPath(); c.ellipse(x,y,r,r*(0.45+rnd()*0.4),a,0,7); c.fill(); }
+    // 基地間泥土道路（僅陸戰圖）：帶寬度抖動的土色帶 + 車轍
+    if ((m.allow||["land"]).includes("land") && m.bases && m.bases.length===2 && !m.deepwaters){
+      const A=m.bases[0], B=m.bases[1], mx=(A.x+B.x)/2+(rnd()*120-60), my=(A.y+B.y)/2+(rnd()*160-80);
+      const pt=t=>{ const ix=(1-t)*(1-t)*A.x+2*(1-t)*t*mx+t*t*B.x, iy=(1-t)*(1-t)*A.y+2*(1-t)*t*my+t*t*B.y; return [ix,iy]; };
+      c.strokeStyle="rgba(122,100,66,0.85)"; c.lineCap="round";
+      for(let s=0;s<=40;s++){ const [x1,y1]=pt(s/40),[x2,y2]=pt(Math.min(1,(s+1)/40));
+        c.lineWidth=14+rnd()*8; c.beginPath(); c.moveTo(x1,y1); c.lineTo(x2,y2); c.stroke(); }
+      c.strokeStyle="rgba(80,64,40,0.5)"; c.lineWidth=2;   // 車轍兩道
+      for(const off of [-4,4]){ c.beginPath();
+        for(let s=0;s<=40;s++){ const [x,y]=pt(s/40); s?c.lineTo(x,y+off):c.moveTo(x,y+off); } c.stroke(); }
+    }
+    // 碎石群
+    for (let i=0;i<26;i++){ const x=rnd()*960,y=rnd()*600,r=1.5+rnd()*3;
+      c.fillStyle=`rgba(${110+rnd()*40|0},${110+rnd()*35|0},${100+rnd()*30|0},0.8)`;
+      c.beginPath(); c.arc(x,y,r,0,7); c.fill();
+      c.fillStyle="rgba(0,0,0,0.15)"; c.beginPath(); c.arc(x+1,y+1,r*0.8,0,7); c.fill(); }
     // 水域：帶波紋
     const water=(list,base,wave)=>{ for(const w of (list||[])){
       c.fillStyle=base; c.fillRect(w.x,w.y,w.w,w.h);

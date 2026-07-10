@@ -113,7 +113,7 @@ const Render3D = {
   _floor(ctx, cam, G, hy){
     const m = G.map, W = cam.W, H = cam.H;
     if (!G._bg || G._bgMap !== m) G.buildTerrain(m);
-    const key = m.id + "|" + [cam.cx, cam.cy, cam.ch, cam.yaw, cam.pitch, cam.focal].map(v => v.toFixed(1)).join("|");
+    const key = "v2|" + m.id + "|" + [cam.cx, cam.cy, cam.ch, cam.yaw, cam.pitch, cam.focal].map(v => v.toFixed(1)).join("|"); // v 版本號：buildTerrain 內容變更時遞增
     if (this._floorKey !== key){
       this._floorKey = key;
       if (!this._floorCv){ this._floorCv = document.createElement("canvas"); this._floorCv.width = W; this._floorCv.height = H; }
@@ -296,15 +296,27 @@ const Render3D = {
     const sside = rel > 0 ? 1 : -1;   // 側面時武器/朝向的左右
 
     const cx = baseA.sx, by = baseA.sy; // 立繪底部中心
-    // AI 立繪 billboard（assets/billboards/）：士兵有 前/後 兩張，載具單張側面；缺圖用程式化 fallback
-    const isVeh = u.cls === "tank" || u.domain === "sea" || u.domain === "air";
-    const img = isVeh ? this._bbImg(u.cls)
-              : (view === "back" ? (this._bbImg(u.cls + "_back") || this._bbImg(u.cls)) : this._bbImg(u.cls));
+    // AI 立繪 billboard：坦克 8 方向(5 圖+鏡射)、士兵 前/側/背(+鏡射)、海空側面(+鏡射)
+    // 立繪素材一律「車頭/面向朝右」，sside<0（面向的螢幕分量朝左）時水平鏡射
+    let img = null, flip = false;
+    const va2 = Math.abs(rel);
+    if (u.cls === "tank"){
+      if (va2 < Math.PI * 0.125)      img = this._bbImg("tank_back");
+      else if (va2 < Math.PI * 0.375){ img = this._bbImg("tank_bq"); flip = sside < 0; }
+      else if (va2 < Math.PI * 0.625){ img = this._bbImg("tank");    flip = sside < 0; }
+      else if (va2 < Math.PI * 0.875){ img = this._bbImg("tank_fq"); flip = sside < 0; }
+      else                             img = this._bbImg("tank_front");
+      if (!img){ img = this._bbImg("tank"); flip = sside < 0; }
+    } else if (u.domain === "sea" || u.domain === "air"){
+      img = this._bbImg(u.cls); flip = sside < 0;
+    } else {
+      if (view === "back")      img = this._bbImg(u.cls + "_back") || this._bbImg(u.cls);
+      else if (view === "side"){ img = this._bbImg(u.cls + "_side") || this._bbImg(u.cls); flip = sside < 0; }
+      else                      img = this._bbImg(u.cls);
+    }
     ctx.save();
     if (img){
       const iw = h * (img.naturalWidth / img.naturalHeight);
-      // 側面時依朝向水平翻轉（載具恆依朝向翻轉）
-      const flip = isVeh ? (sside < 0) : (view === "side" && sside < 0);
       ctx.translate(cx, by);
       if (flip) ctx.scale(-1, 1);
       ctx.drawImage(img, -iw / 2, -h, iw, h);
