@@ -474,6 +474,21 @@ const Game = {
       else if (!this.map.solids.some(s=>circleRectHit(u.x,ny,u.r,s))) nx=u.x;
       else return false;
     }
+    if (u.domain==="land"){
+      // 樹木＝真障礙（樹幹圓形碰撞，沿軸滑行繞過）
+      const trunk = (px,py)=> (this.map.trees||[]).some(t=> Math.hypot(t.x-px,t.y-py) < Math.max(5,t.r*0.3)+u.r );
+      if (trunk(nx,ny)){
+        if (!trunk(nx,u.y)) ny=u.y;
+        else if (!trunk(u.x,ny)) nx=u.x;
+        else return false;
+      }
+      // 壕溝＝反戰車壕：坦克不可越（步兵可下壕）
+      if (u.cls==="tank" && this.inAny(this.map.trenches,nx,ny)){
+        if (!this.inAny(this.map.trenches,nx,u.y)) ny=u.y;
+        else if (!this.inAny(this.map.trenches,u.x,ny)) nx=u.x;
+        else return false;
+      }
+    }
     // 空中單位不互相碰撞（不同高度）；地面/海面單位同域碰撞繞行
     if (u.domain!=="air"){
       const bump = (px,py)=> this.units.some(o=>o!==u&&o.alive&&o.domain===u.domain
@@ -488,9 +503,10 @@ const Game = {
     const moved = Math.hypot(nx-u.x, ny-u.y);
     let apCost = moved/3; // 1 AP = 3px（GDD/01 §2）
     if (u.domain==="land"){
-      if (this.inAny(this.map.shallows,nx,ny)) apCost*=2;          // 涉淺灘
-      if (this.inAny(this.map.wires,nx,ny))    apCost*=2.5;        // 鐵絲網受阻（GDD/04 §2b）
-      else if (this.inAny(this.map.trenches,nx,ny)) apCost*=1.5;  // 下壕溝較慢
+      if (this.inAny(this.map.shallows,nx,ny)) apCost*=2;                       // 涉淺灘
+      if (this.inAny(this.map.wires,nx,ny)) apCost *= (u.cls==="tank"?1.2:2.5); // 鐵絲網：步兵受阻、坦克輾壓
+      else if (this.inAny(this.map.trenches,nx,ny)) apCost*=1.5;               // 步兵下壕較慢
+      else if ((this.map.craters||[]).some(cr=>Math.hypot(cr.x-nx,cr.y-ny)<=cr.r)) apCost*=1.3; // 彈坑崎嶇
     }
     if (Combat.inBush(this.map,u) && NATIONS[u.nationId].trait.id==="tunnel_war") apCost*=0.5; // 越南
     if (u.ap < apCost) return false;
@@ -643,12 +659,21 @@ const Game = {
       c.strokeStyle="rgba(40,40,40,0.7)"; c.beginPath();
       if(horiz){ c.moveTo(t.x,cym); c.lineTo(t.x+t.w,cym); } else { c.moveTo(cxm,t.y); c.lineTo(cxm,t.y+t.h); } c.stroke();
     }
-    // 樹叢：陰影 + 三層樹冠
+    // 草叢（隱蔽帶，可走入）：一片高草——底色斑 + 大量草葉（戰場女武神式）
     for(const b of m.bushes){
-      c.fillStyle="rgba(0,0,0,0.18)"; c.beginPath(); c.ellipse(b.x+5,b.y+7,b.r,b.r*0.7,0,0,7); c.fill();
-      c.fillStyle="#2f5228"; c.beginPath(); c.arc(b.x,b.y,b.r,0,7); c.fill();
-      c.fillStyle="#3c6b32"; c.beginPath(); c.arc(b.x-b.r*0.22,b.y-b.r*0.22,b.r*0.72,0,7); c.fill();
-      c.fillStyle="#4e8540"; c.beginPath(); c.arc(b.x-b.r*0.33,b.y-b.r*0.33,b.r*0.42,0,7); c.fill();
+      c.fillStyle="rgba(40,74,32,0.5)"; c.beginPath(); c.ellipse(b.x,b.y,b.r,b.r*0.8,0,0,7); c.fill();
+      c.fillStyle="rgba(66,110,48,0.55)"; c.beginPath(); c.ellipse(b.x,b.y,b.r*0.78,b.r*0.6,0,0,7); c.fill();
+      let bs=b.x*7+b.y; const brnd=()=>((bs=bs*16807%2147483647)/2147483647);
+      for(let i=0;i<Math.round(b.r*1.6);i++){
+        const a=brnd()*6.283, rr=brnd()*b.r*0.9, gx=b.x+Math.cos(a)*rr, gy=b.y+Math.sin(a)*rr*0.8;
+        c.strokeStyle=`rgba(${96+brnd()*40|0},${140+brnd()*40|0},${70+brnd()*30|0},0.8)`; c.lineWidth=1.3;
+        c.beginPath(); c.moveTo(gx,gy); c.quadraticCurveTo(gx+brnd()*4-2, gy-4-brnd()*5, gx+brnd()*6-3, gy-7-brnd()*6); c.stroke();
+      }
+    }
+    // 樹木（真障礙）：貼圖上畫樹影+樹幹根部；樹冠由 3D billboard 畫
+    for(const t of (m.trees||[])){
+      c.fillStyle="rgba(0,0,0,0.20)"; c.beginPath(); c.ellipse(t.x+4,t.y+5,t.r*0.9,t.r*0.55,0,0,7); c.fill();
+      c.fillStyle="#4a3826"; c.beginPath(); c.arc(t.x,t.y,Math.max(4,t.r*0.22),0,7); c.fill();
     }
     // 沙包：一排麻袋
     for(const s of m.sandbags){

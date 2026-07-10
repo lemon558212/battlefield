@@ -29,8 +29,8 @@ const Render3D = {
       sun.addColorStop(0, "rgba(255,246,218,0.6)"); sun.addColorStop(1, "rgba(255,246,218,0)");
       ctx.fillStyle = sun; ctx.fillRect(0, 0, W, hy);
     }
-    // 地面底色
-    ctx.fillStyle = m.ground || "#7a8f5a"; ctx.fillRect(0, hy, W, H - hy);
+    // 地面：把手繪俯視地形貼圖投影到地平面（mode7 掃描線），草地紋理/水波/壕溝/彈坑全數呈現
+    this._floor(ctx, cam, G, hy);
     // 地面縱深光影：遠處偏暗、前景落陰（增加立體）
     const gg = ctx.createLinearGradient(0, hy, 0, H);
     gg.addColorStop(0, "rgba(55,62,44,0.30)"); gg.addColorStop(0.28, "rgba(0,0,0,0)"); gg.addColorStop(1, "rgba(0,0,0,0.20)");
@@ -39,14 +39,6 @@ const Render3D = {
     const fog = ctx.createLinearGradient(0, hy, 0, hy + 120);
     fog.addColorStop(0, "rgba(236,223,196,0.65)"); fog.addColorStop(1, "rgba(236,223,196,0)");
     ctx.fillStyle = fog; ctx.fillRect(0, hy, W, 120);
-
-    // 地面格線（透視縱深提示）
-    ctx.strokeStyle = "rgba(255,255,255,0.09)"; ctx.lineWidth = 1;
-    for (let x = 0; x <= 960; x += this.GRID) this._seg(ctx, cam, x, 0, x, 600, 0);
-    for (let y = 0; y <= 600; y += this.GRID) this._seg(ctx, cam, 0, y, 960, y, 0);
-
-    // 地面貼附裝飾（平面，畫在立體物件之下）
-    this._decals(ctx, cam, m);
     // 部署階段：畫出我方部署區（地面藍色虛線框）
     if (G.state === "deploy" && m.deploy){ const z = m.deploy[G.playerSide]; if (z) this._deployZone(ctx, cam, z); }
     if (act && G.sel && G.sel.weapon) this._rangeRing(ctx, cam, G.sel);
@@ -60,6 +52,10 @@ const Render3D = {
     for (const b of (m.bunkers || [])){
       const d = cam.depthOf(b.x + b.w / 2, b.y + b.h / 2, 0);
       draws.push({ d, fn: () => this._bunker(ctx, cam, b) });
+    }
+    for (const t of (m.trees || [])){
+      const d = cam.depthOf(t.x, t.y, 0);
+      if (d > cam.nearZ) draws.push({ d, fn: () => this._tree(ctx, cam, t, m) });
     }
     for (const b of m.bases){
       const d = cam.depthOf(b.x, b.y, 0);
@@ -84,6 +80,19 @@ const Render3D = {
     vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(0,0,0,0.26)");
     ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
 
+    // 紙質顆粒 + 暖色水彩罩染（戰場女武神式手繪質感）
+    if (!this._grain){
+      const g = document.createElement("canvas"); g.width = g.height = 96;
+      const gc = g.getContext("2d"), im = gc.createImageData(96, 96);
+      let s = 12345; const rn = () => ((s = s * 16807 % 2147483647) / 2147483647);
+      for (let i = 0; i < im.data.length; i += 4){ const v = 118 + rn() * 20 | 0; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+      gc.putImageData(im, 0, 0);
+      this._grain = ctx.createPattern(g, "repeat");
+    }
+    ctx.save(); ctx.globalAlpha = 0.16; ctx.globalCompositeOperation = "overlay";
+    ctx.fillStyle = this._grain; ctx.fillRect(0, 0, W, H); ctx.restore();
+    ctx.save(); ctx.globalAlpha = 0.06; ctx.fillStyle = "#e8d9b0"; ctx.fillRect(0, 0, W, H); ctx.restore();
+
     // 準心（僅行動模式）
     if (act) this._crosshair(ctx, W, H, hy);
   },
@@ -97,6 +106,44 @@ const Render3D = {
     for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].sx, sp[i].sy);
     ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = "rgba(46,111,216,0.10)"; this._fillPoly(ctx, sp);
+  },
+
+  /* 地面貼圖投影（mode7 掃描線）：每條螢幕橫帶對應世界平面上一條帶，
+     以仿射變換把 960×600 地形貼圖(Game._bg)貼過去。相機不動時直接用快取。 */
+  _floor(ctx, cam, G, hy){
+    const m = G.map, W = cam.W, H = cam.H;
+    if (!G._bg || G._bgMap !== m) G.buildTerrain(m);
+    const key = m.id + "|" + [cam.cx, cam.cy, cam.ch, cam.yaw, cam.pitch, cam.focal].map(v => v.toFixed(1)).join("|");
+    if (this._floorKey !== key){
+      this._floorKey = key;
+      if (!this._floorCv){ this._floorCv = document.createElement("canvas"); this._floorCv.width = W; this._floorCv.height = H; }
+      const c = this._floorCv.getContext("2d");
+      c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, W, H);
+      c.fillStyle = m.ground || "#7a8f5a"; c.fillRect(0, Math.max(0, hy), W, H - Math.max(0, hy)); // 貼圖外(地圖邊界外)基色
+      const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch), cyw = Math.cos(cam.yaw), syw = Math.sin(cam.yaw);
+      const tex = G._bg, step = 3;
+      const row = (y) => { // 該螢幕列對應的世界線：P(sx)=A + side(sx)*dir
+        const u = (H / 2 - y) / cam.focal, den = sp - u * cp;
+        if (den <= 1e-4) return null;
+        const fwd = cam.ch * (cp + u * sp) / den, depth = fwd * cp + cam.ch * sp, k = depth / cam.focal;
+        const s0 = -W / 2 * k; // sx=0 的 side
+        return { ax: cam.cx + fwd * cyw - s0 * syw, ay: cam.cy + fwd * syw + s0 * cyw, dx: -syw * k, dy: cyw * k };
+      };
+      for (let y = Math.max(0, Math.ceil(hy)) + 1; y < H; y += step){
+        const r0 = row(y), r1 = row(y + step);
+        if (!r0) continue;
+        const bdx = r1 ? (r1.ax - r0.ax) / step : 0, bdy = r1 ? (r1.ay - r0.ay) / step : 0;
+        const det = r0.dx * bdy - bdx * r0.dy;
+        if (Math.abs(det) < 1e-9) continue;
+        const i11 = bdy / det, i12 = -bdx / det, i21 = -r0.dy / det, i22 = r0.dx / det; // 世界→螢幕 2×2 反矩陣
+        c.save(); c.beginPath(); c.rect(0, y, W, step + 1); c.clip();
+        c.setTransform(i11, i21, i12, i22, -i11 * r0.ax - i12 * r0.ay, y - i21 * r0.ax - i22 * r0.ay);
+        c.drawImage(tex, 0, 0);
+        c.restore();
+      }
+      c.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    ctx.drawImage(this._floorCv, 0, 0);
   },
 
   /* 世界線段 → 螢幕，對 nearZ 裁剪（避免相機後方點爆掉） */
@@ -123,26 +170,7 @@ const Render3D = {
     ctx.closePath(); ctx.fill();
   },
 
-  /* 地面平面裝飾：水域、礁石、樹叢、沙包 */
-  _decals(ctx, cam, m){
-    const quad = (r, fill) => { const sp = this._projPoly(cam, [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]], 0); if (sp){ ctx.fillStyle = fill; this._fillPoly(ctx, sp); } };
-    for (const w of (m.deepwaters || [])) quad(w, "#244b66");
-    for (const w of (m.waters || [])) quad(w, "#356782");
-    for (const w of (m.shallows || [])) quad(w, "#6ea3b8");
-    for (const w of (m.reefs || [])) quad(w, "#5a5f52");
-    for (const s of (m.sandbags || [])) quad(s, "#a8905c");
-    // 工事（地面平面）
-    for (const t of (m.trenches || [])){ quad({ x: t.x - 2, y: t.y - 2, w: t.w + 4, h: t.h + 4 }, "#6a5c44"); quad(t, "#332c1f"); }
-    for (const w of (m.wires || [])) quad(w, "rgba(45,45,45,0.85)");
-    const pit = (h, fill) => { const c = cam.project(h.x, h.y, 0); if (!c) return; ctx.fillStyle = fill; ctx.beginPath(); ctx.ellipse(c.sx, c.sy, h.r * c.scale, h.r * c.scale * 0.5, 0, 0, 7); ctx.fill(); };
-    for (const h of (m.craters || [])){ pit(h, "rgba(0,0,0,0.30)"); pit({ x: h.x, y: h.y, r: h.r * 0.7 }, "#4a3d2c"); }
-    for (const h of (m.foxholes || [])) pit({ x: h.x, y: h.y, r: h.r }, "#3f3626");
-    for (const b of (m.bushes || [])){
-      const c = cam.project(b.x, b.y, 0); if (!c) continue;
-      ctx.fillStyle = "rgba(47,82,40,0.9)";
-      ctx.beginPath(); ctx.ellipse(c.sx, c.sy, b.r * c.scale, b.r * c.scale * 0.5, 0, 0, 7); ctx.fill();
-    }
-  },
+  /* （水域/工事/草叢的地面外觀已由 _floor 貼圖投影呈現，不再另畫色塊） */
 
   /* 射程圈：沿地面取樣成環 */
   _rangeRing(ctx, cam, u){
@@ -197,6 +225,30 @@ const Render3D = {
     }
     ctx.fillStyle = "#a6a399"; this._fillPoly(ctx, top);
     ctx.strokeStyle = "#4a473f"; ctx.lineWidth = 1.5; this._fillPathStroke(ctx, top);
+  },
+
+  /* 樹木（真障礙）：樹幹 + 疊層樹冠 billboard。verdun 枯樹(r 小)畫禿枝 */
+  _tree(ctx, cam, t, m){
+    const base = cam.project(t.x, t.y, 0); if (!base) return;
+    const hTree = t.r < 18 ? 30 : 40 + t.r * 0.5;              // 枯樹較矮
+    const top = cam.project(t.x, t.y, hTree); if (!top) return;
+    const h = base.sy - top.sy, sc = base.scale;
+    const trunkW = Math.max(2, t.r * 0.22 * sc);
+    // 樹幹
+    ctx.fillStyle = "#4a3826";
+    ctx.fillRect(base.sx - trunkW / 2, top.sy + h * 0.35, trunkW, h * 0.65);
+    if (t.r < 18){ // 枯樹：幾根禿枝
+      ctx.strokeStyle = "#4a3826"; ctx.lineWidth = Math.max(1.5, trunkW * 0.5); ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(base.sx, top.sy + h * 0.5); ctx.lineTo(base.sx - h * 0.18, top.sy + h * 0.22);
+      ctx.moveTo(base.sx, top.sy + h * 0.4); ctx.lineTo(base.sx + h * 0.15, top.sy + h * 0.12);
+      ctx.moveTo(base.sx, top.sy + h * 0.62); ctx.lineTo(base.sx + h * 0.12, top.sy + h * 0.42); ctx.stroke();
+      return;
+    }
+    // 樹冠：三層由暗到亮（左上受光）
+    const cr = t.r * sc;
+    ctx.fillStyle = "#2c4a24"; ctx.beginPath(); ctx.arc(base.sx + cr * 0.12, top.sy + h * 0.34, cr, 0, 7); ctx.fill();
+    ctx.fillStyle = "#3a6030"; ctx.beginPath(); ctx.arc(base.sx - cr * 0.10, top.sy + h * 0.26, cr * 0.8, 0, 7); ctx.fill();
+    ctx.fillStyle = "#4c7a3c"; ctx.beginPath(); ctx.arc(base.sx - cr * 0.22, top.sy + h * 0.18, cr * 0.52, 0, 7); ctx.fill();
   },
 
   /* 主堡：地面圓 + 旗桿 */
