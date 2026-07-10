@@ -46,7 +46,64 @@ const Engine3D = {
       this.scene.add(sun); this.scene.add(sun.target);
 
       this.ok = true;
+      this.loadModels();
     } catch (e){ console.warn("Engine3D 初始化失敗，回退偽3D：", e); this.ok = false; }
+  },
+
+  /* ---------- GLB 模型（CC0，assets/models/）：非同步載入，完成後重建單位 ----------
+   * 自動：量包圍盒→縮放到遊戲尺寸→貼地→軸向(長邊=車頭方向)；rotY 為「模型頭朝向修正」。
+   * 含 SkinnedMesh 的模型無法簡單 clone → 跳過（維持幾何體），避免共享骨架災難。 */
+  _models: {},
+  loadModels(){
+    if (typeof THREE.GLTFLoader === "undefined") return;
+    const loader = new THREE.GLTFLoader();
+    const defs = {
+      tank:    { url: "assets/models/tank.glb",    len: 34, rotY: Math.PI },     // 頂點分析：砲管原朝 -x
+      soldier: { url: "assets/models/soldier.glb", h: 19,  rotY: Math.PI / 2 }   // 人物慣例面朝 +z → 轉到 +x
+    };
+    for (const key in defs){
+      const d = defs[key];
+      loader.load(d.url, g => {
+        const s = g.scene;
+        s.traverse(o => { if (o.isMesh){ o.castShadow = true; } });
+        const box = new THREE.Box3().setFromObject(s), sz = box.getSize(new THREE.Vector3());
+        if (d.len && sz.z > sz.x) s.rotation.y = Math.PI / 2;          // 長邊轉到 +x（車頭軸）
+        const box1 = new THREE.Box3().setFromObject(s), sz1 = box1.getSize(new THREE.Vector3());
+        const k = d.len ? d.len / Math.max(sz1.x, 0.001) : d.h / Math.max(sz1.y, 0.001);
+        s.scale.setScalar(k);
+        const box2 = new THREE.Box3().setFromObject(s);
+        s.position.y -= box2.min.y;                                     // 貼地
+        s.position.x -= (box2.min.x + box2.max.x) / 2;                  // 置中
+        s.position.z -= (box2.min.z + box2.max.z) / 2;
+        this._models[key] = { scene: s, rotY: d.rotY, anims: g.animations || [] };
+        for (const id in this._units){ this.scene.remove(this._units[id]); } // 重建套用模型
+        this._units = {};
+      }, undefined, () => {});
+    }
+  },
+  /* 複製模型（骨架安全 clone）＋國家染色＋動畫 mixer（idle/walk） */
+  _mixers: {},
+  _cloneModel(key, u){
+    const m = this._models[key];
+    if (!m) return null;
+    const c = (typeof THREE.SkeletonUtils !== "undefined") ? THREE.SkeletonUtils.clone(m.scene) : m.scene.clone(true);
+    const tint = new THREE.Color(NATIONS[u.nationId].uniformColor);
+    c.traverse(o => {
+      if (o.isMesh){ o.material = o.material.clone(); if (o.material.color) o.material.color.lerp(tint, 0.3); o.castShadow = true; o.frustumCulled = false; }
+    });
+    if (m.anims.length){
+      const mixer = new THREE.AnimationMixer(c);
+      const pick = re => m.anims.find(a => re.test(a.name));
+      const idle = pick(/idle/i) || m.anims[0];
+      const walk = pick(/walk|run|move/i);
+      const actions = { idle: mixer.clipAction(idle), walk: walk ? mixer.clipAction(walk) : null };
+      actions.idle.play();
+      this._mixers[u.id] = { mixer, actions, cur: "idle" };
+    }
+    const wrap = new THREE.Group();
+    c.rotation.y += m.rotY;
+    wrap.add(c);
+    return wrap;
   },
 
   /* ---------- 靜態地圖場景 ---------- */
@@ -143,6 +200,8 @@ const Engine3D = {
     const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
 
     if (u.cls === "tank"){
+      const mdl = this._cloneModel("tank", u);
+      if (mdl){ g.add(mdl); this._addRing(g, u, G); return g; }
       add(new THREE.Mesh(new THREE.BoxGeometry(30, 8, 20), bodyMat), 0, 8, 0);            // 車體
       add(new THREE.Mesh(new THREE.BoxGeometry(32, 5, 4), darkMat), 0, 3, -11);            // 履帶
       add(new THREE.Mesh(new THREE.BoxGeometry(32, 5, 4), darkMat), 0, 3, 11);
@@ -173,6 +232,8 @@ const Engine3D = {
       }
     } else {
       // 士兵
+      const mdl = this._cloneModel("soldier", u);
+      if (mdl){ g.add(mdl); this._addRing(g, u, G); return g; }
       add(new THREE.Mesh(new THREE.BoxGeometry(3.6, 7, 4.6), darkMat), 0, 3.5, 0);         // 腿
       add(new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.9, 8, 8), bodyMat), 0, 11, 0);  // 軀幹
       add(new THREE.Mesh(new THREE.SphereGeometry(2.5, 8, 7), new THREE.MeshLambertMaterial({ color: 0xd9b48a })), 0, 17.5, 0);
@@ -181,11 +242,13 @@ const Engine3D = {
       add(new THREE.Mesh(new THREE.BoxGeometry(gunL, 1.2, 1.2), metalMat), gunL / 2 + 1, 12.5, 1.8); // 武器(+x)
       if (u.cls === "at" || u.cls === "sam"){ const tube = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 12, 7), darkMat); tube.rotation.z = -Math.PI / 2; add(tube, 2, 16.5, -1.5); }
     }
-    // 敵我識別環
+    this._addRing(g, u, G);
+    return g;
+  },
+  _addRing(g, u, G){
     const col = u.side === G.playerSide ? 0x5b9bff : 0xff6f5a;
     const ring = new THREE.Mesh(new THREE.RingGeometry(u.r + 1, u.r + 3, 20), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.3; g.add(ring);
-    return g;
   },
 
   syncUnits(G){
@@ -198,12 +261,20 @@ const Engine3D = {
       if (!g){ g = this._units[u.id] = this._mkUnit(u, G); this.scene.add(g); }
       g.visible = vis;
       const alt = u.domain === "air" ? 52 : 0;
+      const moved = Math.hypot(g.position.x - u.x, g.position.z - u.y) > 0.4;
       g.position.set(u.x, alt, u.y);
       g.rotation.y = -u.facing;
+      // 動畫：移動→walk、靜止→idle
+      const mx = this._mixers[u.id];
+      if (mx && mx.actions.walk){
+        const want = moved ? "walk" : "idle";
+        if (want !== mx.cur){ mx.actions[mx.cur].stop(); mx.actions[want].play(); mx.cur = want; }
+      }
       seen[u.id] = 1;
     }
     for (const id in this._units){
-      if (!seen[id]){ this.scene.remove(this._units[id]); delete this._units[id]; }
+      if (!seen[id]){ this.scene.remove(this._units[id]); delete this._units[id];
+        if (this._mixers[id]){ delete this._mixers[id]; } }
     }
     if (this._rotor) this._rotor.rotation.y += 0.5; // 直升機旋翼
   },
@@ -213,6 +284,9 @@ const Engine3D = {
     if (!this.ok) return;
     if (this._mapRef !== G.map){ this.buildMap(G); this._mapRef = G.map; }
     this.syncUnits(G);
+    // 動畫推進
+    const now = performance.now(), dt = Math.min(0.05, (now - (this._at || now)) / 1000); this._at = now;
+    for (const id in this._mixers) this._mixers[id].mixer.update(dt);
     const cam = Camera3D;
     this.camera.fov = 2 * Math.atan(300 / cam.focal) * 180 / Math.PI;
     this.camera.updateProjectionMatrix();
