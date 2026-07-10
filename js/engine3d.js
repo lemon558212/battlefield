@@ -97,8 +97,12 @@ const Engine3D = {
     const c = (typeof THREE.SkeletonUtils !== "undefined") ? THREE.SkeletonUtils.clone(m.scene) : m.scene.clone(true);
     const tint = new THREE.Color(NATIONS[u.nationId].uniformColor);
     c.traverse(o => {
-      if (o.isMesh){ o.material = o.material.clone(); if (o.material.color) o.material.color.lerp(tint, 0.3); o.castShadow = true; o.frustumCulled = false; }
+      if (o.isMesh){ o.material = o.material.clone(); if (o.material.color) o.material.color.lerp(tint, 0.3); o.castShadow = true; o.frustumCulled = false;
+        if (u.cls === "specops" && o.material.color) o.material.color.multiplyScalar(0.5); }   // 特種兵低視度黑
     });
+    // 兵種體格微調（剪影差異第二層）
+    const bulk = { mg: 1.1, at: 1.06, engineer: 1.04, sniper: 0.95, specops: 0.97 }[u.cls];
+    if (bulk && key === "soldier") c.scale.multiplyScalar(bulk);
     if (m.anims.length){
       const mixer = new THREE.AnimationMixer(c);
       const pick = re => m.anims.find(a => re.test(a.name));
@@ -257,10 +261,15 @@ const Engine3D = {
     const steelMat = new THREE.MeshLambertMaterial({ color: 0x8a9099 });
     const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
 
-    // 模型優先（士兵共用 soldier；各載具依 cls；缺檔/載入中回退下方幾何體）
-    const modelKey = (u.domain === "land" && u.cls !== "tank") ? "soldier" : u.cls;
+    // 模型優先（士兵共用 soldier 骨架＋兵種專屬裝備；各載具依 cls；缺檔/載入中回退下方幾何體）
+    const isInfantry = u.domain === "land" && u.cls !== "tank";
+    const modelKey = isInfantry ? "soldier" : u.cls;
     const mdl0 = this._cloneModel(modelKey, u);
-    if (mdl0){ g.add(mdl0); this._addRing(g, u, G); return g; }
+    if (mdl0){
+      g.add(mdl0);
+      if (isInfantry) g.add(this._classGear(u));
+      this._addRing(g, u, G); return g;
+    }
 
     if (u.cls === "tank"){
       add(new THREE.Mesh(new THREE.BoxGeometry(30, 8, 20), bodyMat), 0, 8, 0);            // 車體
@@ -299,11 +308,89 @@ const Engine3D = {
       add(new THREE.Mesh(new THREE.SphereGeometry(2.9, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), darkMat), 0, 18.2, 0); // 頭盔
       const gunL = (u.cls === "sniper" || u.cls === "mg" || u.cls === "at") ? 12 : 9;
       add(new THREE.Mesh(new THREE.BoxGeometry(gunL, 1.2, 1.2), metalMat), gunL / 2 + 1, 12.5, 1.8); // 武器(+x)
-      if (u.cls === "at" || u.cls === "sam"){ const tube = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 12, 7), darkMat); tube.rotation.z = -Math.PI / 2; add(tube, 2, 16.5, -1.5); }
+      g.add(this._classGear(u));   // 幾何體 fallback 也掛兵種裝備
     }
     this._addRing(g, u, G);
     return g;
   },
+  /* ---------- 兵種專屬裝備（掛在士兵模型上，一眼認出兵種） ----------
+   * 座標系：+x 前方、y 上、z 右手側。士兵高 19，肩高約 12~14。 */
+  _classGear(u){
+    const kit = new THREE.Group();
+    const dark  = new THREE.MeshLambertMaterial({ color: 0x2b2f27 });
+    const metal = new THREE.MeshLambertMaterial({ color: 0x596157 });
+    const olive = new THREE.MeshLambertMaterial({ color: 0x4a5d3a });
+    const tan   = new THREE.MeshLambertMaterial({ color: 0x8a744e });
+    const red   = new THREE.MeshLambertMaterial({ color: 0xc23b2e });
+    const put = (mesh, x, y, z, rz = 0, rx = 0) => {
+      mesh.position.set(x, y, z); mesh.rotation.z = rz; mesh.rotation.x = rx;
+      mesh.castShadow = true; kit.add(mesh); return mesh;
+    };
+    const box = (w, h, d, mat) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    const cyl = (r, len, mat, seg = 7) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg), mat);
+
+    switch (u.cls){
+      case "rifleman":   // 步槍兵：制式小背包＋水壺
+        put(box(2.6, 4.2, 4.6, olive), -2.6, 11.5, 0);
+        put(cyl(0.9, 2.2, tan), -1.8, 7.5, 2.6);
+        break;
+      case "assault":    // 突擊兵：胸掛彈匣袋×2＋輕背囊
+        put(box(1.4, 2.4, 1.8, dark), 2.4, 11.5, -1.2);
+        put(box(1.4, 2.4, 1.8, dark), 2.4, 11.5, 1.2);
+        put(box(2.2, 3.4, 4, olive), -2.4, 11, 0);
+        break;
+      case "sniper": {   // 狙擊手：背上斜揹超長狙擊槍＋瞄準鏡＋偽裝披肩
+        const rifle = put(cyl(0.55, 17, metal), -2.8, 12, 0, 0.95);
+        rifle.rotation.y = 0.25;
+        put(box(1.1, 1.1, 2, dark), -3.6, 14.5, 0);                       // 瞄準鏡
+        const cape = new THREE.Mesh(new THREE.ConeGeometry(4.2, 6.5, 8, 1, true),
+          new THREE.MeshLambertMaterial({ color: 0x55663f, side: THREE.DoubleSide }));
+        put(cape, -0.6, 11.5, 0);                                          // 吉利披肩
+        break;
+      }
+      case "mg":         // 機槍兵：肩扛重機槍（粗長管＋腳架）＋背彈藥箱
+        put(cyl(0.95, 13, dark), 3.5, 14, -2, -Math.PI / 2);
+        put(box(3.2, 2, 1.6, dark), 0.5, 13.5, -2);                        // 機匣
+        put(cyl(0.35, 4.5, metal), 8, 12, -2.8, 0, 0.5);                   // 腳架×2
+        put(cyl(0.35, 4.5, metal), 8, 12, -1.2, 0, -0.5);
+        put(box(3, 3.4, 5.2, olive), -2.8, 11, 0);                         // 彈藥箱
+        break;
+      case "at":         // 火箭兵：扛肩火箭筒（喇叭尾口）
+        put(cyl(1.6, 14, dark), 0.5, 14.5, -2.4, -Math.PI / 2);
+        put(new THREE.Mesh(new THREE.CylinderGeometry(2.3, 1.7, 2.4, 8), dark), -6.5, 14.5, -2.4, -Math.PI / 2);
+        put(box(2.4, 3, 3.6, olive), -2.4, 10.5, 1);                       // 備彈袋
+        break;
+      case "sam": {      // 防空兵：肩射防空飛彈（筒斜指天＋方形導引頭）
+        const tube = put(cyl(1.4, 13, olive), 0.5, 15, -2.2, -1.05);
+        tube.rotation.y = 0.15;
+        put(box(2.6, 2.6, 2.6, dark), 3.5, 19, -2.2);                      // 導引頭
+        put(box(1.6, 2.2, 1.2, metal), -0.5, 12, -3.4);                    // 握把電池
+        break;
+      }
+      case "mortar":     // 迫擊砲兵：背負砲管＋圓底板
+        put(cyl(1.25, 12, metal), -2.8, 12, 1, 0.55);
+        put(new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.4, 0.7, 10), dark), -3.2, 10.5, -1.6, 0.3, 0.2); // 底板
+        break;
+      case "engineer":   // 工兵：大工具背包＋鏟子＋修理扳手
+        put(box(4.4, 5.4, 5.6, tan), -3, 11.5, 0);
+        put(cyl(0.32, 8, new THREE.MeshLambertMaterial({ color: 0x6b4a2e })), -4.6, 14, 1.6, 0.35); // 鏟柄
+        put(box(1.8, 2.4, 0.5, metal), -5.9, 17.5, 2.8);                   // 鏟頭
+        put(box(0.6, 3, 0.6, metal), -4.6, 14.5, -2, -0.3);                // 扳手
+        break;
+      case "specops":    // 特種兵：低視度小包＋通訊天線＋消音管（配合全身暗色）
+        put(box(2.2, 3, 3.6, dark), -2.2, 11.5, 0);
+        put(cyl(0.16, 6.5, dark), -3, 17, 1.4, 0.18);                      // 天線
+        put(cyl(0.5, 4, dark), 7.5, 12.5, 1.8, -Math.PI / 2);              // 消音管
+        break;
+      case "medic":      // 醫護兵（保留擴充）：紅十字背包
+        put(box(3.4, 4.4, 5, new THREE.MeshLambertMaterial({ color: 0xe8e4da })), -2.8, 11.5, 0);
+        put(box(0.8, 2.6, 0.9, red), -4.4, 11.5, 0);
+        put(box(0.8, 0.9, 2.6, red), -4.4, 11.5, 0);
+        break;
+    }
+    return kit;
+  },
+
   _addRing(g, u, G){
     const col = u.side === G.playerSide ? 0x5b9bff : 0xff6f5a;
     const ring = new THREE.Mesh(new THREE.RingGeometry(u.r + 1, u.r + 3, 20), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 }));
@@ -356,7 +443,9 @@ const Engine3D = {
   syncFx(G){
     const seen = new Set();
     for (const f of G.fx){
-      if (f.type !== "tracer" && f.type !== "boom") continue;   // 文字類仍走 2D
+      if (f.type !== "tracer" && f.type !== "boom" &&
+          f.type !== "hitfx" && f.type !== "death") continue;   // 文字類仍走 2D
+      if (f.type === "hitfx" && f.heal) continue;               // 治療只顯示 2D 綠字
       seen.add(f);
       let e = this._fxMap.get(f);
       if (!e){ e = this._mkFx(f); this._fxMap.set(f, e); }
@@ -378,6 +467,29 @@ const Engine3D = {
       const muzzle = new THREE.PointLight(0xffcf70, 2.2, 90);   // 槍口閃光
       muzzle.position.set(f.x1, h1 + 2, f.y1); objs.push(muzzle);
       this._tryShootAnim(f.x1, f.y1);
+    } else if (f.type === "hitfx"){                             // 命中：彈著塵土揚起
+      const hb = this.heightAt(f.x, f.y) + 2;
+      for (let i = 0; i < 3; i++){
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(1.6 + Math.random(), 7, 6),
+          new THREE.MeshBasicMaterial({ color: 0x9c8a6a, transparent: true, opacity: 0.55 }));
+        puff.position.set(f.x + (Math.random() * 8 - 4), hb + Math.random() * 3, f.y + (Math.random() * 8 - 4));
+        puff.userData.rise = 5 + Math.random() * 7;
+        objs.push(puff);
+      }
+      const spark = new THREE.PointLight(0xffd070, 1.4, 55);    // 命中火花
+      spark.position.set(f.x, hb + 8, f.y); objs.push(spark);
+    } else if (f.type === "death"){                             // 死亡：黑煙柱（載具更大＋餘燼火光）
+      const hb = this.heightAt(f.x, f.y) + 3;
+      const n = f.vehicle ? 5 : 3, base = f.vehicle ? 4.5 : 2.2;
+      for (let i = 0; i < n; i++){
+        const smoke = new THREE.Mesh(new THREE.SphereGeometry(base * (0.7 + Math.random() * 0.6), 7, 6),
+          new THREE.MeshBasicMaterial({ color: f.vehicle ? 0x2a2a2a : 0x4a4a44, transparent: true, opacity: 0.6 }));
+        smoke.position.set(f.x + (Math.random() * 10 - 5), hb + Math.random() * 6, f.y + (Math.random() * 10 - 5));
+        smoke.userData.rise = (f.vehicle ? 16 : 9) + Math.random() * 8;
+        objs.push(smoke);
+      }
+      const ember = new THREE.PointLight(0xff6a28, f.vehicle ? 3.2 : 1.2, f.vehicle ? 180 : 70);
+      ember.position.set(f.x, hb + 6, f.y); objs.push(ember);
     } else { // boom
       const hb = this.heightAt(f.x, f.y) + 6;
       const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
@@ -394,6 +506,14 @@ const Engine3D = {
       const k = 1 - f.t / 0.25;
       e.objs[0].material.opacity = Math.max(0, k);
       e.objs[1].intensity = f.t < 0.08 ? 2.2 * (1 - f.t / 0.08) : 0;
+    } else if (f.type === "hitfx" || f.type === "death"){
+      const k = Math.min(1, f.t / 0.9);
+      for (const o of e.objs){
+        if (o.isPointLight){ o.intensity *= 0.9; continue; }                 // 火光快速熄滅
+        o.position.y += o.userData.rise * 0.016;                             // 煙塵上飄
+        o.scale.setScalar(1 + k * (f.type === "death" ? 2.2 : 1.4));         // 擴散
+        o.material.opacity = Math.max(0, (f.type === "death" ? 0.6 : 0.55) * (1 - k));
+      }
     } else {
       const k = f.t / 0.5, r = (f.r || 20) * (0.35 + k * 1.1);
       e.objs[0].scale.setScalar(r);

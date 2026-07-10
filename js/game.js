@@ -344,6 +344,7 @@ const Game = {
 
   enterAction(u){
     this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null; this._steer3d = null;
+    if (typeof Sfx!=="undefined") Sfx.play("select");
     let mult = Math.pow(0.7, u.actedCount);
     if (NATIONS[u.nationId].trait.id==="rapid_reaction" && this.turn===1) mult *= 1.2; // 法國
     u.ap = u.maxap * mult;
@@ -502,7 +503,7 @@ const Game = {
     this.over={winner:u.side, why:"佔領敵方主堡"};
   },
 
-  pushFx(ev){ for(const e of ev){ e.t=0; this.fx.push(e);} },
+  pushFx(ev){ for(const e of ev){ e.t=0; this.fx.push(e); if(typeof Sfx!=="undefined") Sfx.event(e); } },
 
   /* ---------- 主迴圈 ---------- */
   loop(ts){

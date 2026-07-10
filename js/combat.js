@@ -118,7 +118,7 @@ const Combat = {
     for (let i=0;i<w.shots;i++){
       const chance = this.hitChance(map, shooter, target, part);
       const hit = Math.random() < chance;
-      ev.push({type:"tracer", x1:shooter.x,y1:shooter.y, x2:scatterX+(Math.random()*8-4), y2:scatterY+(Math.random()*8-4), hit});
+      ev.push({type:"tracer", x1:shooter.x,y1:shooter.y, x2:scatterX+(Math.random()*8-4), y2:scatterY+(Math.random()*8-4), hit, w:w.type});
       if (hit){
         const dmg = this.damage(shooter, target, part, interception);
         target.hp -= dmg;
@@ -139,7 +139,8 @@ const Combat = {
     const iranStealth = NATIONS[shooter.nationId].trait.id==="asymmetric" && shooter.cls==="at" && !shooter.hasFired;
     if (!iranStealth) shooter.revealed = true;
     shooter.hasFired = true;
-    for (const u of Game.units){ if (u.alive && u.hp<=0){ u.alive=false; ev.push({type:"death", x:u.x,y:u.y, unit:u}); } }
+    for (const u of Game.units){ if (u.alive && u.hp<=0){ u.alive=false;
+      ev.push({type:"death", x:u.x,y:u.y, unit:u, vehicle:(u.domain||"land")!=="land"||u.cls==="tank"}); } }
     return ev;
   },
 

@@ -201,6 +201,7 @@ const UI = {
   },
   showEnd(){
     const win = Game.over.winner===Game.playerSide;
+    if (typeof Sfx!=="undefined") Sfx.play(win?"victory":"defeat");
     this.el("menu").innerHTML = `
       <h1>${win?"🏆 勝利":"💀 敗北"}</h1>
       <p class="sub">${Game.over.why}（${NATIONS[Game.nations[Game.over.winner]].name} 獲勝）</p>
