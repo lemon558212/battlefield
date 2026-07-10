@@ -23,6 +23,8 @@ const Camera3D = {
   // 目前生效的投影參數（project/unproject/horizonY/depthOf 皆讀這些）
   pitch: 0.36, focal: 470, nearZ: 1,
   mode: "overview",
+  zoom: 1,             // 縮放（滾輪/雙指捏合）：<1 拉近、>1 拉遠，clamp 見 setZoom
+  setZoom(z){ this.zoom = Math.max(0.4, Math.min(2.4, z)); },
 
   // 目前生效相機狀態（project/unproject 讀這些）
   cx: 0, cy: 0, ch: 0, yaw: 0,
@@ -56,24 +58,27 @@ const Camera3D = {
   update(u, out){
     out = out || this;
     const f = (u && typeof u.facing === "number") ? u.facing : 0;
+    const z = Math.max(0.6, Math.min(1.8, this.zoom));   // 跟隨模式縮放範圍較窄
     out.mode = "follow"; out.pitch = this.fPitch; out.focal = this.fFocal;
     out.yaw = f;
-    out.cx = u.x - Math.cos(f) * this.fDist;
-    out.cy = u.y - Math.sin(f) * this.fDist;
-    out.ch = this.fHeight;
+    out.cx = u.x - Math.cos(f) * this.fDist * z;
+    out.cy = u.y - Math.sin(f) * this.fDist * z;
+    out.ch = this.fHeight * z;
     return out;
   },
 
-  /* overview：從玩家一側斜角高空俯瞰全場。寫入 out（預設 this=立即） */
+  /* overview：從玩家一側斜角高空俯瞰全場（依地圖大小取景 + zoom）。寫入 out */
   setOverview(map, playerSide, out){
     out = out || this;
+    const mw = (map && map.w) || 960, mh = (map && map.h) || 600;
+    const s = Math.max(mw / 960, mh / 600) * this.zoom;   // 地圖倍率 × 使用者縮放
     out.mode = "overview"; out.pitch = this.oPitch; out.focal = this.oFocal;
     const base = map && (map.bases || []).find(b => b.side === playerSide);
-    const lookPlus = base ? base.x < 480 : true;   // 玩家在左半 → 面向 +x
+    const lookPlus = base ? base.x < mw / 2 : true;       // 玩家在左半 → 面向 +x
     out.yaw = lookPlus ? 0 : Math.PI;
-    out.ch = this.oHeight;
-    out.cx = lookPlus ? -this.oBack : 960 + this.oBack; // 退到玩家邊界外
-    out.cy = 300;
+    out.ch = this.oHeight * s;
+    out.cx = lookPlus ? -this.oBack * s : mw + this.oBack * s; // 退到玩家邊界外
+    out.cy = mh / 2;
     return out;
   },
 

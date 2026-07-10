@@ -4,6 +4,8 @@
  *       bush 草叢隱蔽｜water 近海(陸不可)｜deepwater 深海｜shallow 淺灘(陸涉水×2)
  *   工事(GDD/04 §2b)：trench 壕溝(×0.4掩體,AP×1.5)｜foxhole 散兵坑{x,y,r}(×0.5)
  *       crater 彈坑{x,y,r}(×0.5)｜wire 鐵絲網(AP×2.5)｜bunker 碉堡(可進,×0.3,擋穿越視線)
+ * 地圖放大：檔尾 SCALE 表一次性把座標×k，m.w/m.h=世界大小、m._k=倍率
+ *   （移動 AP 消耗除以 _k → 每回合「相對地圖」的行動距離維持原設計節奏）
  * allow：允許的作戰域（land/sea/air），部署與敵方組兵依此（GDD/04 §1-2）
  * base：{x,y,side}  deploy：各方部署區
  * 地形細節權威 GDD/04 §2。空陣列可省略（引擎以 ||[] 容錯）
@@ -150,3 +152,22 @@ tutorial: {
   ]
 }
 };
+
+/* ---- 地圖放大（一次性座標縮放）----
+ * 引擎以 m.w/m.h 為世界大小（未設=960×600）；m._k 供移動 AP 折算維持節奏。 */
+(function(){
+  const SCALE = { plain:1.5, town:1.3, desert:1.5, forest:1.4, urban:1.3, beach:1.6, strait:1.5, harbor:1.5, verdun:1.5 };
+  const rect = (r,k)=>{ r.x*=k; r.y*=k; if(r.w!=null) r.w*=k; if(r.h!=null) r.h*=k; };
+  const circ = (c,k)=>{ c.x*=k; c.y*=k; if(c.r!=null) c.r*=k; };
+  for (const id in MAPS){
+    const m = MAPS[id], k = SCALE[id] || 1;
+    m.w = Math.round(960*k); m.h = Math.round(600*k); m._k = k;
+    if (k === 1) continue;
+    for (const key of ["solids","sandbags","reefs","waters","deepwaters","shallows","trenches","wires","bunkers","deploy"])
+      (m[key]||[]).forEach(r=>rect(r,k));
+    for (const key of ["bushes","craters","foxholes"]) (m[key]||[]).forEach(c=>circ(c,k));
+    (m.trees||[]).forEach(t=>{ t.x*=k; t.y*=k; });
+    (m.bases||[]).forEach(b=>{ b.x*=k; b.y*=k; });
+    m.budget = Math.round(m.budget * (1 + (k-1)*0.7));   // 大地圖多給兵力預算
+  }
+})();

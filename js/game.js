@@ -32,11 +32,19 @@ const Game = {
     this.canvas.addEventListener("mousedown", e=>{ this._mouseDown=true; this.onClick(e); });
     window.addEventListener("mousemove", e=>{ if(this._mouseDown) this._pointerMove(e.clientX,e.clientY); });
     window.addEventListener("mouseup", ()=>{ this._mouseDown=false; this._pointerUp(); });
-    // 手機觸控：touch 轉為點擊（部署放置／下令／行動移動與開火）
-    this.canvas.addEventListener("touchstart", e=>{ if(e.cancelable) e.preventDefault(); const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0); }, {passive:false});
-    this.canvas.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault(); const t=e.changedTouches[0]; if(t) this._pointerMove(t.clientX,t.clientY); }, {passive:false});
-    this.canvas.addEventListener("touchend", e=>{ if(e.cancelable) e.preventDefault(); this._pointerUp(); }, {passive:false});
+    // 手機觸控：單指=點擊/拖曳；雙指=捏合縮放（縮放時取消移動操控）
+    const pinchD = e => Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    this.canvas.addEventListener("touchstart", e=>{ if(e.cancelable) e.preventDefault(); this._touch=true;
+      if (e.touches.length>=2){ this._pinch=pinchD(e); this._steer3d=null; return; }
+      const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0); }, {passive:false});
+    this.canvas.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault();
+      if (e.touches.length>=2){ const d=pinchD(e); if(this._pinch){ Camera3D.setZoom(Camera3D.zoom*this._pinch/d); } this._pinch=d; return; }
+      const t=e.changedTouches[0]; if(t) this._pointerMove(t.clientX,t.clientY); }, {passive:false});
+    this.canvas.addEventListener("touchend", e=>{ if(e.cancelable) e.preventDefault(); if(e.touches.length<2) this._pinch=null; this._pointerUp(); }, {passive:false});
     this.canvas.addEventListener("contextmenu", e=>e.preventDefault());
+    // 滾輪縮放（桌機）
+    this.canvas.addEventListener("wheel", e=>{ e.preventDefault(); Camera3D.setZoom(Camera3D.zoom*(e.deltaY>0?1.1:0.9)); }, {passive:false});
+    this._initJoystick();
     if (typeof Camera3D !== "undefined") Camera3D.selfTest(); // P1 投影校正（GDD/07），console 應見 PASS
     if (typeof Engine3D !== "undefined") Engine3D.init();      // 真 3D（GDD/08）；失敗自動回退偽 3D
     UI.showMenu();
@@ -379,7 +387,7 @@ const Game = {
     if (foe===this.sel){ this.moveTarget=null; this._steer=null; return; }
     // 空地：開始操控移動（按住拖曳持續操控、放開即停；快速輕點=走到該點）
     if (!foe){
-      this.moveTarget = { x: clamp(x, this.sel.r, 960-this.sel.r), y: clamp(y, this.sel.r, 600-this.sel.r) };
+      this.moveTarget = { x: clamp(x, this.sel.r, (this.map.w||960)-this.sel.r), y: clamp(y, this.sel.r, (this.map.h||600)-this.sel.r) };
       this._steer = { t: Date.now(), sx:x, sy:y, moved:false };
     }
   },
@@ -418,6 +426,34 @@ const Game = {
     return [ (clientX-r.left)*(this.canvas.width/r.width), (clientY-r.top)*(this.canvas.height/r.height) ];
   },
 
+  /* 虛擬搖桿（觸控裝置、行動模式才顯示）：上=前進/下=後退、左右=轉向。
+     事件 stopPropagation → 不影響畫面點擊（瞄準/停止）。 */
+  _initJoystick(){
+    const joy=document.createElement("div");
+    joy.id="joy";
+    joy.style.cssText="position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;"+
+      "background:rgba(20,28,20,0.35);border:2px solid rgba(255,255,255,0.28);display:none;z-index:6;touch-action:none;";
+    const knob=document.createElement("div");
+    knob.style.cssText="position:absolute;left:50%;top:50%;width:48px;height:48px;border-radius:50%;"+
+      "background:rgba(255,255,255,0.38);border:1.5px solid rgba(255,255,255,0.5);transform:translate(-50%,-50%);";
+    joy.appendChild(knob);
+    document.getElementById("stage").appendChild(joy);
+    this._joyEl=joy; this._joy=null;
+    const setJoy=(t)=>{
+      const r=joy.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+      let dx=t.clientX-cx, dy=t.clientY-cy;
+      const d=Math.hypot(dx,dy)||1, max=r.width/2-8;
+      if(d>max){ dx*=max/d; dy*=max/d; }
+      knob.style.transform=`translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      this._joy={ fwd: clamp(-dy/(max*0.8),-1,1), turn: clamp(dx/(max*0.8),-1,1) };
+    };
+    const end=e=>{ if(e.cancelable) e.preventDefault(); e.stopPropagation(); this._joy=null; knob.style.transform="translate(-50%,-50%)"; };
+    joy.addEventListener("touchstart",e=>{ if(e.cancelable) e.preventDefault(); e.stopPropagation(); setJoy(e.changedTouches[0]); },{passive:false});
+    joy.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault(); e.stopPropagation(); setJoy(e.changedTouches[0]); },{passive:false});
+    joy.addEventListener("touchend",end,{passive:false});
+    joy.addEventListener("touchcancel",end,{passive:false});
+  },
+
   /* 玩家在瞄準面板按下開火 */
   playerFire(part){
     if (this.selFired || !this.aimTarget) return;
@@ -453,6 +489,7 @@ const Game = {
       for (let i=0;i<ENEMY_SUBSTEPS && this.state==="enemy"; i++) this.updateEnemy(0.033);
     }
     this.fx = this.fx.filter(f=>(f.t+=dt) < (f.type==="tracer"?0.25:f.type==="boom"?0.5:0.9));
+    if (this._joyEl) this._joyEl.style.display = (this.state==="act" && this._touch) ? "block" : "none";
     this.render();
   },
 
@@ -461,9 +498,10 @@ const Game = {
 
   moveUnit(u, dx, dy, dt, setFacing=true){
     let speed = u.domain==="air" ? 160 : u.domain==="sea" ? (u.big?60:95) : (u.cls==="tank"?70:100); // px/s
+    speed *= (this.map._k||1);              // 大地圖等比加速，牆鐘節奏不變
     if (this.state==="enemy") speed *= 2.5; // 敵方階段快轉（戰棋慣例，不影響規則）
     let nx = u.x + dx*speed*dt, ny = u.y + dy*speed*dt;
-    nx = clamp(nx, u.r, 960-u.r); ny = clamp(ny, u.r, 600-u.r);
+    nx = clamp(nx, u.r, (this.map.w||960)-u.r); ny = clamp(ny, u.r, (this.map.h||600)-u.r);
     // 作戰域地形限制（GDD/04 §1-2）
     if (u.domain==="sea"){
       if (!this.isWater(nx,ny)) return false;                                  // 艦艇不能上陸
@@ -502,7 +540,7 @@ const Game = {
       }
     }
     const moved = Math.hypot(nx-u.x, ny-u.y);
-    let apCost = moved/3; // 1 AP = 3px（GDD/01 §2）
+    let apCost = moved/(3*(this.map._k||1)); // 1 AP = 3px；大地圖依 _k 折算維持節奏（data-maps 檔頭）
     if (u.domain==="land"){
       if (this.inAny(this.map.shallows,nx,ny)) apCost*=2;                       // 涉淺灘
       if (this.inAny(this.map.wires,nx,ny)) apCost *= (u.cls==="tank"?1.2:2.5); // 鐵絲網：步兵受阻、坦克輾壓
@@ -525,6 +563,7 @@ const Game = {
     if (this.keys["a"]||this.keys["arrowleft"]) turn-=1;
     if (this.keys["d"]||this.keys["arrowright"])turn+=1;
     if (this._steer3d){ fwd+=this._steer3d.fwd; turn+=this._steer3d.turn; }
+    if (this._joy){ fwd+=this._joy.fwd; turn+=this._joy.turn; }   // 虛擬搖桿
     fwd=clamp(fwd,-1,1); turn=clamp(turn,-1,1);
     if (turn) u.facing += turn * 2.2 * dt;          // 轉向速率 2.2 rad/s
     if (Math.abs(fwd)>0.02){
@@ -614,18 +653,19 @@ const Game = {
   /* ---------- 渲染 ---------- */
   /* 一次性把靜態地形預渲染到離屏 canvas（每幀只需貼上，手機也順） */
   buildTerrain(m){
+    const W=m.w||960, H=m.h||600, AR=(W*H)/(960*600);   // 面積倍率：紋理數量等比
     const cv = this._bg = document.createElement("canvas");
-    cv.width=960; cv.height=600; this._bgMap=m;
+    cv.width=W; cv.height=H; this._bgMap=m;
     const c = cv.getContext("2d");
     let seed=97; const rnd=()=>((seed=seed*16807%2147483647)/2147483647);
-    c.fillStyle=m.ground; c.fillRect(0,0,960,600);
+    c.fillStyle=m.ground; c.fillRect(0,0,W,H);
     // 草地紋理：深淺斑塊 + 草點
-    for (let i=0;i<170;i++){ const x=rnd()*960,y=rnd()*600,r=8+rnd()*26;
+    for (let i=0;i<170*AR;i++){ const x=rnd()*W,y=rnd()*H,r=8+rnd()*26;
       c.fillStyle="rgba(0,0,0,"+(0.03+rnd()*0.05).toFixed(3)+")"; c.beginPath(); c.ellipse(x,y,r,r*0.7,0,0,7); c.fill(); }
-    for (let i=0;i<260;i++){ const x=rnd()*960,y=rnd()*600;
+    for (let i=0;i<260*AR;i++){ const x=rnd()*W,y=rnd()*H;
       c.strokeStyle="rgba(255,255,255,0.045)"; c.beginPath(); c.moveTo(x,y); c.lineTo(x+rnd()*3-1.5,y-2-rnd()*3); c.stroke(); }
     // 大片地貌色斑帶（乾草/深綠/土斑），打破單色感
-    for (let i=0;i<7;i++){ const x=rnd()*960,y=rnd()*600,r=60+rnd()*120,a=rnd()*7;
+    for (let i=0;i<7*AR;i++){ const x=rnd()*W,y=rnd()*H,r=60+rnd()*120,a=rnd()*7;
       const hues=["rgba(150,140,80,0.10)","rgba(60,80,40,0.12)","rgba(130,105,70,0.10)","rgba(160,155,110,0.09)"];
       c.fillStyle=hues[i%hues.length]; c.beginPath(); c.ellipse(x,y,r,r*(0.45+rnd()*0.4),a,0,7); c.fill(); }
     // 基地間泥土道路（僅陸戰圖）：帶寬度抖動的土色帶 + 車轍
@@ -640,7 +680,7 @@ const Game = {
         for(let s=0;s<=40;s++){ const [x,y]=pt(s/40); s?c.lineTo(x,y+off):c.moveTo(x,y+off); } c.stroke(); }
     }
     // 碎石群
-    for (let i=0;i<26;i++){ const x=rnd()*960,y=rnd()*600,r=1.5+rnd()*3;
+    for (let i=0;i<26*AR;i++){ const x=rnd()*W,y=rnd()*H,r=1.5+rnd()*3;
       c.fillStyle=`rgba(${110+rnd()*40|0},${110+rnd()*35|0},${100+rnd()*30|0},0.8)`;
       c.beginPath(); c.arc(x,y,r,0,7); c.fill();
       c.fillStyle="rgba(0,0,0,0.15)"; c.beginPath(); c.arc(x+1,y+1,r*0.8,0,7); c.fill(); }

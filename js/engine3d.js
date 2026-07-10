@@ -40,12 +40,9 @@ const Engine3D = {
       const hemi = new THREE.HemisphereLight(0xd8ecff, 0x54604a, 0.55);
       this.scene.add(hemi);
       const sun = new THREE.DirectionalLight(0xfff1d6, 0.95);
-      sun.position.set(760, 620, 80);
       sun.castShadow = true;
       sun.shadow.mapSize.set(1024, 1024);
-      const sc = sun.shadow.camera;
-      sc.left = -720; sc.right = 720; sc.top = 720; sc.bottom = -720; sc.far = 2400;
-      sun.target.position.set(480, 0, 300);
+      this._sun = sun;
       this.scene.add(sun); this.scene.add(sun.target);
 
       this.ok = true;
@@ -54,23 +51,34 @@ const Engine3D = {
 
   /* ---------- 靜態地圖場景 ---------- */
   buildMap(G){
-    const m = G.map;
+    const m = G.map, mw = m.w || 960, mh = m.h || 600;
+    const S = Math.max(mw / 960, mh / 600);              // 地圖倍率：光影/霧距離等比
     if (this.mapGroup) this.scene.remove(this.mapGroup);
     const grp = this.mapGroup = new THREE.Group();
 
+    // 太陽/陰影/霧依地圖大小取範圍
+    const sun = this._sun;
+    sun.position.set(mw * 0.79, 620 * S, mh * 0.13);
+    const sc = sun.shadow.camera, ext = Math.max(mw, mh) * 0.78;
+    sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.far = 3200 * S;
+    sc.updateProjectionMatrix();
+    sun.target.position.set(mw / 2, 0, mh / 2);
+    this.scene.fog.near = 750 * S; this.scene.fog.far = 2400 * S;
+    this.camera.far = 6000 * S;
+
     // 遠景大地（地圖外圍基色，接天際）
-    const far = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000),
+    const far = new THREE.Mesh(new THREE.PlaneGeometry(9000 * S, 9000 * S),
       new THREE.MeshLambertMaterial({ color: new THREE.Color(m.ground || "#7a8f5a").multiplyScalar(0.9) }));
-    far.rotation.x = -Math.PI / 2; far.position.set(480, -0.25, 300); far.receiveShadow = true;
+    far.rotation.x = -Math.PI / 2; far.position.set(mw / 2, -0.25, mh / 2); far.receiveShadow = true;
     grp.add(far);
 
     // 地形貼圖平面（buildTerrain 手繪圖直接當紋理：道路/水/工事全帶入）
     if (!G._bg || G._bgMap !== m) G.buildTerrain(m);
     const tex = new THREE.CanvasTexture(G._bg);
     tex.anisotropy = 4;
-    const gnd = new THREE.Mesh(new THREE.PlaneGeometry(960, 600),
+    const gnd = new THREE.Mesh(new THREE.PlaneGeometry(mw, mh),
       new THREE.MeshLambertMaterial({ map: tex }));
-    gnd.rotation.x = -Math.PI / 2; gnd.position.set(480, 0, 300); gnd.receiveShadow = true;
+    gnd.rotation.x = -Math.PI / 2; gnd.position.set(mw / 2, 0, mh / 2); gnd.receiveShadow = true;
     grp.add(gnd);
 
     // 建築：擠出盒 + 屋頂

@@ -19,8 +19,8 @@ const Fog = {
   /* 開局把整張地圖標為已探索：地形全程可見（戰場女武神式），
      迷霧只體現在「敵人未偵察到就不顯示」，而非遮黑地形 */
   exploreAll(){
-    this._cols = Math.ceil(960 / FOG_CELL);
-    this._rows = Math.ceil(600 / FOG_CELL);
+    this._cols = Math.ceil(((Game.map&&Game.map.w)||960) / FOG_CELL);
+    this._rows = Math.ceil(((Game.map&&Game.map.h)||600) / FOG_CELL);
     for (let cx = 0; cx < this._cols; cx++)
       for (let cy = 0; cy < this._rows; cy++)
         this.explored.add(this.key(cx, cy));
@@ -30,8 +30,8 @@ const Fog = {
   recompute(){
     if (!Game.map) return;
     this.visible.clear();
-    this._cols = Math.ceil(960 / FOG_CELL);
-    this._rows = Math.ceil(600 / FOG_CELL);
+    this._cols = Math.ceil((Game.map.w||960) / FOG_CELL);
+    this._rows = Math.ceil((Game.map.h||600) / FOG_CELL);
     for (const u of Game.units){
       if (!u.alive || u.side !== Game.playerSide) continue;
       let R = u.sight;
