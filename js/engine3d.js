@@ -30,6 +30,8 @@ const Engine3D = {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.renderer.outputEncoding = THREE.sRGBEncoding;
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 電影級色調映射
+      this.renderer.toneMappingExposure = 1.12;
 
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x8fb8dc);
@@ -58,8 +60,14 @@ const Engine3D = {
     if (typeof THREE.GLTFLoader === "undefined") return;
     const loader = new THREE.GLTFLoader();
     const defs = {
-      tank:    { url: "assets/models/tank.glb",    len: 34, rotY: Math.PI },     // 頂點分析：砲管原朝 -x
-      soldier: { url: "assets/models/soldier.glb", h: 19,  rotY: Math.PI / 2 }   // 人物慣例面朝 +z → 轉到 +x
+      tank:      { url: "assets/models/tank.glb",      len: 34, rotY: Math.PI },     // 頂點分析：砲管原朝 -x
+      soldier:   { url: "assets/models/soldier.glb",   h: 19,  rotY: Math.PI / 2 },  // 人物慣例面朝 +z → 轉到 +x
+      destroyer: { url: "assets/models/destroyer.glb", len: 46, rotY: Math.PI },     // 頂點分析：艦首朝 -x
+      lst:       { url: "assets/models/destroyer.glb", len: 38, rotY: Math.PI },     // 登陸艦暫共用艦體(較短)
+      submarine: { url: "assets/models/submarine.glb", len: 34, rotY: Math.PI },     // 帆罩前置 → 首朝 -x
+      fighter:   { url: "assets/models/fighter.glb",   len: 24, rotY: 0 },
+      attacker:  { url: "assets/models/attacker.glb",  len: 26, rotY: 0 },
+      gunship:   { url: "assets/models/gunship.glb",   len: 18, rotY: 0 }
     };
     for (const key in defs){
       const d = defs[key];
@@ -106,9 +114,36 @@ const Engine3D = {
     return wrap;
   },
 
+  /* ---------- 地形高度場（純視覺，遊戲邏輯仍是 2D 平面） ----------
+   * 山丘隆起 + 壕溝/彈坑/散兵坑真凹陷。單位/樹/建物 y 皆取此。 */
+  heightAt(x, y){
+    const m = this._mapRef;
+    if (!m) return 0;
+    let h = 0;
+    for (const H of (m.hills || [])){
+      const d2 = ((x - H.x) ** 2 + (y - H.y) ** 2) / (H.r * H.r);
+      if (d2 < 1) h += H.h * Math.pow(1 - d2, 1.5);
+    }
+    for (const t of (m.trenches || [])){
+      const dx = Math.max(t.x - x, x - (t.x + t.w), 0), dy = Math.max(t.y - y, y - (t.y + t.h), 0);
+      const d = Math.hypot(dx, dy);
+      if (d < 5) h -= 6 * (1 - d / 5);
+    }
+    for (const c of (m.craters || [])){
+      const d = Math.hypot(x - c.x, y - c.y);
+      if (d < c.r) h -= 4.5 * (1 - (d / c.r) ** 2);
+    }
+    for (const f of (m.foxholes || [])){
+      const d = Math.hypot(x - f.x, y - f.y);
+      if (d < f.r) h -= 3.5 * (1 - (d / f.r) ** 2);
+    }
+    return h;
+  },
+
   /* ---------- 靜態地圖場景 ---------- */
   buildMap(G){
     const m = G.map, mw = m.w || 960, mh = m.h || 600;
+    this._mapRef = m;                                    // heightAt 於本函式內即需引用
     const S = Math.max(mw / 960, mh / 600);              // 地圖倍率：光影/霧距離等比
     if (this.mapGroup) this.scene.remove(this.mapGroup);
     const grp = this.mapGroup = new THREE.Group();
@@ -129,58 +164,81 @@ const Engine3D = {
     far.rotation.x = -Math.PI / 2; far.position.set(mw / 2, -0.25, mh / 2); far.receiveShadow = true;
     grp.add(far);
 
-    // 地形貼圖平面（buildTerrain 手繪圖直接當紋理：道路/水/工事全帶入）
+    // 天空穹頂：垂直漸層（頂湛藍→地平線暖白），不受霧影響
+    if (!this._skyTex){
+      const sc2 = document.createElement("canvas"); sc2.width = 1; sc2.height = 256;
+      const g2 = sc2.getContext("2d"), gr = g2.createLinearGradient(0, 0, 0, 256);
+      gr.addColorStop(0, "#4f8ac9"); gr.addColorStop(0.55, "#9ec6e6"); gr.addColorStop(0.78, "#e8ddc2"); gr.addColorStop(1, "#efe6cf");
+      g2.fillStyle = gr; g2.fillRect(0, 0, 1, 256);
+      this._skyTex = new THREE.CanvasTexture(sc2);
+    }
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(4200 * S, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshBasicMaterial({ map: this._skyTex, side: THREE.BackSide, fog: false }));
+    sky.position.set(mw / 2, -40, mh / 2);
+    grp.add(sky);
+
+    // 地形貼圖平面（buildTerrain 手繪圖直接當紋理）＋高度場頂點位移（山丘/壕溝/彈坑真起伏）
     if (!G._bg || G._bgMap !== m) G.buildTerrain(m);
     const tex = new THREE.CanvasTexture(G._bg);
     tex.anisotropy = 4;
-    const gnd = new THREE.Mesh(new THREE.PlaneGeometry(mw, mh),
-      new THREE.MeshLambertMaterial({ map: tex }));
-    gnd.rotation.x = -Math.PI / 2; gnd.position.set(mw / 2, 0, mh / 2); gnd.receiveShadow = true;
+    const segX = Math.min(200, Math.round(mw / 10)), segY = Math.min(140, Math.round(mh / 10));
+    const geo = new THREE.PlaneGeometry(mw, mh, segX, segY);
+    geo.rotateX(-Math.PI / 2);                 // 幾何本身轉平（頂點 y=高度、x/z=世界）
+    geo.translate(mw / 2, 0, mh / 2);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++){
+      pos.setY(i, this.heightAt(pos.getX(i), pos.getZ(i)));
+    }
+    geo.computeVertexNormals();
+    const gnd = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex }));
+    gnd.receiveShadow = true;
     grp.add(gnd);
 
     // 建築：擠出盒 + 屋頂
     const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e6a63 });
     const roofMat = new THREE.MeshLambertMaterial({ color: 0x57534c });
     for (const s of (m.solids || [])){
+      const hg = this.heightAt(s.x + s.w / 2, s.y + s.h / 2);
       const b = new THREE.Mesh(new THREE.BoxGeometry(s.w, 42, s.h), wallMat);
-      b.position.set(s.x + s.w / 2, 21, s.y + s.h / 2);
+      b.position.set(s.x + s.w / 2, 21 + hg, s.y + s.h / 2);
       b.castShadow = b.receiveShadow = true; grp.add(b);
       const r = new THREE.Mesh(new THREE.BoxGeometry(s.w + 4, 3, s.h + 4), roofMat);
-      r.position.set(s.x + s.w / 2, 43.5, s.y + s.h / 2); r.castShadow = true; grp.add(r);
+      r.position.set(s.x + s.w / 2, 43.5 + hg, s.y + s.h / 2); r.castShadow = true; grp.add(r);
     }
     // 碉堡：低矮混凝土 + 射口帶
     const bunkMat = new THREE.MeshLambertMaterial({ color: 0x8d8a80 });
     const slitMat = new THREE.MeshLambertMaterial({ color: 0x23211d });
     for (const b of (m.bunkers || [])){
+      const hg = this.heightAt(b.x + b.w / 2, b.y + b.h / 2);
       const k = new THREE.Mesh(new THREE.BoxGeometry(b.w, 24, b.h), bunkMat);
-      k.position.set(b.x + b.w / 2, 12, b.y + b.h / 2); k.castShadow = k.receiveShadow = true; grp.add(k);
+      k.position.set(b.x + b.w / 2, 12 + hg, b.y + b.h / 2); k.castShadow = k.receiveShadow = true; grp.add(k);
       const s1 = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.6, 3.5, b.h + 0.6), slitMat);
-      s1.position.set(b.x + b.w / 2, 14, b.y + b.h / 2); grp.add(s1);
+      s1.position.set(b.x + b.w / 2, 14 + hg, b.y + b.h / 2); grp.add(s1);
     }
     // 樹：幹 + 疊層樹冠（r<18 枯樹只留枝幹）
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
     const leafMat = new THREE.MeshLambertMaterial({ color: 0x3a6030 });
     const leafMat2 = new THREE.MeshLambertMaterial({ color: 0x4c7a3c });
     for (const t of (m.trees || [])){
-      const dead = t.r < 18, hT = dead ? 26 : 34 + t.r * 0.5;
+      const dead = t.r < 18, hT = dead ? 26 : 34 + t.r * 0.5, hg = this.heightAt(t.x, t.y);
       const tr = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(1.6, t.r * 0.14), Math.max(2.2, t.r * 0.2), hT, 6), trunkMat);
-      tr.position.set(t.x, hT / 2, t.y); tr.castShadow = true; grp.add(tr);
+      tr.position.set(t.x, hT / 2 + hg, t.y); tr.castShadow = true; grp.add(tr);
       if (!dead){
         const c1 = new THREE.Mesh(new THREE.ConeGeometry(t.r * 0.95, t.r * 1.5, 7), leafMat);
-        c1.position.set(t.x, hT * 0.72 + t.r * 0.5, t.y); c1.castShadow = true; grp.add(c1);
+        c1.position.set(t.x, hT * 0.72 + t.r * 0.5 + hg, t.y); c1.castShadow = true; grp.add(c1);
         const c2 = new THREE.Mesh(new THREE.ConeGeometry(t.r * 0.62, t.r * 1.1, 7), leafMat2);
-        c2.position.set(t.x, hT * 0.72 + t.r * 1.15, t.y); c2.castShadow = true; grp.add(c2);
+        c2.position.set(t.x, hT * 0.72 + t.r * 1.15 + hg, t.y); c2.castShadow = true; grp.add(c2);
       }
     }
     // 主堡旗桿
     for (const b of (m.bases || [])){
-      const col = b.side === G.playerSide ? 0x2e6fd8 : 0xc23b22;
+      const col = b.side === G.playerSide ? 0x2e6fd8 : 0xc23b22, hg = this.heightAt(b.x, b.y);
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 46, 6), new THREE.MeshLambertMaterial({ color: 0xcfcfcf }));
-      pole.position.set(b.x, 23, b.y); pole.castShadow = true; grp.add(pole);
+      pole.position.set(b.x, 23 + hg, b.y); pole.castShadow = true; grp.add(pole);
       const flag = new THREE.Mesh(new THREE.BoxGeometry(16, 9, 0.6), new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide }));
-      flag.position.set(b.x + 8, 40, b.y); flag.castShadow = true; grp.add(flag);
+      flag.position.set(b.x + 8, 40 + hg, b.y); flag.castShadow = true; grp.add(flag);
       const ring = new THREE.Mesh(new THREE.RingGeometry(12, 16, 24), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55 }));
-      ring.rotation.x = -Math.PI / 2; ring.position.set(b.x, 0.25, b.y); grp.add(ring);
+      ring.rotation.x = -Math.PI / 2; ring.position.set(b.x, 0.25 + hg, b.y); grp.add(ring);
     }
     this.scene.add(grp);
     // 舊單位快取全清（換圖重建）
@@ -199,9 +257,12 @@ const Engine3D = {
     const steelMat = new THREE.MeshLambertMaterial({ color: 0x8a9099 });
     const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
 
+    // 模型優先（士兵共用 soldier；各載具依 cls；缺檔/載入中回退下方幾何體）
+    const modelKey = (u.domain === "land" && u.cls !== "tank") ? "soldier" : u.cls;
+    const mdl0 = this._cloneModel(modelKey, u);
+    if (mdl0){ g.add(mdl0); this._addRing(g, u, G); return g; }
+
     if (u.cls === "tank"){
-      const mdl = this._cloneModel("tank", u);
-      if (mdl){ g.add(mdl); this._addRing(g, u, G); return g; }
       add(new THREE.Mesh(new THREE.BoxGeometry(30, 8, 20), bodyMat), 0, 8, 0);            // 車體
       add(new THREE.Mesh(new THREE.BoxGeometry(32, 5, 4), darkMat), 0, 3, -11);            // 履帶
       add(new THREE.Mesh(new THREE.BoxGeometry(32, 5, 4), darkMat), 0, 3, 11);
@@ -231,9 +292,7 @@ const Engine3D = {
         add(new THREE.Mesh(new THREE.BoxGeometry(4, 5, 1), bodyMat), -10, 8, 0);           // 垂尾
       }
     } else {
-      // 士兵
-      const mdl = this._cloneModel("soldier", u);
-      if (mdl){ g.add(mdl); this._addRing(g, u, G); return g; }
+      // 士兵（幾何體 fallback）
       add(new THREE.Mesh(new THREE.BoxGeometry(3.6, 7, 4.6), darkMat), 0, 3.5, 0);         // 腿
       add(new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.9, 8, 8), bodyMat), 0, 11, 0);  // 軀幹
       add(new THREE.Mesh(new THREE.SphereGeometry(2.5, 8, 7), new THREE.MeshLambertMaterial({ color: 0xd9b48a })), 0, 17.5, 0);
@@ -249,6 +308,7 @@ const Engine3D = {
     const col = u.side === G.playerSide ? 0x5b9bff : 0xff6f5a;
     const ring = new THREE.Mesh(new THREE.RingGeometry(u.r + 1, u.r + 3, 20), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.3; g.add(ring);
+    g.userData.ring = ring;
   },
 
   syncUnits(G){
@@ -260,13 +320,25 @@ const Engine3D = {
       let g = this._units[u.id];
       if (!g){ g = this._units[u.id] = this._mkUnit(u, G); this.scene.add(g); }
       g.visible = vis;
-      const alt = u.domain === "air" ? 52 : 0;
+      const alt = u.domain === "air" ? 52 : (u.domain === "sea" ? 0 : this.heightAt(u.x, u.y));
       const moved = Math.hypot(g.position.x - u.x, g.position.z - u.y) > 0.4;
       g.position.set(u.x, alt, u.y);
       g.rotation.y = -u.facing;
+      // 選中單位：識別環轉金色脈動
+      const ring = g.userData.ring;
+      if (ring){
+        if (G.sel === u){
+          ring.material.color.setHex(0xffd83d);
+          const p = 1 + 0.18 * Math.sin(performance.now() / 160);
+          ring.scale.set(p, p, 1);
+        } else {
+          ring.material.color.setHex(u.side === G.playerSide ? 0x5b9bff : 0xff6f5a);
+          ring.scale.set(1, 1, 1);
+        }
+      }
       // 動畫：移動→walk、靜止→idle
       const mx = this._mixers[u.id];
-      if (mx && mx.actions.walk){
+      if (mx && mx.actions.walk && mx.cur !== "shoot"){   // 射擊動畫播畢由 finished 監聽器接回
         const want = moved ? "walk" : "idle";
         if (want !== mx.cur){ mx.actions[mx.cur].stop(); mx.actions[want].play(); mx.cur = want; }
       }
@@ -279,11 +351,81 @@ const Engine3D = {
     if (this._rotor) this._rotor.rotation.y += 0.5; // 直升機旋翼
   },
 
+  /* ---------- 3D 特效（曳光/爆炸/槍口閃光，資料仍是 Game.fx） ---------- */
+  _fxMap: new Map(),
+  syncFx(G){
+    const seen = new Set();
+    for (const f of G.fx){
+      if (f.type !== "tracer" && f.type !== "boom") continue;   // 文字類仍走 2D
+      seen.add(f);
+      let e = this._fxMap.get(f);
+      if (!e){ e = this._mkFx(f); this._fxMap.set(f, e); }
+      this._updFx(f, e);
+    }
+    for (const [f, e] of this._fxMap){
+      if (!seen.has(f)){ for (const o of e.objs) this.scene.remove(o); this._fxMap.delete(f); }
+    }
+  },
+  _mkFx(f){
+    const objs = [];
+    if (f.type === "tracer"){
+      const h1 = this.heightAt(f.x1, f.y1) + 12, h2 = this.heightAt(f.x2, f.y2) + 10;
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(f.x1, h1, f.y1), new THREE.Vector3(f.x2, h2, f.y2)]);
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: f.hit ? 0xffe178 : 0xd8d8d8, transparent: true, blending: THREE.AdditiveBlending }));
+      objs.push(line);
+      const muzzle = new THREE.PointLight(0xffcf70, 2.2, 90);   // 槍口閃光
+      muzzle.position.set(f.x1, h1 + 2, f.y1); objs.push(muzzle);
+      this._tryShootAnim(f.x1, f.y1);
+    } else { // boom
+      const hb = this.heightAt(f.x, f.y) + 6;
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff8a3a, transparent: true, blending: THREE.AdditiveBlending }));
+      ball.position.set(f.x, hb, f.y); objs.push(ball);
+      const glow = new THREE.PointLight(0xff9a40, 4, 220);      // 爆炸打亮周遭
+      glow.position.set(f.x, hb + 8, f.y); objs.push(glow);
+    }
+    for (const o of objs) this.scene.add(o);
+    return { objs };
+  },
+  _updFx(f, e){
+    if (f.type === "tracer"){
+      const k = 1 - f.t / 0.25;
+      e.objs[0].material.opacity = Math.max(0, k);
+      e.objs[1].intensity = f.t < 0.08 ? 2.2 * (1 - f.t / 0.08) : 0;
+    } else {
+      const k = f.t / 0.5, r = (f.r || 20) * (0.35 + k * 1.1);
+      e.objs[0].scale.setScalar(r);
+      e.objs[0].material.opacity = Math.max(0, 1 - k);
+      e.objs[1].intensity = 4 * Math.max(0, 1 - k);
+    }
+  },
+  /* 開火者若有 shoot 動畫片段 → 播一次再回原動作 */
+  _tryShootAnim(x, y){
+    for (const id in this._mixers){
+      const g = this._units[id];
+      if (!g || Math.hypot(g.position.x - x, g.position.z - y) > 25) continue;
+      const mx = this._mixers[id];
+      if (!mx.actions.shoot){
+        const m = this._models.soldier;
+        const clip = m && m.anims.find(a => /shoot|fire|attack|gun/i.test(a.name));
+        if (!clip) return;
+        mx.actions.shoot = mx.mixer.clipAction(clip);
+        mx.actions.shoot.setLoop(THREE.LoopOnce); mx.actions.shoot.clampWhenFinished = false;
+        mx.mixer.addEventListener("finished", () => { if (mx.cur !== "shoot") return; mx.actions.shoot.stop(); mx.actions.idle.play(); mx.cur = "idle"; });
+      }
+      mx.actions[mx.cur].stop(); mx.actions.shoot.reset().play(); mx.cur = "shoot";
+      return;
+    }
+  },
+
   /* ---------- 每幀渲染（相機同步自 Camera3D） ---------- */
   render(G){
     if (!this.ok) return;
     if (this._mapRef !== G.map){ this.buildMap(G); this._mapRef = G.map; }
     this.syncUnits(G);
+    this.syncFx(G);
     // 動畫推進
     const now = performance.now(), dt = Math.min(0.05, (now - (this._at || now)) / 1000); this._at = now;
     for (const id in this._mixers) this._mixers[id].mixer.update(dt);
@@ -305,7 +447,7 @@ const Engine3D = {
       if (!u.alive) continue;
       const isP = u.side === G.playerSide;
       if (!isP && !G.enemyVisible(u)) continue;
-      const alt = u.domain === "air" ? 52 : 0;
+      const alt = u.domain === "air" ? 52 : (u.domain === "sea" ? 0 : this.heightAt(u.x, u.y));
       const figH = u.cls === "tank" ? 18 : u.domain === "sea" ? 14 : u.domain === "air" ? 12 : 22;
       const top = cam.project(u.x, u.y, alt + figH + 4);
       if (!top) continue;
@@ -317,7 +459,7 @@ const Engine3D = {
       if (G.aimTarget === u){ const mid = cam.project(u.x, u.y, alt + figH * 0.5);
         if (mid){ ctx.strokeStyle = "#ff5a4a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mid.sx, mid.sy, Math.max(10, 16 * mid.scale), 0, 7); ctx.stroke(); } }
     }
-    for (const f of G.fx) Render3D._fx(ctx, cam, f);
+    for (const f of G.fx){ if (f.type === "tracer" || f.type === "boom") continue; Render3D._fx(ctx, cam, f); } // 曳光/爆炸已 3D 化
     if (cam.mode === "follow") Render3D._crosshair(ctx, cam.W, cam.H, cam.horizonY());
   }
 };

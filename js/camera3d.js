@@ -25,6 +25,19 @@ const Camera3D = {
   mode: "overview",
   zoom: 1,             // 縮放（滾輪/雙指捏合）：<1 拉近、>1 拉遠，clamp 見 setZoom
   setZoom(z){ this.zoom = Math.max(0.4, Math.min(2.4, z)); },
+  pan: { x: 0, y: 0 }, // 俯瞰平移（世界座標偏移；拖曳空地改變）
+  panBy(dxScreen, dyScreen, map){
+    // 「抓住地圖」語感：內容跟著手指走。靈敏度=畫面中心的世界單位/像素
+    const sens = this.ch / this.focal * 1.15;
+    const fx = Math.cos(this.yaw), fy = Math.sin(this.yaw);   // 前向
+    const rx = -Math.sin(this.yaw), ry = Math.cos(this.yaw);  // 螢幕右
+    this.pan.x += fx * dyScreen * sens - rx * dxScreen * sens;
+    this.pan.y += fy * dyScreen * sens - ry * dxScreen * sens;
+    const mw = (map && map.w) || 960, mh = (map && map.h) || 600;
+    this.pan.x = Math.max(-mw, Math.min(mw, this.pan.x));
+    this.pan.y = Math.max(-mh * 0.8, Math.min(mh * 0.8, this.pan.y));
+  },
+  resetView(){ this.zoom = 1; this.pan.x = 0; this.pan.y = 0; },
 
   // 目前生效相機狀態（project/unproject 讀這些）
   cx: 0, cy: 0, ch: 0, yaw: 0,
@@ -77,8 +90,8 @@ const Camera3D = {
     const lookPlus = base ? base.x < mw / 2 : true;       // 玩家在左半 → 面向 +x
     out.yaw = lookPlus ? 0 : Math.PI;
     out.ch = this.oHeight * s;
-    out.cx = lookPlus ? -this.oBack * s : mw + this.oBack * s; // 退到玩家邊界外
-    out.cy = mh / 2;
+    out.cx = (lookPlus ? -this.oBack * s : mw + this.oBack * s) + this.pan.x; // 退到玩家邊界外＋拖曳平移
+    out.cy = mh / 2 + this.pan.y;
     return out;
   },
 

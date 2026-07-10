@@ -35,7 +35,7 @@ const Game = {
     // 手機觸控：單指=點擊/拖曳；雙指=捏合縮放（縮放時取消移動操控）
     const pinchD = e => Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
     this.canvas.addEventListener("touchstart", e=>{ if(e.cancelable) e.preventDefault(); this._touch=true;
-      if (e.touches.length>=2){ this._pinch=pinchD(e); this._steer3d=null; return; }
+      if (e.touches.length>=2){ this._pinch=pinchD(e); this._steer3d=null; this._mapDrag=null; return; }
       const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0); }, {passive:false});
     this.canvas.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault();
       if (e.touches.length>=2){ const d=pinchD(e); if(this._pinch){ Camera3D.setZoom(Camera3D.zoom*this._pinch/d); } this._pinch=d; return; }
@@ -60,6 +60,7 @@ const Game = {
     this.nations[0]=atkNation; this.nations[1]=defNation;
     this.playerSide = playerSide;
     this.units=[]; this.fx=[]; this.turn=1; this.over=null; this.hintIdx=0;
+    if (typeof Camera3D!=="undefined") Camera3D.resetView();   // 縮放/平移歸位
     Fog.reset();
     this.budgetLeft = this.map.budget;
     this.deployCls = null;
@@ -286,8 +287,12 @@ const Game = {
     if (this.state==="menu"||!this.map) return;
     // 全程 3D：把螢幕點反投影成地面世界座標（相機依狀態 overview/follow）
     const w = (typeof Camera3D!=="undefined") ? (Camera3D.applyFor(this,true), Camera3D.unproject(x,y)) : [x,y];
-    if (this.state==="deploy"){ if (w) this.deployClick(w[0],w[1],button); return; }
-    if (this.state==="cmd"){    if (w) this.cmdClick(w[0],w[1]); return; }
+    if (this.state==="deploy" || this.state==="cmd"){
+      if (button===2){ if (w && this.state==="deploy") this.deployClick(w[0],w[1],2); return; } // 右鍵立即（移除部署）
+      // 按下先記錄：輕點=選兵/部署、按住拖曳=平移視角（俯瞰可看清敵陣）
+      this._mapDrag = { sx:x, sy:y, wx:(w?w[0]:null), wy:(w?w[1]:null), moved:false, t:Date.now() };
+      return;
+    }
     if (this.state==="act"){
       // 行動模式相對操控：按下先記步（拖曳=轉向/前進、快速輕點=瞄準/停）
       if (Net.connected && Net.myside!==this.turnOwner) return;
@@ -395,6 +400,17 @@ const Game = {
   /* 拖曳操控：手指/滑鼠移動時持續更新移動目標 */
   /* 行動模式相對操控：拖曳的垂直分量=前進/後退、水平分量=轉向（沿用相機 yaw，穩定不甩） */
   _pointerMove(clientX, clientY){
+    // 俯瞰（指令/部署）拖曳 → 平移視角
+    if (this._mapDrag){
+      const [cx,cy]=this._toWorld(clientX,clientY);
+      const dx = cx - this._mapDrag.sx, dy = cy - this._mapDrag.sy;
+      if (Math.hypot(dx,dy) > 10) this._mapDrag.moved = true;
+      if (this._mapDrag.moved){
+        Camera3D.panBy(dx, dy, this.map);
+        this._mapDrag.sx = cx; this._mapDrag.sy = cy;
+      }
+      return;
+    }
     if (this.state!=="act" || !this._steer3d || !this.sel) return;
     if (Net.connected && Net.myside!==this.turnOwner) return;
     const [cx,cy]=this._toWorld(clientX,clientY);           // 螢幕(canvas)座標
@@ -405,6 +421,15 @@ const Game = {
   },
   /* 放開：快速輕點=瞄準/停；拖曳=結束操控（停止移動） */
   _pointerUp(){
+    // 俯瞰：輕點才觸發原本的選兵/部署
+    if (this._mapDrag){
+      const d = this._mapDrag; this._mapDrag = null;
+      if (!d.moved && Date.now()-d.t < 500 && d.wx!=null){
+        if (this.state==="deploy") this.deployClick(d.wx, d.wy, 0);
+        else if (this.state==="cmd") this.cmdClick(d.wx, d.wy);
+      }
+      return;
+    }
     if (!this._steer3d) return;
     const held = Date.now() - this._steer3d.t;
     if (held < 260 && !this._steer3d.moved){
@@ -721,7 +746,7 @@ const Game = {
       if(horiz){ c.moveTo(t.x,cym); c.lineTo(t.x+t.w,cym); } else { c.moveTo(cxm,t.y); c.lineTo(cxm,t.y+t.h); } c.stroke();
     }
     // 草叢（隱蔽帶，可走入）：一片高草——底色斑 + 大量草葉（戰場女武神式）
-    for(const b of m.bushes){
+    for(const b of (m.bushes||[])){
       c.fillStyle="rgba(40,74,32,0.5)"; c.beginPath(); c.ellipse(b.x,b.y,b.r,b.r*0.8,0,0,7); c.fill();
       c.fillStyle="rgba(66,110,48,0.55)"; c.beginPath(); c.ellipse(b.x,b.y,b.r*0.78,b.r*0.6,0,0,7); c.fill();
       let bs=b.x*7+b.y; const brnd=()=>((bs=bs*16807%2147483647)/2147483647);
@@ -737,7 +762,7 @@ const Game = {
       c.fillStyle="#4a3826"; c.beginPath(); c.arc(t.x,t.y,Math.max(4,t.r*0.22),0,7); c.fill();
     }
     // 沙包：一排麻袋
-    for(const s of m.sandbags){
+    for(const s of (m.sandbags||[])){
       const horiz=s.w>=s.h, n=Math.max(2,Math.round((horiz?s.w:s.h)/14));
       for(let i=0;i<n;i++){ const cx=horiz? s.x+(i+0.5)*s.w/n : s.x+s.w/2,
         cy=horiz? s.y+s.h/2 : s.y+(i+0.5)*s.h/n;
@@ -746,7 +771,7 @@ const Game = {
         c.strokeStyle="rgba(80,66,40,0.5)"; c.beginPath(); c.moveTo(cx-5,cy); c.lineTo(cx+5,cy); c.stroke(); }
     }
     // 建築：陰影 + 屋頂高光 + 窗
-    for(const s of m.solids){
+    for(const s of (m.solids||[])){
       c.fillStyle="rgba(0,0,0,0.22)"; c.fillRect(s.x+4,s.y+5,s.w,s.h);
       c.fillStyle="#6e6a63"; c.fillRect(s.x,s.y,s.w,s.h);
       c.fillStyle="#807b72"; c.fillRect(s.x,s.y,s.w,6);
