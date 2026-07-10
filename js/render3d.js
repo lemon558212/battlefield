@@ -227,6 +227,18 @@ const Render3D = {
     ctx.strokeStyle = "#4a473f"; ctx.lineWidth = 1.5; this._fillPathStroke(ctx, top);
   },
 
+  /* AI 立繪載入（assets/billboards/{key}.png）：false=載入中/失敗，Image=可用 */
+  _bbImgs: {},
+  _bbImg(key){
+    if (key in this._bbImgs) return this._bbImgs[key] || null;
+    this._bbImgs[key] = false;
+    const i = new Image();
+    i.onload = () => { this._bbImgs[key] = i; };
+    i.onerror = () => { this._bbImgs[key] = false; };
+    i.src = "assets/billboards/" + key + ".png";
+    return null;
+  },
+
   /* 樹木（真障礙）：樹幹 + 疊層樹冠 billboard。verdun 枯樹(r 小)畫禿枝 */
   _tree(ctx, cam, t, m){
     const base = cam.project(t.x, t.y, 0); if (!base) return;
@@ -284,8 +296,25 @@ const Render3D = {
     const sside = rel > 0 ? 1 : -1;   // 側面時武器/朝向的左右
 
     const cx = baseA.sx, by = baseA.sy; // 立繪底部中心
+    // AI 立繪 billboard（assets/billboards/）：士兵有 前/後 兩張，載具單張側面；缺圖用程式化 fallback
+    const isVeh = u.cls === "tank" || u.domain === "sea" || u.domain === "air";
+    const img = isVeh ? this._bbImg(u.cls)
+              : (view === "back" ? (this._bbImg(u.cls + "_back") || this._bbImg(u.cls)) : this._bbImg(u.cls));
     ctx.save();
-    if (u.cls === "tank") this._bbTank(ctx, cx, by, h, c, edge, view, sside);
+    if (img){
+      const iw = h * (img.naturalWidth / img.naturalHeight);
+      // 側面時依朝向水平翻轉（載具恆依朝向翻轉）
+      const flip = isVeh ? (sside < 0) : (view === "side" && sside < 0);
+      ctx.translate(cx, by);
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(img, -iw / 2, -h, iw, h);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      // 敵我識別：腳底色環（圖片無描邊）
+      ctx.strokeStyle = edge; ctx.lineWidth = 2; ctx.globalAlpha = 0.8;
+      ctx.beginPath(); ctx.ellipse(cx, by, Math.max(8, iw * 0.32), Math.max(3, iw * 0.10), 0, 0, 7); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    else if (u.cls === "tank") this._bbTank(ctx, cx, by, h, c, edge, view, sside);
     else if (u.domain === "sea") this._bbShip(ctx, cx, by, h, c, edge);
     else if (u.domain === "air") this._bbAir(ctx, cx, by, h, c, edge);
     else this._bbSoldier(ctx, cx, by, h, c, edge, u, view, sside);
