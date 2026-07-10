@@ -35,7 +35,7 @@ const Engine3D = {
 
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x8fb8dc);
-      this.scene.fog = new THREE.Fog(0xd9e3ea, 750, 2400);
+      this.scene.fog = new THREE.Fog(0xd9e3ea, 1150, 3400);   // 拉遠霧距：俯瞰不洗白、遠景仍朦朧
 
       this.camera = new THREE.PerspectiveCamera(65, 960 / 600, 2, 6000);
 
@@ -144,6 +144,102 @@ const Engine3D = {
     return h;
   },
 
+  /* 修正 sRGB 輸出下的純色材質：hex 色值是 sRGB 直覺色，需轉線性才不會渲染偏白 */
+  _linearize(root){
+    root.traverse(o => {
+      if (!o.isMesh && !o.isInstancedMesh) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const mt of ms){
+        if (mt && mt.isMeshLambertMaterial && !mt.map && mt.color && !mt._lin){
+          mt.color.convertSRGBToLinear(); mt._lin = true;
+        }
+      }
+    });
+  },
+
+  /* ---------- 程序化材質工廠（零素材：canvas 手繪，依地圖種子固定） ---------- */
+  _rng(str){
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) h = ((h ^ str.charCodeAt(i)) * 16777619) >>> 0;
+    return () => ((h = (h * 1664525 + 1013904223) >>> 0) / 4294967296);
+  },
+  /* 牆面：灰泥底＋斑駁污漬＋兩排窗（玻璃反光/窗櫺）＋隨機木門＋底部濺泥 */
+  _wallTex(rnd){
+    const cv = document.createElement("canvas"); cv.width = 256; cv.height = 128;
+    const c = cv.getContext("2d");
+    const palette = ["#b8a888", "#a89a80", "#9a948a", "#b5ab96", "#8f8878", "#a99783"];
+    c.fillStyle = palette[(rnd() * palette.length) | 0]; c.fillRect(0, 0, 256, 128);
+    for (let i = 0; i < 90; i++){
+      c.fillStyle = `rgba(${rnd() < 0.5 ? "0,0,0" : "255,255,255"},${(0.02 + rnd() * 0.05).toFixed(3)})`;
+      const x = rnd() * 256, y = rnd() * 128, r = 3 + rnd() * 14;
+      c.beginPath(); c.ellipse(x, y, r, r * 0.6, 0, 0, 7); c.fill();
+    }
+    const mud = c.createLinearGradient(0, 92, 0, 128);
+    mud.addColorStop(0, "rgba(58,48,34,0)"); mud.addColorStop(1, "rgba(58,48,34,0.45)");
+    c.fillStyle = mud; c.fillRect(0, 92, 256, 36);
+    const doorAt = rnd() < 0.75 ? (rnd() * 4) | 0 : -1;
+    for (let row = 0; row < 2; row++){
+      const wy = row ? 72 : 20;
+      for (let i = 0; i < 4; i++){
+        const wx = 20 + i * 60;
+        if (row === 1 && i === doorAt){                                  // 一樓此格改木門
+          c.fillStyle = "#4a3a28"; c.fillRect(wx - 3, 66, 32, 62);
+          c.fillStyle = "#3a2d1e"; c.fillRect(wx + 1, 72, 24, 56);
+          c.fillStyle = "#c9b07a"; c.fillRect(wx + 19, 100, 3, 6);       // 門把
+          continue;
+        }
+        c.fillStyle = "#2c2f33"; c.fillRect(wx, wy, 26, 32);
+        c.fillStyle = "rgba(150,180,205,0.5)"; c.fillRect(wx + 2, wy + 2, 22, 13); // 玻璃反光
+        c.lineWidth = 3; c.strokeStyle = "#55483a"; c.strokeRect(wx - 1.5, wy - 1.5, 29, 35);
+        c.fillStyle = "#55483a"; c.fillRect(wx, wy + 15, 26, 2.5);       // 窗櫺
+        if (rnd() < 0.25){ c.fillStyle = "rgba(20,22,24,0.85)"; c.fillRect(wx + 2, wy + 2, 22, 28); } // 破窗
+      }
+    }
+    const t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; return t;
+  },
+  /* 接觸陰影：放射漸層黑圓（假 AO，鋪在建物/樹底） */
+  _shadowTex(){
+    if (this._shTex) return this._shTex;
+    const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+    const c = cv.getContext("2d"), g = c.createRadialGradient(32, 32, 4, 32, 32, 32);
+    g.addColorStop(0, "rgba(0,0,0,0.42)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    return (this._shTex = new THREE.CanvasTexture(cv));
+  },
+  _contactShadow(grp, x, y, w, d, hg){
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
+      new THREE.MeshBasicMaterial({ map: this._shadowTex(), transparent: true, depthWrite: false }));
+    s.rotation.x = -Math.PI / 2; s.position.set(x, hg + 0.42, y); grp.add(s);
+  },
+  /* 草叢：透明底手繪草葉（交叉面片用） */
+  _grassTex(){
+    if (this._grTex) return this._grTex;
+    const cv = document.createElement("canvas"); cv.width = 64; cv.height = 48;
+    const c = cv.getContext("2d");
+    for (let i = 0; i < 26; i++){
+      const x = 6 + Math.random() * 52, sway = Math.random() * 14 - 7, h = 22 + Math.random() * 24;
+      c.strokeStyle = `rgb(${60 + Math.random() * 40 | 0},${110 + Math.random() * 50 | 0},${45 + Math.random() * 30 | 0})`;
+      c.lineWidth = 1.6 + Math.random();
+      c.beginPath(); c.moveTo(x, 48); c.quadraticCurveTo(x + sway * 0.4, 48 - h * 0.6, x + sway, 48 - h); c.stroke();
+    }
+    this._grTex = new THREE.CanvasTexture(cv);
+    this._grTex.encoding = THREE.sRGBEncoding;
+    return this._grTex;
+  },
+  /* 雲：柔邊白棉團 */
+  _cloudTex(){
+    if (this._clTex) return this._clTex;
+    const cv = document.createElement("canvas"); cv.width = 256; cv.height = 128;
+    const c = cv.getContext("2d");
+    for (let i = 0; i < 14; i++){
+      const x = 40 + Math.random() * 176, y = 45 + Math.random() * 40, r = 18 + Math.random() * 30;
+      const g = c.createRadialGradient(x, y, 2, x, y, r);
+      g.addColorStop(0, "rgba(255,255,255,0.55)"); g.addColorStop(1, "rgba(255,255,255,0)");
+      c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+    }
+    return (this._clTex = new THREE.CanvasTexture(cv));
+  },
+
   /* ---------- 靜態地圖場景 ---------- */
   buildMap(G){
     const m = G.map, mw = m.w || 960, mh = m.h || 600;
@@ -159,7 +255,7 @@ const Engine3D = {
     sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.far = 3200 * S;
     sc.updateProjectionMatrix();
     sun.target.position.set(mw / 2, 0, mh / 2);
-    this.scene.fog.near = 750 * S; this.scene.fog.far = 2400 * S;
+    this.scene.fog.near = 1150 * S; this.scene.fog.far = 3400 * S;
     this.camera.far = 6000 * S;
 
     // 遠景大地（地圖外圍基色，接天際）
@@ -175,6 +271,7 @@ const Engine3D = {
       gr.addColorStop(0, "#4f8ac9"); gr.addColorStop(0.55, "#9ec6e6"); gr.addColorStop(0.78, "#e8ddc2"); gr.addColorStop(1, "#efe6cf");
       g2.fillStyle = gr; g2.fillRect(0, 0, 1, 256);
       this._skyTex = new THREE.CanvasTexture(sc2);
+      this._skyTex.encoding = THREE.sRGBEncoding;
     }
     const sky = new THREE.Mesh(new THREE.SphereGeometry(4200 * S, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
       new THREE.MeshBasicMaterial({ map: this._skyTex, side: THREE.BackSide, fog: false }));
@@ -185,6 +282,7 @@ const Engine3D = {
     if (!G._bg || G._bgMap !== m) G.buildTerrain(m);
     const tex = new THREE.CanvasTexture(G._bg);
     tex.anisotropy = 4;
+    tex.encoding = THREE.sRGBEncoding;   // 渲染器輸出 sRGB，貼圖必須同標記，否則整張洗白
     const segX = Math.min(200, Math.round(mw / 10)), segY = Math.min(140, Math.round(mh / 10));
     const geo = new THREE.PlaneGeometry(mw, mh, segX, segY);
     geo.rotateX(-Math.PI / 2);                 // 幾何本身轉平（頂點 y=高度、x/z=世界）
@@ -198,16 +296,39 @@ const Engine3D = {
     gnd.receiveShadow = true;
     grp.add(gnd);
 
-    // 建築：擠出盒 + 屋頂
-    const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e6a63 });
-    const roofMat = new THREE.MeshLambertMaterial({ color: 0x57534c });
+    // 建築：窗戶牆面材質＋斜屋頂＋高矮錯落＋煙囪＋接觸陰影
+    const rnd = this._rng((m.ground || "") + mw + "x" + mh);
+    const wallTexes = [this._wallTex(rnd), this._wallTex(rnd), this._wallTex(rnd)];
+    const roofCols = [0x7a4a38, 0x5a5f66, 0x6b5140, 0x4e585e];
+    const topMat = new THREE.MeshLambertMaterial({ color: 0x8f887c });
+    const brickMat = new THREE.MeshLambertMaterial({ color: 0x6e4636 });
     for (const s of (m.solids || [])){
-      const hg = this.heightAt(s.x + s.w / 2, s.y + s.h / 2);
-      const b = new THREE.Mesh(new THREE.BoxGeometry(s.w, 42, s.h), wallMat);
-      b.position.set(s.x + s.w / 2, 21 + hg, s.y + s.h / 2);
+      const cx = s.x + s.w / 2, cz = s.y + s.h / 2, hg = this.heightAt(cx, cz);
+      const bh = 36 + rnd() * 18;                                        // 樓高錯落
+      const wall = new THREE.MeshLambertMaterial({ map: wallTexes[(rnd() * 3) | 0] });
+      const b = new THREE.Mesh(new THREE.BoxGeometry(s.w, bh, s.h),
+        [wall, wall, topMat, topMat, wall, wall]);                        // 側面窗牆、頂面素色
+      b.position.set(cx, bh / 2 + hg, cz);
       b.castShadow = b.receiveShadow = true; grp.add(b);
-      const r = new THREE.Mesh(new THREE.BoxGeometry(s.w + 4, 3, s.h + 4), roofMat);
-      r.position.set(s.x + s.w / 2, 43.5 + hg, s.y + s.h / 2); r.castShadow = true; grp.add(r);
+      // 斜屋頂（三角柱擠出，屋脊沿長邊）
+      const alongX = s.w >= s.h;
+      const len = (alongX ? s.w : s.h) + 5, wid = (alongX ? s.h : s.w) + 5;
+      const roofH = wid * (0.28 + rnd() * 0.12);
+      const shp = new THREE.Shape();
+      shp.moveTo(-wid / 2, 0); shp.lineTo(wid / 2, 0); shp.lineTo(0, roofH); shp.closePath();
+      const rg = new THREE.ExtrudeGeometry(shp, { depth: len, bevelEnabled: false });
+      rg.translate(0, 0, -len / 2);
+      const roof = new THREE.Mesh(rg, new THREE.MeshLambertMaterial({ color: roofCols[(rnd() * roofCols.length) | 0] }));
+      roof.rotation.y = alongX ? Math.PI / 2 : 0;
+      roof.position.set(cx, bh + hg - 0.5, cz); roof.castShadow = true; grp.add(roof);
+      if (rnd() < 0.55){                                                  // 煙囪
+        const ch = new THREE.Mesh(new THREE.BoxGeometry(4, roofH + 8, 4), brickMat);
+        ch.position.set(cx + (alongX ? (rnd() - 0.5) * s.w * 0.5 : s.w * 0.18),
+                        bh + roofH * 0.5 + 3 + hg,
+                        cz + (alongX ? s.h * 0.18 : (rnd() - 0.5) * s.h * 0.5));
+        ch.castShadow = true; grp.add(ch);
+      }
+      this._contactShadow(grp, cx, cz, s.w + 18, s.h + 18, hg);
     }
     // 碉堡：低矮混凝土 + 射口帶
     const bunkMat = new THREE.MeshLambertMaterial({ color: 0x8d8a80 });
@@ -219,20 +340,41 @@ const Engine3D = {
       const s1 = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.6, 3.5, b.h + 0.6), slitMat);
       s1.position.set(b.x + b.w / 2, 14 + hg, b.y + b.h / 2); grp.add(s1);
     }
-    // 樹：幹 + 疊層樹冠（r<18 枯樹只留枝幹）
+    // 樹：三型混生（針葉塔/闊葉團/枯樹枝幹）＋色調與姿態抖動＋樹底陰影
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
-    const leafMat = new THREE.MeshLambertMaterial({ color: 0x3a6030 });
-    const leafMat2 = new THREE.MeshLambertMaterial({ color: 0x4c7a3c });
+    const leafMats = [0x3a6030, 0x4c7a3c, 0x2f5228, 0x5c7f38, 0x466b2e]
+      .map(c0 => new THREE.MeshLambertMaterial({ color: c0 }));
     for (const t of (m.trees || [])){
-      const dead = t.r < 18, hT = dead ? 26 : 34 + t.r * 0.5, hg = this.heightAt(t.x, t.y);
-      const tr = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(1.6, t.r * 0.14), Math.max(2.2, t.r * 0.2), hT, 6), trunkMat);
-      tr.position.set(t.x, hT / 2 + hg, t.y); tr.castShadow = true; grp.add(tr);
-      if (!dead){
-        const c1 = new THREE.Mesh(new THREE.ConeGeometry(t.r * 0.95, t.r * 1.5, 7), leafMat);
-        c1.position.set(t.x, hT * 0.72 + t.r * 0.5 + hg, t.y); c1.castShadow = true; grp.add(c1);
-        const c2 = new THREE.Mesh(new THREE.ConeGeometry(t.r * 0.62, t.r * 1.1, 7), leafMat2);
-        c2.position.set(t.x, hT * 0.72 + t.r * 1.15 + hg, t.y); c2.castShadow = true; grp.add(c2);
+      const tr0 = this._rng("t" + t.x + "," + t.y);
+      const dead = t.r < 18, hg = this.heightAt(t.x, t.y);
+      const hT = dead ? 24 + tr0() * 8 : 30 + t.r * 0.5 + tr0() * 10;
+      const tr = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(1.6, t.r * 0.13), Math.max(2.4, t.r * 0.2), hT, 6), trunkMat);
+      tr.position.set(t.x, hT / 2 + hg, t.y);
+      tr.rotation.z = (tr0() - 0.5) * 0.1; tr.castShadow = true; grp.add(tr);
+      if (dead){                                                          // 枯樹：兩根斜枝
+        for (let i = 0; i < 2; i++){
+          const br = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.1, 10 + tr0() * 6, 5), trunkMat);
+          br.position.set(t.x + (tr0() - 0.5) * 5, hT * (0.55 + tr0() * 0.3) + hg, t.y + (tr0() - 0.5) * 5);
+          br.rotation.z = 0.6 + tr0() * 0.9; br.rotation.y = tr0() * 6.28;
+          br.castShadow = true; grp.add(br);
+        }
+      } else if (tr0() < 0.45){                                           // 針葉：三層塔
+        for (let i = 0; i < 3; i++){
+          const rr = t.r * (0.95 - i * 0.24), mat = leafMats[(tr0() * leafMats.length) | 0];
+          const c1 = new THREE.Mesh(new THREE.ConeGeometry(rr, t.r * (1.15 - i * 0.18), 7), mat);
+          c1.position.set(t.x, hT * 0.55 + t.r * (0.45 + i * 0.5) + hg, t.y);
+          c1.castShadow = true; grp.add(c1);
+        }
+      } else {                                                            // 闊葉：不規則球團
+        for (let i = 0; i < 3; i++){
+          const rr = t.r * (0.55 + tr0() * 0.35), mat = leafMats[(tr0() * leafMats.length) | 0];
+          const bl = new THREE.Mesh(new THREE.IcosahedronGeometry(rr, 1), mat);
+          bl.position.set(t.x + (tr0() - 0.5) * t.r * 0.8, hT * 0.85 + (tr0() - 0.3) * t.r * 0.5 + hg,
+                          t.y + (tr0() - 0.5) * t.r * 0.8);
+          bl.scale.y = 0.82; bl.castShadow = true; grp.add(bl);
+        }
       }
+      this._contactShadow(grp, t.x, t.y, t.r * 2.2, t.r * 2.2, hg);
     }
     // 主堡旗桿
     for (const b of (m.bases || [])){
@@ -244,6 +386,135 @@ const Engine3D = {
       const ring = new THREE.Mesh(new THREE.RingGeometry(12, 16, 24), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55 }));
       ring.rotation.x = -Math.PI / 2; ring.position.set(b.x, 0.25 + hg, b.y); grp.add(ring);
     }
+
+    // 沙包：一顆顆堆疊的立體沙包牆（InstancedMesh，兩層交錯）
+    {
+      const bags = [];
+      for (const sb of (m.sandbags || []).concat(m.reefs ? [] : [])){
+        const horiz = sb.w >= sb.h, L = horiz ? sb.w : sb.h;
+        const n = Math.max(3, Math.round(L / 7));
+        for (let lay = 0; lay < 2; lay++){
+          for (let i = 0; i < n - lay; i++){
+            const f = (i + 0.5 + lay * 0.5) / n;
+            bags.push({
+              x: sb.x + (horiz ? f * sb.w : sb.w / 2) + (rnd() - 0.5) * 1.4,
+              y: sb.y + (horiz ? sb.h / 2 : f * sb.h) + (rnd() - 0.5) * 1.4,
+              h: 1.6 + lay * 3.1, ry: (horiz ? 0 : Math.PI / 2) + (rnd() - 0.5) * 0.3,
+              s: 0.9 + rnd() * 0.25
+            });
+          }
+        }
+      }
+      if (bags.length){
+        const bagGeo = new THREE.SphereGeometry(1, 7, 5); bagGeo.scale(3.6, 1.8, 2.3);
+        const inst = new THREE.InstancedMesh(bagGeo, new THREE.MeshLambertMaterial({ color: 0x9d8b63 }), bags.length);
+        const d = new THREE.Object3D();
+        bags.forEach((b, i) => {
+          d.position.set(b.x, b.h + this.heightAt(b.x, b.y), b.y);
+          d.rotation.set(0, b.ry, 0); d.scale.setScalar(b.s);
+          d.updateMatrix(); inst.setMatrixAt(i, d.matrix);
+        });
+        inst.castShadow = true; grp.add(inst);
+      }
+    }
+
+    // 鐵絲網：木樁＋三道鐵線＋交錯斜線（樁 InstancedMesh、線一筆 LineSegments）
+    {
+      const posts = [], segs = [];
+      for (const w of (m.wires || [])){
+        const horiz = w.w >= w.h, L = horiz ? w.w : w.h;
+        const n = Math.max(2, Math.round(L / 16)) + 1;
+        const pts = [];
+        for (let i = 0; i < n; i++){
+          const f = i / (n - 1);
+          const px = w.x + (horiz ? f * w.w : w.w / 2), py = w.y + (horiz ? w.h / 2 : f * w.h);
+          pts.push([px, py, this.heightAt(px, py)]);
+          posts.push({ x: px, y: py });
+        }
+        for (let i = 0; i < pts.length - 1; i++){
+          const [ax, ay, ah] = pts[i], [bx, by, bh2] = pts[i + 1];
+          for (const hh of [2.6, 5.4, 8.0])                                        // 三道橫線
+            segs.push(ax, ah + hh, ay, bx, bh2 + hh, by);
+          segs.push(ax, ah + 2.6, ay, bx, bh2 + 8.0, by);                          // 交錯斜線
+          segs.push(ax, ah + 8.0, ay, bx, bh2 + 2.6, by);
+        }
+      }
+      if (posts.length){
+        const pGeo = new THREE.CylinderGeometry(0.55, 0.7, 9.5, 5);
+        const pInst = new THREE.InstancedMesh(pGeo, new THREE.MeshLambertMaterial({ color: 0x4c3a26 }), posts.length);
+        const d = new THREE.Object3D();
+        posts.forEach((p, i) => {
+          d.position.set(p.x, 4.75 + this.heightAt(p.x, p.y), p.y);
+          d.rotation.set(0, 0, (rnd() - 0.5) * 0.12); d.updateMatrix(); pInst.setMatrixAt(i, d.matrix);
+        });
+        pInst.castShadow = true; grp.add(pInst);
+        const lg = new THREE.BufferGeometry();
+        lg.setAttribute("position", new THREE.Float32BufferAttribute(segs, 3));
+        grp.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x3d3d38 })));
+      }
+    }
+
+    // 散景：草叢（交叉面片）＋岩石，避開水域/建物/碉堡
+    {
+      const ok = (x, y) => !(G.isWater && G.isWater(x, y)) &&
+        !G.inAny(m.solids, x, y) && !G.inAny(m.bunkers, x, y) && !G.inAny(m.waters, x, y);
+      const tufts = [];
+      for (let i = 0, tries = 0; i < 130 * S && tries < 600; tries++){
+        const x = rnd() * mw, y = rnd() * mh;
+        if (!ok(x, y)) continue;
+        tufts.push({ x, y, r: rnd() * Math.PI, s: 0.8 + rnd() * 1.1 }); i++;
+      }
+      if (tufts.length){
+        const quad = new THREE.PlaneGeometry(7, 5.5);
+        const gMat = new THREE.MeshLambertMaterial({ map: this._grassTex(), transparent: true,
+          alphaTest: 0.35, side: THREE.DoubleSide });
+        for (const rot of [0, Math.PI / 2]){
+          const inst = new THREE.InstancedMesh(quad, gMat, tufts.length);
+          const d = new THREE.Object3D();
+          tufts.forEach((t, i) => {
+            d.position.set(t.x, 2.4 * t.s + this.heightAt(t.x, t.y), t.y);
+            d.rotation.set(0, t.r + rot, 0); d.scale.setScalar(t.s);
+            d.updateMatrix(); inst.setMatrixAt(i, d.matrix);
+          });
+          grp.add(inst);
+        }
+      }
+      const rocks = [];
+      for (let i = 0, tries = 0; i < 36 * S && tries < 300; tries++){
+        const x = rnd() * mw, y = rnd() * mh;
+        if (!ok(x, y)) continue;
+        rocks.push({ x, y, s: 1.2 + rnd() * 2.6, r: rnd() * Math.PI * 2 }); i++;
+      }
+      if (rocks.length){
+        const inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
+          new THREE.MeshLambertMaterial({ color: 0x7d7a70 }), rocks.length);
+        const d = new THREE.Object3D();
+        rocks.forEach((r, i) => {
+          d.position.set(r.x, r.s * 0.45 + this.heightAt(r.x, r.y), r.y);
+          d.rotation.set(r.r, r.r * 2.3, 0); d.scale.set(r.s, r.s * 0.7, r.s * 0.85);
+          d.updateMatrix(); inst.setMatrixAt(i, d.matrix);
+        });
+        inst.castShadow = true; grp.add(inst);
+      }
+    }
+
+    // 天空生氣：太陽光暈 + 飄浮雲層（Sprite 恆面向相機，不受霧影響）
+    {
+      const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: this._shadowTex(), // 佔位，下行改色
+        color: 0xfff3c0, transparent: true, opacity: 0.9, fog: false,
+        blending: THREE.AdditiveBlending, depthWrite: false }));
+      sunSpr.material.map = this._cloudTex();
+      sunSpr.position.set(mw * 0.79, 560 * S, mh * 0.13); sunSpr.scale.set(260 * S, 130 * S, 1);
+      grp.add(sunSpr);
+      for (let i = 0; i < 6; i++){
+        const cl = new THREE.Sprite(new THREE.SpriteMaterial({ map: this._cloudTex(),
+          transparent: true, opacity: 0.35 + rnd() * 0.3, fog: false, depthWrite: false }));
+        cl.position.set(rnd() * mw * 1.6 - mw * 0.3, (330 + rnd() * 220) * S, rnd() * mh * 1.6 - mh * 0.3);
+        cl.scale.set((320 + rnd() * 380) * S, (90 + rnd() * 120) * S, 1);
+        grp.add(cl);
+      }
+    }
+    this._linearize(grp);
     this.scene.add(grp);
     // 舊單位快取全清（換圖重建）
     for (const id in this._units){ this.scene.remove(this._units[id]); }
@@ -268,7 +539,7 @@ const Engine3D = {
     if (mdl0){
       g.add(mdl0);
       if (isInfantry) g.add(this._classGear(u));
-      this._addRing(g, u, G); return g;
+      this._addRing(g, u, G); this._linearize(g); return g;
     }
 
     if (u.cls === "tank"){
@@ -311,6 +582,7 @@ const Engine3D = {
       g.add(this._classGear(u));   // 幾何體 fallback 也掛兵種裝備
     }
     this._addRing(g, u, G);
+    this._linearize(g);
     return g;
   },
   /* ---------- 兵種專屬裝備（掛在士兵模型上，一眼認出兵種） ----------
