@@ -115,6 +115,10 @@ const UI = {
     const img = chr ? (chr.fullPortrait || chr.portrait) : vart;
     if (!img){ el.style.display = "none"; return; }
     const named = !!u.charName;
+    if (named && typeof Sfx !== "undefined" && el.dataset.lastVoiced !== String(u.id)){
+      el.dataset.lastVoiced = String(u.id);
+      Sfx.voice(u.cls, "sel");
+    }
     el.innerHTML = `
       <img src="${img}" alt="" class="${vart ? "veh" : ""}">
       <div class="cc-info">
@@ -262,6 +266,7 @@ const UI = {
     this.hideAll();
     this.el("side").style.display="block";
     this.showMissionBanner();
+    if (typeof Sfx!=="undefined" && Game.map) Sfx.ambient(Game.map.id, Game.mapAllow());
     this.el("side").innerHTML = `
       <h3 id="hudTurn"></h3><div id="hudCp" class="cp"></div>
       <div id="selInfo" class="panel"></div>
@@ -346,7 +351,7 @@ const UI = {
   },
   showEnd(){
     const win = Game.over.winner===Game.playerSide;
-    if (typeof Sfx!=="undefined"){ Sfx.bgm(null); Sfx.play(win?"victory":"defeat"); }
+    if (typeof Sfx!=="undefined"){ Sfx.bgm(null); Sfx.ambientStop(); Sfx.play(win?"victory":"defeat"); }
     const chN = Game.storyChapter, ch = chN ? STORY[chN-1] : null;
     let extra = "";
     if (ch && win){

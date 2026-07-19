@@ -31,7 +31,7 @@ plain: {
 },
 
 verdun: {
-  id:"verdun", name:"凡爾登絞肉機", ground:"#8a7f63", budget:1500, allow:["land","air"],
+  id:"verdun", name:"凡爾登絞肉機", sky:"dusk", weather:"rain", ground:"#8a7f63", budget:1500, allow:["land","air"],
   /* WWI 塹壕戰：兩側平行塹壕＋中央無人地帶（彈坑、鐵絲網）＋機槍碉堡 */
   trenches:[ {x:150,y:70,w:26,h:180}, {x:150,y:350,w:26,h:180},   // 我方(左)前線壕(縱)
              {x:120,y:290,w:120,h:22},                             // 我方交通壕(橫)
@@ -77,7 +77,7 @@ desert: {
 },
 
 forest: {
-  id:"forest", name:"密林伏擊", ground:"#5f7347", budget:1400, allow:["land","air"],
+  id:"forest", name:"密林伏擊", weather:"rain", ground:"#5f7347", budget:1400, allow:["land","air"],
   solids:[ {x:430,y:120,w:60,h:60}, {x:430,y:420,w:60,h:60}, {x:220,y:290,w:50,h:50}, {x:690,y:290,w:50,h:50} ],
   sandbags:[ {x:380,y:280,w:40,h:12}, {x:540,y:300,w:40,h:12} ],
   trees:[ {x:290,y:110,r:24}, {x:390,y:190,r:26}, {x:580,y:110,r:24}, {x:660,y:190,r:22},
@@ -91,7 +91,7 @@ forest: {
 },
 
 urban: {
-  id:"urban", name:"城市廢墟", ground:"#7d7871", budget:1400, allow:["land","air"],
+  id:"urban", name:"城市廢墟", sky:"dusk", ground:"#7d7871", budget:1400, allow:["land","air"],
   solids:[ {x:220,y:80,w:90,h:110}, {x:220,y:410,w:90,h:110}, {x:650,y:80,w:90,h:110}, {x:650,y:410,w:90,h:110},
            {x:420,y:140,w:120,h:70}, {x:420,y:390,w:120,h:70}, {x:120,y:270,w:70,h:60}, {x:770,y:270,w:70,h:60}, {x:450,y:270,w:60,h:60} ],
   sandbags:[ {x:360,y:260,w:12,h:48}, {x:590,y:260,w:12,h:48}, {x:470,y:220,w:44,h:12}, {x:470,y:380,w:44,h:12} ],
@@ -103,7 +103,7 @@ urban: {
 },
 
 beach: {
-  id:"beach", name:"灘岸登陸", ground:"#8f9a6d", budget:2600, allow:["land","sea","air"],
+  id:"beach", name:"灘岸登陸", sky:"dawn", ground:"#8f9a6d", budget:2600, allow:["land","sea","air"],
   /* 左 1/3 為海（進攻方海空登陸），中段淺灘，右陸縱深 */
   deepwaters:[ {x:0,y:0,w:120,h:600} ],
   waters:[ {x:120,y:0,w:120,h:600} ],
@@ -130,7 +130,7 @@ strait: {
 },
 
 harbor: {
-  id:"harbor", name:"港灣突襲", ground:"#8a8f72", budget:2600, allow:["land","sea","air"],
+  id:"harbor", name:"港灣突襲", sky:"night", ground:"#8a8f72", budget:2600, allow:["land","sea","air"],
   /* 上半陸地碼頭、下半海灣：兩棲＋海空混合戰 */
   deepwaters:[ {x:0,y:380,w:960,h:220} ],
   waters:[ {x:0,y:300,w:960,h:80} ],
@@ -144,7 +144,7 @@ harbor: {
 },
 
 tutorial: {
-  id:"tutorial", name:"教學：台海防衛", ground:"#8f9a6d", budget:2000, tutorial:true, allow:["land","sea","air"],
+  id:"tutorial", name:"教學：台海防衛", sky:"dawn", ground:"#8f9a6d", budget:2000, tutorial:true, allow:["land","sea","air"],
   fixedNations:{ atk:"china", def:"taiwan", playerSide:1 },
   deepwaters:[ {x:0,y:0,w:110,h:600} ],
   waters:[ {x:110,y:0,w:100,h:600} ],

@@ -374,7 +374,7 @@ const Engine3D = {
     for (const key in MODEL_ASSETS){
       const a=MODEL_ASSETS[key];
       if(!a.url){this._modelState[key]="missing";continue;}
-      defs[key]={url:a.url,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy,selfGear:!!a.selfGear};
+      defs[key]={url:a.url,alt:a.alt,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy,selfGear:!!a.selfGear};
     }
     const byUrl = {};                                     // 同 URL 只下載/解析一次
     for (const key in defs){ if (!defs[key].lazy) (byUrl[defs[key].url] = byUrl[defs[key].url] || []).push(key); }
@@ -451,6 +451,14 @@ const Engine3D = {
           setTimeout(() => { const again = {}; again[url] = keys; this._loadGroups(again); }, 1200 * (n + 1));
           return;
         }
+        const altUrl = defs[keys[0]] && defs[keys[0]].alt;             // 換備援副檔名再試（防毒/過濾器攔 .glb 對策）
+        if (altUrl && altUrl !== url && !this._loadRetries[altUrl]){
+          this._loadRetries[altUrl] = 1;
+          for (const key of keys) delete this._modelState[key];
+          const again = {}; again[altUrl] = keys;
+          setTimeout(() => this._loadGroups(again), 500);
+          return;
+        }
         this._loadError(url, error);                                   // 最終失敗：畫面明示原因
         for (const key of keys) this._modelState[key] = "failed";      // 走幾何 fallback
       };
@@ -490,7 +498,8 @@ const Engine3D = {
       const base=idle||walk||run||move||m.anims[0];
       const action=clip=>clip?mixer.clipAction(clip):null;
       const actions={idle:action(base),walk:action(walk||move||run),run:action(run||walk||move),
-        crouch:action(crouch),aim:action(aim),shoot:action(shoot),hit:action(hit),death:action(death)};
+        crouch:action(crouch),aim:action(aim),shoot:action(shoot),hit:action(hit),death:action(death),
+        wave:action(pick(/wave/i))};
       const staticIdle=!idle;
       actions.idle.play();if(staticIdle)actions.idle.paused=true;
       for(const one of [actions.shoot,actions.hit,actions.death])if(one){one.setLoop(THREE.LoopOnce);one.clampWhenFinished=one===actions.death;}
@@ -748,19 +757,54 @@ const Engine3D = {
     far.rotation.x = -Math.PI / 2; far.position.set(mw / 2, -0.25, mh / 2); far.receiveShadow = true;
     grp.add(far);
 
-    // 天空穹頂：垂直漸層（頂湛藍→地平線暖白），不受霧影響
-    if (!this._skyTex){
+    // 天空穹頂：垂直漸層，依地圖 sky 欄位換時段（day/dawn/dusk/night，GDD/11 天空盒四時段）
+    const SKY_STOPS = {
+      day:  ["#4f8ac9", "#9ec6e6", "#e8ddc2", "#efe6cf"],
+      dawn: ["#3c5a8a", "#b58ca0", "#f0c896", "#f6e3c0"],
+      dusk: ["#2e3f66", "#8a6a8e", "#e8a06a", "#f2d3a0"],
+      night:["#0b1430", "#1c2a52", "#3a4a72", "#54628c"]
+    };
+    const skyKind = SKY_STOPS[m.sky] ? m.sky : "day";
+    this._skyTexes = this._skyTexes || {};
+    if (!this._skyTexes[skyKind]){
       const sc2 = document.createElement("canvas"); sc2.width = 1; sc2.height = 256;
       const g2 = sc2.getContext("2d"), gr = g2.createLinearGradient(0, 0, 0, 256);
-      gr.addColorStop(0, "#4f8ac9"); gr.addColorStop(0.55, "#9ec6e6"); gr.addColorStop(0.78, "#e8ddc2"); gr.addColorStop(1, "#efe6cf");
+      const st = SKY_STOPS[skyKind];
+      gr.addColorStop(0, st[0]); gr.addColorStop(0.55, st[1]); gr.addColorStop(0.78, st[2]); gr.addColorStop(1, st[3]);
       g2.fillStyle = gr; g2.fillRect(0, 0, 1, 256);
-      this._skyTex = new THREE.CanvasTexture(sc2);
-      this._skyTex.encoding = THREE.sRGBEncoding;
+      const t = new THREE.CanvasTexture(sc2); t.encoding = THREE.sRGBEncoding;
+      this._skyTexes[skyKind] = t;
     }
     const sky = new THREE.Mesh(new THREE.SphereGeometry(4200 * S, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      new THREE.MeshBasicMaterial({ map: this._skyTex, side: THREE.BackSide, fog: false }));
+      new THREE.MeshBasicMaterial({ map: this._skyTexes[skyKind], side: THREE.BackSide, fog: false }));
     sky.position.set(mw / 2, -40, mh / 2);
     grp.add(sky);
+
+    // 遠景山脈剪影：地平線環狀低多邊形錐體，吃霧自然淡出（GDD/11 遠景）
+    const mtnMat = new THREE.MeshLambertMaterial({ color: 0x6d7c92 });
+    for (let i = 0; i < 15; i++){
+      const a = (i / 15) * Math.PI * 2 + (i % 3) * 0.13;
+      const hM = (260 + (i * 137) % 260) * S, wM = (520 + (i * 251) % 420) * S;
+      const mtn = new THREE.Mesh(new THREE.ConeGeometry(wM, hM, 5), mtnMat);
+      mtn.position.set(mw / 2 + Math.cos(a) * 2500 * S, hM / 2 - 6, mh / 2 + Math.sin(a) * 2500 * S);
+      mtn.rotation.y = a; mtn.userData.noToon = true;
+      grp.add(mtn);
+    }
+
+    // 雨天粒子（map.weather==="rain"）：以視錐附近循環下落
+    if (this._rain){ this.scene.remove(this._rain); this._rain = null; }
+    if (m.weather === "rain"){
+      const N = 900, pos = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++){
+        pos[i*3] = Math.random() * 900 - 450; pos[i*3+1] = Math.random() * 380; pos[i*3+2] = Math.random() * 900 - 450;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      const rain = new THREE.Points(geo, new THREE.PointsMaterial({
+        color: 0x9fb6cc, size: 1.8, transparent: true, opacity: 0.5, sizeAttenuation: true, fog: true }));
+      rain.userData.noToon = true; rain.frustumCulled = false;
+      this._rain = rain; this.scene.add(rain);
+    }
 
     // 真 3D 地表：乾淨 diffuse＋高度場；不再把建築/樹/工事的俯視圖烙在地面。
     const tex = new THREE.CanvasTexture(this._groundCanvas(m));
@@ -1771,7 +1815,12 @@ const Engine3D = {
         if(mx.actions[mx.cur])mx.actions[mx.cur].stop();mx.actions.hit.reset().play();mx.cur="hit";
         g.userData.actionHistory.push({name:"hit",at:Math.round(now)});
       }
-      if (mx && mx.actions.walk && mx.cur !== "shoot" && mx.cur !== "hit" && mx.cur!=="death"){
+      // 勝利姿勢：戰鬥結束時勝方步兵揮手歡呼（有 wave 片段才播）
+      if (G.over && mx && mx.actions.wave && u.side === G.over.winner && mx.cur !== "wave" && mx.cur !== "death"){
+        if (mx.actions[mx.cur]) mx.actions[mx.cur].stop();
+        mx.actions.wave.reset().play(); mx.cur = "wave";
+      }
+      if (mx && mx.actions.walk && mx.cur !== "shoot" && mx.cur !== "hit" && mx.cur!=="death" && mx.cur!=="wave"){
         const locomotion=mx.actions.run&&(g.userData.motion||0)>.72?"run":"walk";
         const want=activeMove?locomotion:u.crouched&&mx.actions.crouch?"crouch":
           (G.sel===u&&G.aimTarget&&mx.actions.aim?"aim":"idle");
@@ -1965,6 +2014,16 @@ const Engine3D = {
     this.syncFx(G);
     // 動畫推進
     for (const id in this._mixers) this._mixers[id].mixer.update(dt);
+    // 雨滴下落（循環盒跟隨相機注視點）
+    if (this._rain){
+      const p = this._rain.geometry.attributes.position, tgt = Camera3D.target || { x: 480, y: 300 };
+      this._rain.position.set(tgt.x, 0, tgt.y);
+      for (let i = 1; i < p.array.length; i += 3){
+        p.array[i] -= 240 * dt;
+        if (p.array[i] < 0) p.array[i] += 380;
+      }
+      p.needsUpdate = true;
+    }
     this._applyCharacterSecondary(G,now);
     this._publishQA(G);
     const cam = Camera3D;

@@ -682,6 +682,8 @@ const Game = {
   playerFire(part){
     if (this.selFired || !this.aimTarget) return;
     const t = this.aimTarget;
+    if (this.sel && this.sel.charName && typeof Sfx !== "undefined" && Math.random() < 0.5)
+      Sfx.voice(this.sel.cls, "atk");                       // 具名角色開火戰吼（節流在 Sfx.voice）
     const ev = Combat.fire(this.map, this.sel, t, part);
     this.pushFx(ev);
     this.selFired = true;

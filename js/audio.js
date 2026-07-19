@@ -144,7 +144,57 @@ const Sfx = {
     if (e.type === "tracer")      this.play(this._wmap[e.w] || "rifle");
     else if (e.type === "boom")   this.play("boom");
     else if (e.type === "hitfx"){ if (!e.heal) this.play("hit"); }
-    else if (e.type === "death")  this.play(e.vehicle ? "vboom" : "death");
+    else if (e.type === "death"){
+      this.play(e.vehicle ? "vboom" : "death");
+      if (e.unit && e.unit.charName) this.voice(e.unit.cls, "down");   // 具名角色倒地語音
+    }
+  },
+
+  /* ---------- 角色語音（OpenAI TTS 預生成檔，assets/audio/voice/） ---------- */
+  _voiceLast: { sel: 0, atk: 0 },
+  voice(cls, evt){
+    if (this.muted || !cls) return;
+    const now = performance.now();
+    if ((evt === "sel" || evt === "atk") && now - (this._voiceLast[evt] || 0) < 3500) return;
+    this._voiceLast[evt] = now;
+    const a = new Audio(`assets/audio/voice/${cls}_${evt}.mp3`);
+    a.volume = 0.8; a.play().catch(() => {});
+  },
+
+  /* ---------- 程序化環境音（風/浪/鳥，零素材；隨戰場開始/結束啟停） ---------- */
+  _amb: { nodes: [], timer: null },
+  ambient(mapId, domains){
+    this.ambientStop();
+    if (!this._ac()) return;
+    const c = this.ctx, A = this._amb;
+    const wind = c.createBufferSource(); wind.buffer = this._noise(); wind.loop = true;
+    const wf = c.createBiquadFilter(); wf.type = "lowpass"; wf.frequency.value = 240;
+    const wg = c.createGain(); wg.gain.value = 0.028;
+    const lfo = c.createOscillator(); lfo.frequency.value = 0.13;
+    const lfoG = c.createGain(); lfoG.gain.value = 0.014;
+    lfo.connect(lfoG); lfoG.connect(wg.gain);
+    wind.connect(wf); wf.connect(wg); wg.connect(this.master);
+    wind.start(); lfo.start();
+    A.nodes.push(wind, lfo);
+    const sea = domains && domains.includes("sea");
+    const woodsy = ["forest", "plain", "town", "verdun", "tutorial"].includes(mapId);
+    A.timer = setInterval(() => {
+      try {
+        if (sea){                                   // 浪湧：帶通噪音緩起緩落
+          this._burst({ dur: 2.6, vol: 0.05, type: "bandpass", freq: 420, q: 0.6, atk: 1.1 });
+        } else if (woodsy && Math.random() < 0.4){  // 鳥鳴：兩聲短哨
+          const f = 2200 + Math.random() * 1400;
+          this._tone({ freq: f, freqEnd: f * 1.25, dur: 0.09, vol: 0.02, type: "sine", atk: 0.02 });
+          this._tone({ freq: f * 1.1, freqEnd: f * 0.9, dur: 0.12, vol: 0.016, type: "sine", at: 0.15, atk: 0.02 });
+        }
+      } catch (e) {}
+    }, sea ? 3800 : 2600);
+  },
+  ambientStop(){
+    const A = this._amb;
+    if (A.timer){ clearInterval(A.timer); A.timer = null; }
+    for (const n of A.nodes){ try { n.stop(); } catch (e) {} }
+    A.nodes = [];
   },
 
   /* ---------- 程序化配樂（BGM）----------
