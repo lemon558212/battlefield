@@ -108,7 +108,9 @@ const UI = {
         const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
         const on = Game.deployCls===k?" on":"";
         return `<button class="unitBtn${on}" data-cls="${k}">
-          <b>${CLASS_BASE[k].zh}</b>｜${u.label}<br><span>${u.weapon}</span><em>${c}點·${cp}CP</em></button>`;
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>${CLASS_BASE[k].zh}</b>｜${u.label}<br><span class="weapon">${u.weapon}</span></span>
+          <em>${c}點·${cp}CP</em></button>`;
       }).join("");
     }
     this.el("side").innerHTML = `
@@ -125,7 +127,6 @@ const UI = {
     this.el("btnGo").onclick = ()=>Game.finishDeploy();
     this.el("btnBack").onclick = ()=>{ Game.state="menu"; Game.map=null; this.showMenu(); };
   },
-
   /* ---------- 戰鬥 HUD ---------- */
   showBattle(){
     this.hideAll();
@@ -133,12 +134,16 @@ const UI = {
     this.el("side").innerHTML = `
       <h3 id="hudTurn"></h3><div id="hudCp" class="cp"></div>
       <div id="selInfo" class="panel"></div>
+      <button id="btnTerrain" style="display:none">蹲伏掩蔽 (C)</button>
+      <button id="btnUnload" style="display:none">放下跳板並卸載</button>
       <button id="btnFireEnd" style="display:none">結束行動 (E)</button>
       <button id="btnCapture" style="display:none">佔領主堡</button>
       <button id="btnEndTurn">結束回合</button>
       <div id="hint" class="hint" style="display:none"></div>
       <div id="log"></div>`;
     this.el("btnEndTurn").onclick=()=>{ if(Game.state==="cmd") Game.endTurn(); };
+    this.el("btnTerrain").onclick=()=>Game.toggleTerrainAction();
+    this.el("btnUnload").onclick=()=>Game.unloadLST();
     this.el("btnFireEnd").onclick=()=>{ if(Game.state==="act") Game.endAction(); };
     this.el("btnCapture").onclick=()=>Game.tryCapture();
     window.addEventListener("keydown",e=>{ if(e.key.toLowerCase()==="e"&&Game.state==="act") Game.endAction(); });
@@ -157,15 +162,24 @@ const UI = {
     const u=Game.sel, info=this.el("selInfo");
     if (!info) return;
     if (u){
+      const terrain=Game.terrainActionAt(u), crouch=u.crouched;
       info.innerHTML = `<b>${u.label}</b>（${CLASS_BASE[u.cls].zh}）<br>${u.weaponName}<br>
         HP ${Math.max(0,Math.round(u.hp))}/${u.maxhp}<br>AP <progress max="${u.maxap}" value="${u.ap}"></progress>
+        ${crouch?`<br>掩蔽：${terrain?terrain.label:"蹲伏"}`:""}
+        ${u.cls==="lst"?`<br>載員：${(u.carried||[]).map(p=>p.label).join("、")||"無"}`:""}
         ${Game.selFired?"<br>⚠ 已用掉開火機會":""}`;
       this.el("btnFireEnd").style.display="block";
+      this.el("btnTerrain").style.display=(crouch||terrain)?"block":"none";
+      this.el("btnTerrain").textContent=crouch?"站起 (C)":terrain?`蹲伏掩蔽：${terrain.label} (C)`:"蹲伏掩蔽 (C)";
+      this.el("btnUnload").style.display=(u.cls==="lst"&&(u.carried||[]).length)?"block":"none";
+      this.el("btnUnload").disabled=!Game.canUnloadLST(u);
       const base=Game.map.bases.find(b=>b.side!==u.side);
       this.el("btnCapture").style.display = (u.canCap&&dist(u,base)<34)?"block":"none";
     } else {
       info.innerHTML = "點選我方單位下令（1 CP，坦克 2 CP）";
       this.el("btnFireEnd").style.display="none";
+      this.el("btnTerrain").style.display="none";
+      this.el("btnUnload").style.display="none";
       this.el("btnCapture").style.display="none";
     }
   },

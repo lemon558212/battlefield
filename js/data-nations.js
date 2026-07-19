@@ -348,26 +348,38 @@ france: {
 /* 兵種與武器「基準表」— 陸軍權威 GDD/02、海空權威 GDD/04，此處為引擎鏡像。
  * domain: land/sea/air（GDD/04 §1）；sight: 視野半徑 px（GDD/05 §2） */
 const CLASS_BASE = {
-  rifleman:{ zh:"步兵",   hp:100, ap:240, def:5,  cost:80,  wtype:"rifle",   alert:true,  canCap:true,  domain:"land", sight:170 },
-  assault: { zh:"突擊兵", hp:130, ap:160, def:10, cost:110, wtype:"carbine", alert:true,  canCap:true,  domain:"land", sight:120 },
-  mg:      { zh:"機槍兵", hp:120, ap:120, def:10, cost:120, wtype:"lmg",     alert:true,  canCap:false, domain:"land", sight:120 },
-  mortar:  { zh:"迫砲兵", hp:90,  ap:100, def:5,  cost:130, wtype:"mortar",  alert:false, canCap:false, domain:"land", sight:120 },
-  sniper:  { zh:"狙擊兵", hp:80,  ap:100, def:0,  cost:140, wtype:"sniper",  alert:false, canCap:false, domain:"land", sight:150 },
-  at:      { zh:"火箭兵", hp:110, ap:120, def:15, cost:140, wtype:"rocket",  alert:false, canCap:false, domain:"land", sight:120 },
-  engineer:{ zh:"工兵",   hp:90,  ap:200, def:5,  cost:90,  wtype:"carbine", alert:false, canCap:true,  domain:"land", sight:120 },
-  specops: { zh:"特種兵", hp:110, ap:220, def:8,  cost:160, wtype:"carbine", alert:true,  canCap:true,  domain:"land", sight:150 },
-  tank:    { zh:"裝甲兵", hp:600, ap:140, def:60, cost:400, wtype:"cannon",  alert:true,  canCap:false, domain:"land", sight:130 },
+  rifleman:{ zh:"步兵",   hp:100, ap:240, def:5,  cost:80,  wtype:"rifle",   alert:true,  canCap:true,  domain:"land", mobility:"scout",    sight:170 },
+  assault: { zh:"突擊兵", hp:130, ap:160, def:10, cost:110, wtype:"carbine", alert:true,  canCap:true,  domain:"land", mobility:"foot",     sight:120 },
+  mg:      { zh:"機槍兵", hp:120, ap:120, def:10, cost:120, wtype:"lmg",     alert:true,  canCap:false, domain:"land", mobility:"heavy",    sight:120 },
+  mortar:  { zh:"迫砲兵", hp:90,  ap:100, def:5,  cost:130, wtype:"mortar",  alert:false, canCap:false, domain:"land", mobility:"heavy",    sight:120 },
+  sniper:  { zh:"狙擊兵", hp:80,  ap:100, def:0,  cost:140, wtype:"sniper",  alert:false, canCap:false, domain:"land", mobility:"foot",     sight:150 },
+  at:      { zh:"火箭兵", hp:110, ap:120, def:15, cost:140, wtype:"rocket",  alert:false, canCap:false, domain:"land", mobility:"heavy",    sight:120 },
+  engineer:{ zh:"工兵",   hp:90,  ap:200, def:5,  cost:90,  wtype:"carbine", alert:false, canCap:true,  domain:"land", mobility:"engineer", sight:120 },
+  specops: { zh:"特種兵", hp:110, ap:220, def:8,  cost:160, wtype:"carbine", alert:true,  canCap:true,  domain:"land", mobility:"special",  sight:150 },
+  tank:    { zh:"裝甲兵", hp:600, ap:140, def:60, cost:400, wtype:"cannon",  alert:true,  canCap:false, domain:"land", mobility:"tracked",  sight:130 },
   // ── 防空兵（land 域，只打空軍）
-  sam:     { zh:"防空兵", hp:120, ap:110, def:5,  cost:150, wtype:"sam_missile", alert:true, canCap:false, domain:"land", sight:110, airSight:300 },
+  sam:     { zh:"防空兵", hp:120, ap:110, def:5,  cost:150, wtype:"sam_missile", alert:true, canCap:false, domain:"land", mobility:"heavy", sight:110, airSight:300 },
   // ── 海軍（sea 域，只在水域移動）
-  destroyer:  { zh:"驅逐艦",   hp:900, ap:140, def:50, cost:520, wtype:"naval_gun",        alert:true,  canCap:false, domain:"sea", sight:200, big:true },
-  missileboat:{ zh:"飛彈快艇", hp:260, ap:220, def:15, cost:220, wtype:"antiship_missile", alert:false, canCap:false, domain:"sea", sight:150 },
-  lst:        { zh:"登陸艦",   hp:700, ap:120, def:30, cost:300, wtype:"naval_mg",         alert:true,  canCap:false, domain:"sea", sight:150, big:true },
-  submarine:  { zh:"潛艦",     hp:400, ap:160, def:20, cost:360, wtype:"torpedo",          alert:false, canCap:false, domain:"sea", sight:150, stealth:true },
+  destroyer:  { zh:"驅逐艦",   hp:900, ap:140, def:50, cost:520, wtype:"naval_gun",        alert:true,  canCap:false, domain:"sea", mobility:"naval", sight:200, big:true },
+  missileboat:{ zh:"飛彈快艇", hp:260, ap:220, def:15, cost:220, wtype:"antiship_missile", alert:false, canCap:false, domain:"sea", mobility:"naval", sight:150 },
+  lst:        { zh:"登陸艦",   hp:700, ap:120, def:30, cost:300, wtype:"naval_mg",         alert:true,  canCap:false, domain:"sea", mobility:"naval", sight:150, big:true },
+  submarine:  { zh:"潛艦",     hp:400, ap:160, def:20, cost:360, wtype:"torpedo",          alert:false, canCap:false, domain:"sea", mobility:"naval", sight:150, stealth:true },
   // ── 空軍（air 域，飛行、無視地形阻擋）
-  fighter: { zh:"戰鬥機",     hp:220, ap:320, def:10, cost:340, wtype:"aam",        alert:true,  canCap:false, domain:"air", sight:240 },
-  attacker:{ zh:"攻擊機",     hp:260, ap:300, def:10, cost:320, wtype:"agm",        alert:false, canCap:false, domain:"air", sight:240 },
-  gunship: { zh:"武裝直升機", hp:300, ap:240, def:15, cost:300, wtype:"rocket_pod", alert:true,  canCap:false, domain:"air", sight:240 }
+  fighter: { zh:"戰鬥機",     hp:220, ap:320, def:10, cost:340, wtype:"aam",        alert:true,  canCap:false, domain:"air", mobility:"air", sight:240 },
+  attacker:{ zh:"攻擊機",     hp:260, ap:300, def:10, cost:320, wtype:"agm",        alert:false, canCap:false, domain:"air", mobility:"air", sight:240 },
+  gunship: { zh:"武裝直升機", hp:300, ap:240, def:15, cost:300, wtype:"rocket_pod", alert:true,  canCap:false, domain:"air", mobility:"air", sight:240 }
+};
+
+/* 地形移動倍率：null=不可進入；數值=每像素 AP 倍率（GDD/04 §2c）。 */
+const TERRAIN_MOBILITY = {
+  scout:    { ground:1, shallow:1.35, water:null, deepwater:null, hill:1.10, trench:1.15, crater:1.10, wire:1.8,  bush:0.85 },
+  foot:     { ground:1, shallow:1.55, water:null, deepwater:null, hill:1.15, trench:1.25, crater:1.15, wire:2.0,  bush:0.90 },
+  heavy:    { ground:1, shallow:1.80, water:null, deepwater:null, hill:1.25, trench:1.40, crater:1.25, wire:2.4,  bush:1.00 },
+  engineer: { ground:1, shallow:1.20, water:2.40, deepwater:null, hill:1.10, trench:1.10, crater:1.00, wire:1.1,  bush:0.90 },
+  special:  { ground:1, shallow:1.20, water:1.80, deepwater:null, hill:1.00, trench:1.00, crater:1.00, wire:1.35, bush:0.65 },
+  tracked:  { ground:1, shallow:1.50, water:null, deepwater:null, hill:1.35, trench:null, crater:1.35, wire:1.1,  bush:1.25 },
+  naval:    { ground:null, shallow:1.35, water:1.00, deepwater:1.00, hill:null, trench:null, crater:null, wire:null, bush:null },
+  air:      { ground:1, shallow:1.00, water:1.00, deepwater:1.00, hill:1.00, trench:1.00, crater:1.00, wire:1.00, bush:1.00 }
 };
 
 const WEAPON_BASE = {

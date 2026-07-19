@@ -16,8 +16,7 @@ const Fog = {
 
   reset(){ this.visible.clear(); this.explored.clear(); },
 
-  /* 開局把整張地圖標為已探索：地形全程可見（戰場女武神式），
-     迷霧只體現在「敵人未偵察到就不顯示」，而非遮黑地形 */
+  /* 僅供除錯／觀戰使用；正常開戰不得呼叫，否則會破壞 GDD/05 三態迷霧。 */
   exploreAll(){
     this._cols = Math.ceil(((Game.map&&Game.map.w)||960) / FOG_CELL);
     this._rows = Math.ceil(((Game.map&&Game.map.h)||600) / FOG_CELL);
@@ -82,9 +81,36 @@ const Fog = {
       for (let cy = 0; cy < this._rows; cy++){
         const s = this.state(cx * FOG_CELL, cy * FOG_CELL);
         if (s === 2) continue;
-        ctx.fillStyle = s === 1 ? "rgba(10,14,20,0.12)" : "rgba(8,12,20,0.34)";
+        ctx.fillStyle = s === 1 ? "rgba(10,14,20,0.45)" : "rgba(8,12,20,0.85)";
         ctx.fillRect(cx * FOG_CELL, cy * FOG_CELL, FOG_CELL, FOG_CELL);
       }
+    }
+  },
+
+  /* 真 3D 主路徑：把世界格投影成透視四邊形，禁止沿用俯視座標整屏覆蓋。 */
+  renderProjected(ctx, cam, heightAt){
+    if(!this.enabled||!cam)return;
+    const buckets=[[],[]];
+    for(let cx=0;cx<this._cols;cx++){
+      for(let cy=0;cy<this._rows;cy++){
+        const wx=cx*FOG_CELL,wy=cy*FOG_CELL,s=this.state(wx,wy);
+        if(s===2)continue;
+        const world=[[wx,wy],[wx+FOG_CELL,wy],[wx+FOG_CELL,wy+FOG_CELL],[wx,wy+FOG_CELL]];
+        const pts=world.map(([x,y])=>cam.project(x,y,(heightAt?heightAt(x,y):0)+0.8));
+        if(pts.some(p=>!p))continue;
+        buckets[s].push(pts);
+      }
+    }
+    for(const s of [0,1]){
+      if(!buckets[s].length)continue;
+      ctx.beginPath();
+      for(const pts of buckets[s]){
+        ctx.moveTo(pts[0].sx,pts[0].sy);
+        for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].sx,pts[i].sy);
+        ctx.closePath();
+      }
+      ctx.fillStyle=s===1?"rgba(10,14,20,0.45)":"rgba(8,12,20,0.85)";
+      ctx.fill();
     }
   }
 };

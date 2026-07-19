@@ -20,6 +20,7 @@ const Combat = {
   /* 目標命中倍率（越小越受保護）。取所有掩體最佳者。
      沙包/礁石：方向性（射線穿過且貼身 ≤28px）。工事：站進去即生效（角度無關）。 */
   coverFactor(map, sx,sy, t){
+    if (!t.crouched) return 1.0;
     let f = 1.0;
     for (const sb of (map.sandbags||[]).concat(map.reefs||[])){
       const nx=clamp(t.x,sb.x,sb.x+sb.w), ny=clamp(t.y,sb.y,sb.y+sb.h);
@@ -29,6 +30,10 @@ const Combat = {
     for (const tr of (map.trenches||[])) if (ptInRect(t.x,t.y,tr)) { f=Math.min(f,0.4); break; } // 壕溝
     for (const h of (map.foxholes||[]).concat(map.craters||[]))
       if (Math.hypot(t.x-h.x,t.y-h.y)<=h.r) { f=Math.min(f,0.5); break; }                        // 散兵坑/彈坑
+    for(const s of (map.solids||[])){
+      const nx=clamp(t.x,s.x,s.x+s.w),ny=clamp(t.y,s.y,s.y+s.h);
+      if(!ptInRect(t.x,t.y,s)&&Math.hypot(t.x-nx,t.y-ny)<=24){f=Math.min(f,0.65);break;}
+    }
     return f;
   },
 
@@ -39,7 +44,7 @@ const Combat = {
     if (t.stealth && !t.revealed){                                                    // 潛艦潛航：近距或驅逐艦反潛才可見
       if (dist(viewer,t) > 80 && viewer.cls!=="destroyer") return false;
     }
-    if (this.inBush(map,t) && !t.revealed){
+    if (this.inBush(map,t) && t.crouched && !t.revealed){
       let detect = 60;
       if (NATIONS[t.nationId].trait.id==="jungle_craft") detect = 30;               // 泰國
       if (t.cls==="specops") detect = 0;                                            // 特種兵草叢完全隱蔽

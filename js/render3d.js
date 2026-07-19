@@ -12,9 +12,9 @@ const Render3D = {
   SKY_TOP: "#7fb0dc", SKY_HOR: "#d3e3ef",
   GRID: 80,                       // 地面格線間距（世界單位）
 
-  draw(ctx, G){
+  draw(ctx, G, dt){
     const cam = Camera3D, m = G.map;
-    cam.applyFor(G);                       // 依狀態選 follow / overview 相機
+    cam.applyFor(G,false,dt);              // 依狀態選 follow / overview，相同 dt 阻尼
     const act = (cam.mode === "follow");
     const W = cam.W, H = cam.H;
     const hy = Math.max(0, Math.min(H, cam.horizonY()));
@@ -227,15 +227,16 @@ const Render3D = {
     ctx.strokeStyle = "#4a473f"; ctx.lineWidth = 1.5; this._fillPathStroke(ctx, top);
   },
 
-  /* AI 立繪載入（assets/billboards/{key}.png）：false=載入中/失敗，Image=可用 */
+  /* 寫實召喚立繪（assets/units-realistic/{兵種}.png）：false=載入中/失敗，Image=可用 */
   _bbImgs: {},
   _bbImg(key){
+    key = key.replace(/_(back|side|fq|bq|front)$/i, ""); // 寫實圖目前每兵種單一 3/4 視角
     if (key in this._bbImgs) return this._bbImgs[key] || null;
     this._bbImgs[key] = false;
     const i = new Image();
     i.onload = () => { this._bbImgs[key] = i; };
     i.onerror = () => { this._bbImgs[key] = false; };
-    i.src = "assets/billboards/" + key + ".png";
+    i.src = (typeof UNIT_ART_DATA!=="undefined"&&UNIT_ART_DATA[key]) || ("assets/units-realistic/" + key + ".png");
     return null;
   },
 
@@ -279,7 +280,8 @@ const Render3D = {
     const air = u.domain === "air" ? 52 : 0;
     const ground = cam.project(u.x, u.y, 0);
     const baseA = cam.project(u.x, u.y, air);
-    const figH = u.cls === "tank" ? 16 : u.domain === "sea" ? 12 : u.domain === "air" ? 11 : 21;
+    const posture=u.domain==="land"&&u.cls!=="tank"&&u.crouched?0.68:1;
+    const figH = (u.cls === "tank" ? 16 : u.domain === "sea" ? 12 : u.domain === "air" ? 11 : 21)*posture;
     const topA = cam.project(u.x, u.y, air + figH);
     if (!baseA || !topA) return;
     const h = Math.max(7, baseA.sy - topA.sy), sc = baseA.scale;
@@ -296,8 +298,8 @@ const Render3D = {
     const sside = rel > 0 ? 1 : -1;   // 側面時武器/朝向的左右
 
     const cx = baseA.sx, by = baseA.sy; // 立繪底部中心
-    // AI 立繪 billboard：坦克 8 方向(5 圖+鏡射)、士兵 前/側/背(+鏡射)、海空側面(+鏡射)
-    // 立繪素材一律「車頭/面向朝右」，sside<0（面向的螢幕分量朝左）時水平鏡射
+    // 寫實 PNG 目前每兵種單一 3/4 視角；舊的視角 key 會在 _bbImg 正規化為同一兵種檔。
+    // 車輛／海空依面向做水平鏡射；完整前後視角待未來寫實 GLB 或多視角生圖補齊。
     let img = null, flip = false;
     const va2 = Math.abs(rel);
     if (u.cls === "tank"){
@@ -335,7 +337,9 @@ const Render3D = {
     // 血條（立繪頂上）
     const bw = Math.max(14, (u.cls === "tank" ? 30 : 20) * sc * 0.5), bx = cx - bw / 2, y0 = topA.sy - 6;
     ctx.fillStyle = "#222"; ctx.fillRect(bx, y0, bw, 3);
-    ctx.fillStyle = u.hp > u.maxhp * 0.3 ? "#4fd05e" : "#e04b3a"; ctx.fillRect(bx, y0, bw * Math.max(0, Math.min(1, u.hp / u.maxhp)), 3);
+    ctx.fillStyle = isP ? (u.hp > u.maxhp * 0.3 ? "#4fd05e" : "#e04b3a") : "#e53935";
+    ctx.fillRect(bx, y0, bw * Math.max(0, Math.min(1, u.hp / u.maxhp)), 3);
+    if(u.crouched){ctx.fillStyle="#f1d46a";ctx.font="bold 10px sans-serif";ctx.textAlign="center";ctx.fillText("掩",cx,y0-3);}
     if (G.sel === u){ ctx.strokeStyle = "#ffd83d"; ctx.lineWidth = 2; ctx.strokeRect(bx - 1, y0 - 1, bw + 2, 5); }
     // 選中/瞄準標記
     if (G.aimTarget === u && ground){ ctx.strokeStyle = "#ff5a4a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, (topA.sy + by) / 2, h * 0.6, 0, 7); ctx.stroke(); }

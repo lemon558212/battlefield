@@ -31,8 +31,9 @@ function makeUnit(nationId, clsKey, side, x, y){
     x, y, r: radius,
     hp, maxhp: hp, ap, maxap: ap, def, cost,
     alive: true, actedCount: 0, hasFired: false, revealed: false,
+    crouched: false, terrainAction: null,
     alert: base.alert, canCap: base.canCap,
-    domain, sight: base.sight||120, airSight: base.airSight||0,
+    domain, mobility: base.mobility || domain, sight: base.sight||120, airSight: base.airSight||0,
     flying: domain==="air", stealth: !!base.stealth, big: !!base.big,
     carried: [],           // lst 載運的 land 單位
     facing: side === 0 ? 0 : Math.PI

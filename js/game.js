@@ -5,7 +5,7 @@
  * ============================================================ */
 "use strict";
 
-const ENEMY_SUBSTEPS = 6; // 敵方回合每幀推進的子步數（牆鐘壓縮，見 loop 註解）
+const ENEMY_TIME_SCALE = 1; // moveUnit 已對敵軍加速 2.5×；此處不再疊加時間跳步
 
 const Game = {
   canvas:null, ctx:null, state:"menu",
@@ -21,37 +21,83 @@ const Game = {
   _mpReady:false, _mpGuestUnits:null,   // 連線布署狀態
   plans:[], curPlan:null, enemyCpLeft:0, germanyTankDiscountUsed:false,
   budgetLeft:0, deployCls:null,
-  keys:{}, lastTs:0, over:null, hintIdx:0,
+  keys:{}, lastTs:0, over:null, hintIdx:0, _pickCycle:null,
 
   /* ---------- 生命週期 ---------- */
   init(){
     this.canvas = document.getElementById("game");
     this.ctx = this.canvas.getContext("2d");
-    window.addEventListener("keydown", e=>{ this.keys[e.key.toLowerCase()]=true; });
-    window.addEventListener("keyup",   e=>{ this.keys[e.key.toLowerCase()]=false; });
-    this.canvas.addEventListener("mousedown", e=>{ this._mouseDown=true; this.onClick(e); });
+    const editable=e=>e.target&&(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)||e.target.isContentEditable);
+    window.addEventListener("keydown", e=>{ const k=e.key.toLowerCase();
+      if(this.state==="act"&&!editable(e)&&k==="c"&&!e.repeat){e.preventDefault();this.toggleTerrainAction();return;}
+      if(this.state==="act"&&!editable(e)&&["arrowup","arrowdown","arrowleft","arrowright"].includes(k))e.preventDefault();
+      if(!editable(e))this.keys[k]=true;
+    });
+    window.addEventListener("keyup",e=>{ this.keys[e.key.toLowerCase()]=false; });
+    window.addEventListener("blur",()=>this._clearControls());
+    document.addEventListener("visibilitychange",()=>{
+      if(document.hidden)this._clearControls();
+      else{this.lastTs=performance.now();if(typeof Engine3D!=="undefined")Engine3D._at=performance.now();}
+    });
+    this.canvas.addEventListener("mousedown", e=>{ this._mouseDown=e.button===0; this.onClick(e); });
     window.addEventListener("mousemove", e=>{ if(this._mouseDown) this._pointerMove(e.clientX,e.clientY); });
     window.addEventListener("mouseup", ()=>{ this._mouseDown=false; this._pointerUp(); });
     // 手機觸控：單指=點擊/拖曳；雙指=捏合縮放（縮放時取消移動操控）
     const pinchD = e => Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
     this.canvas.addEventListener("touchstart", e=>{ if(e.cancelable) e.preventDefault(); this._touch=true;
       if (e.touches.length>=2){ this._pinch=pinchD(e); this._steer3d=null; this._mapDrag=null; return; }
-      const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0); }, {passive:false});
+      const t=e.changedTouches[0]; if(t) this.onClickXY(t.clientX,t.clientY,0,"touch"); }, {passive:false});
     this.canvas.addEventListener("touchmove", e=>{ if(e.cancelable) e.preventDefault();
       if (e.touches.length>=2){ const d=pinchD(e); if(this._pinch){ Camera3D.setZoom(Camera3D.zoom*this._pinch/d); } this._pinch=d; return; }
       const t=e.changedTouches[0]; if(t) this._pointerMove(t.clientX,t.clientY); }, {passive:false});
     this.canvas.addEventListener("touchend", e=>{ if(e.cancelable) e.preventDefault(); if(e.touches.length<2) this._pinch=null; this._pointerUp(); }, {passive:false});
+    this.canvas.addEventListener("touchcancel", e=>{ if(e.cancelable) e.preventDefault(); this._pinch=null; this._steer3d=null; this._mapDrag=null; }, {passive:false});
     this.canvas.addEventListener("contextmenu", e=>e.preventDefault());
     // 滾輪縮放（桌機）
     this.canvas.addEventListener("wheel", e=>{ e.preventDefault(); Camera3D.setZoom(Camera3D.zoom*(e.deltaY>0?1.1:0.9)); }, {passive:false});
     this._initJoystick();
     if (typeof Camera3D !== "undefined") Camera3D.selfTest(); // P1 投影校正（GDD/07），console 應見 PASS
-    if (typeof Engine3D !== "undefined") Engine3D.init();      // 真 3D（GDD/08）；失敗自動回退偽 3D
+    if (typeof Engine3D !== "undefined") Engine3D.init();      // 真 3D（GDD/08）；失敗採 fail-closed，不得偽 3D 降級
     UI.showMenu();
-    const raf = ts=>{ this.loop(ts); requestAnimationFrame(raf); };
+    // 可重現的瀏覽器發布閘門情境；只組合正式公開流程，不建立第二套規則。
+    const qaScenario=new URLSearchParams(location.search).get("qaScenario");
+    if(qaScenario==="lst")setTimeout(()=>{
+      this.startBattle("beach","china","taiwan",0);
+      this.aiDeploy(0);
+      if(!this.units.some(u=>u.side===0&&u.cls==="lst"))this.units.push(makeUnit("china","lst",0,200,300));
+      if(!this.units.some(u=>u.side===0&&u.cls==="rifleman"))this.units.push(makeUnit("china","rifleman",0,500,240));
+      if(!this.units.some(u=>u.side===0&&u.cls==="assault"))this.units.push(makeUnit("china","assault",0,500,360));
+      this.finishDeploy();
+      const ship=this.units.find(u=>u.side===0&&u.cls==="lst");
+      if(ship){ship.x=270*(this.map._k||1);ship.y=300*(this.map._k||1);this.enterAction(ship);UI.refreshActBar();}
+    },0);
+    if(qaScenario==="all17")setTimeout(()=>{
+      this.startBattle("harbor","china","taiwan",0);
+      this.units=[];
+      const infantry=["rifleman","assault","mg","mortar","sniper","at","engineer","specops","sam"];
+      infantry.forEach((cls,i)=>this.units.push(makeUnit("china",cls,0,(245+(i%5)*105)*(this.map._k||1),(65+Math.floor(i/5)*105)*(this.map._k||1))));
+      this.units.push(makeUnit("china","tank",0,760*(this.map._k||1),210*(this.map._k||1)));
+      ["destroyer","missileboat","lst","submarine"].forEach((cls,i)=>this.units.push(makeUnit("china",cls,0,(170+i*205)*(this.map._k||1),470*(this.map._k||1))));
+      ["fighter","attacker","gunship"].forEach((cls,i)=>this.units.push(makeUnit("china",cls,0,(340+i*160)*(this.map._k||1),335*(this.map._k||1))));
+      this.state="cmd";this.turnOwner=0;this.beginTurn(0);Camera3D.setZoom(.5);UI.showBattle();UI.log("QA：17 兵種真 3D 實載檢查");
+    },0);
+    if(qaScenario==="missileboat")setTimeout(()=>{
+      this.startBattle("harbor","china","taiwan",0);this.units=[];
+      const k=this.map._k||1,boat=makeUnit("china","missileboat",0,180*k,500*k),target=makeUnit("taiwan","destroyer",1,280*k,500*k);
+      this.units=[boat,target];this.state="cmd";this.turnOwner=0;this.beginTurn(0);this.enterAction(boat);this.aimTarget=target;Camera3D.setZoom(.6);UI.showBattle();UI.refreshActBar();
+    },0);
+    if(qaScenario==="riflemove")setTimeout(()=>{
+      this.startBattle("plain","china","taiwan",0);this.units=[];
+      const k=this.map._k||1,rifleman=makeUnit("china","rifleman",0,300*k,520*k),target=makeUnit("taiwan","rifleman",1,390*k,520*k);
+      this.units=[rifleman,target];this.state="cmd";this.turnOwner=0;this.beginTurn(0);this.enterAction(rifleman);Camera3D.setZoom(.6);UI.showBattle();UI.refreshActBar();
+    },0);
+    const raf=ts=>{if(!document.hidden)this.loop(ts);else this.lastTs=ts;requestAnimationFrame(raf);};
     requestAnimationFrame(raf);
-    // 分頁隱藏時 rAF 被瀏覽器暫停，用 interval 後備驅動（注意：背景分頁計時器會被節流至約 1 次/秒，屬瀏覽器行為）
-    setInterval(()=>{ if (document.hidden) this.loop(performance.now()); }, 50);
+  },
+
+  _clearControls(){
+    this.keys={};this._mouseDown=false;this._steer3d=null;this._mapDrag=null;this._joy=null;
+    if(this._joyKnob)this._joyKnob.style.transform="translate(-50%,-50%)";
   },
 
   startBattle(mapId, atkNation, defNation, playerSide){
@@ -65,6 +111,7 @@ const Game = {
     this.budgetLeft = this.map.budget;
     this.deployCls = null;
     this.aiDeploy(1-playerSide);
+    this.prepareLSTCargo(1-playerSide);
     this.state="deploy";
     UI.showDeploy();
     if (this.map.tutorial) UI.hint(this.map.hints[0]);
@@ -121,7 +168,7 @@ const Game = {
       for (const cls of perDomain[dom]){
         const c = unitCost(nation, cls);
         if (c > b) continue;
-        const spot = this.findDeploySpot(dom, zone);
+        const spot = this.findDeploySpot(cls, zone);
         if (!spot) continue;
         b -= c;
         this.units.push(makeUnit(nation, cls, side, spot.x, spot.y));
@@ -129,15 +176,15 @@ const Game = {
     }
   },
 
-  /* 在部署區找一個符合作戰域地形的生成點 */
-  findDeploySpot(domain, zone){
+  /* 在部署區找一個符合兵種移動輪廓的生成點 */
+  findDeploySpot(cls, zone){
+    const base = CLASS_BASE[cls], probe = { cls, domain:base.domain||"land", mobility:base.mobility||base.domain||"land" };
     for (let t=0;t<100;t++){
       const x = zone.x + 20 + Math.random()*Math.max(1,zone.w-40);
       const y = zone.y + 20 + Math.random()*Math.max(1,zone.h-40);
       if (this.map.solids.some(s=>circleRectHit(x,y,18,s))) continue;
       if (this.units.some(o=>o.alive&&Math.hypot(o.x-x,o.y-y)<o.r+20)) continue;
-      if (domain==="sea" && !this.isWater(x,y)) continue;
-      if (domain==="land" && (this.inAny(this.map.waters,x,y)||this.inAny(this.map.deepwaters,x,y))) continue;
+      if (!this.canOccupyTerrain(probe,x,y)) continue;
       return {x,y};
     }
     return null;
@@ -145,13 +192,70 @@ const Game = {
 
   finishDeploy(){
     if (!this.units.some(u=>u.side===this.playerSide)){ UI.log("至少部署一名單位"); return; }
+    this.prepareLSTCargo(this.playerSide);
     if (Net.connected){ this.mpReady(); return; }
     this.state="cmd";
-    Fog.exploreAll();   // 地形全程可見，迷霧只隱藏未偵察的敵人
     Fog.recompute();
     this.beginTurn(this.playerSide);
     UI.showBattle();
     if (this.map.tutorial) UI.hint(this.map.hints[1]);
+  },
+
+  /* LST v1 預載：依 GDD/04 §6，每艘優先裝載突擊兵／步槍兵，最多兩名。
+   * 載員自戰場陣列移除，避免被看見、瞄準、碰撞或計入視線；卸載時還原同一物件。 */
+  prepareLSTCargo(side){
+    const lsts=this.units.filter(u=>u.alive&&u.side===side&&u.cls==="lst");
+    for(const ship of lsts){
+      ship.carried=ship.carried||[];
+      if(ship.carried.length)continue;
+      const priority={assault:0,rifleman:1};
+      const candidates=this.units.filter(u=>u!==ship&&u.alive&&u.side===side&&u.domain==="land"&&u.cls!=="tank")
+        .sort((a,b)=>(priority[a.cls]??5)-(priority[b.cls]??5)||dist(a,ship)-dist(b,ship));
+      for(const passenger of candidates.slice(0,2)){
+        ship.carried.push(passenger);
+        const idx=this.units.indexOf(passenger);if(idx>=0)this.units.splice(idx,1);
+      }
+      if(ship.carried.length&&side===this.playerSide)UI.log(`${ship.label} 已預載 ${ship.carried.map(u=>u.label).join("、")}`);
+    }
+  },
+
+  _unloadSpot(ship, passenger, ordinal){
+    const m=this.map,scale=m._k||1;
+    for(let ring=30*scale;ring<=72*scale;ring+=10*scale){
+      for(let i=0;i<16;i++){
+        const angle=ship.facing+(i+ordinal*5)*Math.PI/8,x=ship.x+Math.cos(angle)*ring,y=ship.y+Math.sin(angle)*ring;
+        if(x<passenger.r||y<passenger.r||x>(m.w||960)-passenger.r||y>(m.h||600)-passenger.r)continue;
+        if(this.inAny(m.deepwaters,x,y)||this.inAny(m.waters,x,y)||this.inAny(m.shallows,x,y))continue;
+        if(!this.canOccupyTerrain(passenger,x,y))continue;
+        if((m.solids||[]).some(s=>circleRectHit(x,y,passenger.r,s)))continue;
+        if(this.units.some(o=>o.alive&&Math.hypot(o.x-x,o.y-y)<o.r+passenger.r+3))continue;
+        return {x,y};
+      }
+    }
+    return null;
+  },
+
+  canUnloadLST(ship){
+    if(!ship||ship.cls!=="lst"||!(ship.carried||[]).length)return false;
+    const nearRect=r=>{const nx=clamp(ship.x,r.x,r.x+r.w),ny=clamp(ship.y,r.y,r.y+r.h);return Math.hypot(ship.x-nx,ship.y-ny)<=48*(this.map._k||1);};
+    if(!(this.map.shallows||[]).some(nearRect))return false;
+    return ship.carried.some((p,i)=>!!this._unloadSpot(ship,p,i));
+  },
+
+  unloadLST(){
+    const ship=this.sel;
+    if(this.state!=="act"||!this.canUnloadLST(ship)){UI.hint("登陸艦須靠近淺灘，且相鄰陸地要有足夠卸載空間");return false;}
+    const landed=[],remaining=[];
+    for(const passenger of ship.carried){
+      const spot=this._unloadSpot(ship,passenger,landed.length);
+      if(!spot){remaining.push(passenger);continue;}
+      passenger.x=spot.x;passenger.y=spot.y;passenger.facing=ship.facing;passenger.ap=passenger.maxap;
+      passenger.crouched=false;passenger.terrainAction=null;this.units.push(passenger);landed.push(passenger);
+    }
+    ship.carried=remaining;
+    ship.unloadingUntil=performance.now()+1600;
+    UI.log(`${ship.label} 放下艦艏跳板，卸載 ${landed.map(u=>u.label).join("、")}`);
+    Fog.recompute();UI.refreshActBar();if(Net.connected)Net.sendState();return landed.length>0;
   },
 
   cpFor(side){
@@ -166,7 +270,7 @@ const Game = {
     this.aiDeploy(0);                                 // startBattle 已布署 side 1，這裡補 side 0
     this.playerSide = 0; this.turnOwner = 0;
     this.state = "cmd";
-    Fog.exploreAll(); Fog.recompute();
+    Fog.recompute();
     this.beginTurn(0);
     UI.showBattle();
     Net.sendState();
@@ -212,17 +316,37 @@ const Game = {
     this._mpGuestUnits = d.units;
     if (this._mpReady) this._mpHostStart();
   },
+
+  _restoreNetUnit(su, fallbackSide){
+    const side = Number.isInteger(su.side) ? su.side : fallbackSide;
+    const u = makeUnit(su.nationId, su.cls, side, su.x, su.y);
+    if(Number.isFinite(su.id))u.id=su.id;
+    if(Number.isFinite(su.hp))u.hp=su.hp;
+    if(Number.isFinite(su.ap))u.ap=su.ap;
+    if(Number.isFinite(su.facing))u.facing=su.facing;
+    if(Number.isFinite(su.actedCount))u.actedCount=su.actedCount;
+    if(typeof su.alive==="boolean")u.alive=su.alive;
+    if(typeof su.revealed==="boolean")u.revealed=su.revealed;
+    u.crouched=!!su.crouched;
+    u.terrainAction=su.terrainAction||null;
+    u.carried=(su.carried||[]).map(passenger=>this._restoreNetUnit(passenger,side));
+    return u;
+  },
+
+  _maxUnitIdDeep(units){
+    let maxid=0;
+    const visit=list=>{for(const u of list||[]){if(Number.isFinite(u.id)&&u.id>maxid)maxid=u.id;visit(u.carried);}};
+    visit(units);return maxid;
+  },
   // 主機權威合併雙方部隊、開打並廣播
   _mpHostStart(){
     let maxid = 0; for (const u of this.units) if (u.id>maxid) maxid=u.id;
-    const opp = this._mpGuestUnits.map(su=>{
-      const u = makeUnit(su.nationId, su.cls, 1, su.x, su.y);
-      u.id = ++maxid; u.hp=su.hp; u.ap=su.ap; u.facing=su.facing; u.alive=su.alive;
-      return u;
-    });
+    const opp = this._mpGuestUnits.map(su=>this._restoreNetUnit(su,1));
+    const reassignIds=list=>{for(const u of list){u.id=++maxid;reassignIds(u.carried||[]);}};
+    reassignIds(opp);
     this.units = this.units.filter(u=>u.side===0).concat(opp);
     this.turnOwner = 0; this.playerSide = 0; this.state = "cmd";
-    Fog.exploreAll(); Fog.recompute(); this.beginTurn(0);
+    Fog.recompute(); this.beginTurn(0);
     UI.showBattle(); Net.sendState();
     UI.log("—— 雙方就緒，開戰！你先手 ——");
   },
@@ -248,18 +372,12 @@ const Game = {
     this.turn = d.turn; this.cp = d.cp; this.cpMax = d.cpMax; this.over = d.over || null;
     this.turnOwner = d.turnOwner;
     this.playerSide = Net.myside;
-    let maxid = 0;
-    this.units = d.units.map(su=>{
-      const u = makeUnit(su.nationId, su.cls, su.side, su.x, su.y);
-      u.id=su.id; u.hp=su.hp; u.ap=su.ap; u.alive=su.alive; u.facing=su.facing;
-      u.actedCount=su.actedCount; u.revealed=su.revealed;
-      if (su.id>maxid) maxid=su.id;
-      return u;
-    });
+    this.units = d.units.map(su=>this._restoreNetUnit(su,su.side));
+    const maxid=this._maxUnitIdDeep(this.units);
     UNIT_SEQ = Math.max(UNIT_SEQ||1, maxid+1);
     this.sel=null; this.aimTarget=null; this.moveTarget=null;
     this.state = this.over ? "over" : "cmd";
-    Fog.exploreAll(); Fog.recompute();
+    Fog.recompute();
     if (this.over) UI.showEnd(); else UI.showBattle();
     UI.refreshHud();
   },
@@ -279,41 +397,95 @@ const Game = {
   },
 
   /* ---------- 輸入 ---------- */
-  onClick(e){ this.onClickXY(e.clientX, e.clientY, e.button||0); },
-  onClickXY(clientX, clientY, button){
+  onClick(e){ this.onClickXY(e.clientX, e.clientY, e.button||0, "mouse"); },
+  onClickXY(clientX, clientY, button, pointerType){
     const rect = this.canvas.getBoundingClientRect();
     const x = (clientX-rect.left) * (this.canvas.width/rect.width);
     const y = (clientY-rect.top) * (this.canvas.height/rect.height);
     if (this.state==="menu"||!this.map) return;
-    // 全程 3D：把螢幕點反投影成地面世界座標（相機依狀態 overview/follow）
-    const w = (typeof Camera3D!=="undefined") ? (Camera3D.applyFor(this,true), Camera3D.unproject(x,y)) : [x,y];
+    pointerType = pointerType || "mouse";
+    // 只讀取最後一幀真正顯示的相機；輸入時不得瞬移相機，否則畫面與命中座標會錯位。
+    const w = (typeof Camera3D!=="undefined") ? Camera3D.unproject(x,y) : [x,y];
     if (this.state==="deploy" || this.state==="cmd"){
-      if (button===2){ if (w && this.state==="deploy") this.deployClick(w[0],w[1],2); return; } // 右鍵立即（移除部署）
+      const pick = this.pickUnitAtScreen(x,y,this.playerSide,pointerType);
+      if (button===2){
+        if (this.state==="deploy"){
+          if (pick) this.removeDeployedUnit(pick);
+          else if (w) this.deployClick(w[0],w[1],2);
+        }
+        return;
+      }
+      if(button!==0)return;
       // 按下先記錄：輕點=選兵/部署、按住拖曳=平移視角（俯瞰可看清敵陣）
-      this._mapDrag = { sx:x, sy:y, wx:(w?w[0]:null), wy:(w?w[1]:null), moved:false, t:Date.now() };
+      this._mapDrag = { sx:x, sy:y, cx:clientX, cy:clientY, wx:(w?w[0]:null), wy:(w?w[1]:null),
+        pick, pointerType, moved:false, t:Date.now() };
       return;
     }
     if (this.state==="act"){
       // 行動模式相對操控：按下先記步（拖曳=轉向/前進、快速輕點=瞄準/停）
+      if(button!==0)return;
       if (Net.connected && Net.myside!==this.turnOwner) return;
-      this._steer3d = { sx:x, sy:y, wx:(w?w[0]:null), wy:(w?w[1]:null), fwd:0, turn:0, moved:false, t:Date.now() };
+      const pick = this.pickUnitAtScreen(x,y,null,pointerType);
+      this._steer3d = { sx:x, sy:y, cx:clientX, cy:clientY, wx:(w?w[0]:null), wy:(w?w[1]:null),
+        pick, pointerType, fwd:0, turn:0, moved:false, t:Date.now() };
       return;
     }
+  },
+
+  /* 可見 3D 模型的螢幕命中：空軍不再錯投到 wz=0 地面。
+   * 回傳按下當下命中的單位，pointerup 不重新追逐已移動的模型。 */
+  pickUnitAtScreen(sx,sy,side=null,pointerType="mouse"){
+    if (typeof Camera3D==="undefined") return null;
+    const rect=this.canvas.getBoundingClientRect();
+    const kx=this.canvas.width/Math.max(1,rect.width), ky=this.canvas.height/Math.max(1,rect.height);
+    const touch=pointerType==="touch", minW=(touch?48:36)*kx, minH=(touch?48:36)*ky;
+    const padX=(touch?10:6)*kx, padY=(touch?10:6)*ky, hits=[];
+    for (const u of this.units){
+      if (!u.alive || (side!==null && u.side!==side)) continue;
+      if (u.side!==this.playerSide && !this.enemyVisible(u)) continue;
+      let b = (typeof Engine3D!=="undefined" && Engine3D.ok) ? Engine3D.unitScreenBounds(u,Camera3D) : null;
+      if (!b){
+        const alt=u.domain==="air"?52:u.domain==="sea"?0:
+          ((typeof Engine3D!=="undefined"&&Engine3D.ok)?Engine3D.heightAt(u.x,u.y):0);
+        const h=u.cls==="tank"?18:u.domain==="sea"?14:u.domain==="air"?14:22;
+        const p=Camera3D.project(u.x,u.y,alt+h*0.5);
+        if (!p) continue;
+        const hw=(u.domain==="air"?15:u.domain==="sea"?(u.big?26:20):u.cls==="tank"?18:7)*p.scale;
+        const hh=Math.max(5,h*p.scale*0.55);
+        b={left:p.sx-hw,top:p.sy-hh,right:p.sx+hw,bottom:p.sy+hh,depth:p.depth};
+      }
+      const rawW=Math.max(1,b.right-b.left), rawH=Math.max(1,b.bottom-b.top);
+      const cx=(b.left+b.right)/2, cy=(b.top+b.bottom)/2;
+      const halfW=Math.max(rawW/2,minW/2)+padX, halfH=Math.max(rawH/2,minH/2)+padY;
+      if (sx<cx-halfW || sx>cx+halfW || sy<cy-halfH || sy>cy+halfH) continue;
+      const raw=sx>=b.left&&sx<=b.right&&sy>=b.top&&sy<=b.bottom;
+      const norm=((sx-cx)/halfW)**2+((sy-cy)/halfH)**2;
+      hits.push({u,raw,norm,depth:b.depth||Infinity});
+    }
+    hits.sort((a,b)=>(b.raw-a.raw)||(a.depth-b.depth)||(a.norm-b.norm));
+    if(!hits.length){this._pickCycle=null;return null;}
+    let chosen=hits[0].u;
+    const now=Date.now(),key=hits.map(h=>h.u.id).join(","),prev=this._pickCycle;
+    if(hits.length>1&&prev&&now-prev.t<900&&Math.hypot(sx-prev.sx,sy-prev.sy)<12&&prev.key===key){
+      const at=hits.findIndex(h=>h.u.id===prev.id);chosen=hits[(at+1+hits.length)%hits.length].u;
+    }
+    this._pickCycle={sx,sy,t:now,key,id:chosen.id};
+    return chosen;
   },
 
   deployClick(x,y,btn){
     const zone = this.map.deploy[this.playerSide];
     if (btn===2){ // 右鍵移除
       const u = this.unitAt(x,y,this.playerSide);
-      if (u){ this.units.splice(this.units.indexOf(u),1); this.budgetLeft += u.cost; UI.refreshDeploy(); }
+      if (u) this.removeDeployedUnit(u);
       return;
     }
     if (!this.deployCls) { UI.log("先在右側選擇兵種"); return; }
     if (!ptInRect(x,y,zone)) { UI.log("只能部署在我方藍框區域內"); return; }
     if (this.map.solids.some(s=>circleRectHit(x,y,14,s))) return;
-    const dom = CLASS_BASE[this.deployCls].domain;
-    if (dom==="sea" && !this.isWater(x,y)){ UI.log("艦艇只能部署在水域（藍色）"); return; }
-    if (dom==="land" && (this.inAny(this.map.waters,x,y)||this.inAny(this.map.deepwaters,x,y))){ UI.log("陸軍不能部署在深水，只能上陸或淺灘"); return; }
+    const base = CLASS_BASE[this.deployCls], dom = base.domain;
+    const probe = { cls:this.deployCls, domain:dom, mobility:base.mobility||dom };
+    if (!this.canOccupyTerrain(probe,x,y)){ UI.log("此兵種無法進入該地形"); return; }
     const c = unitCost(this.nations[this.playerSide], this.deployCls);
     if (c > this.budgetLeft){ UI.log("點數不足"); return; }
     if (this.deployCls==="tank" && this.units.filter(u=>u.side===this.playerSide&&u.cls==="tank").length>=2){ UI.log("坦克每隊最多 2 輛"); return; }
@@ -324,6 +496,12 @@ const Game = {
     UI.refreshDeploy();
   },
 
+  removeDeployedUnit(u){
+    const i=this.units.indexOf(u);
+    if (i<0 || u.side!==this.playerSide) return;
+    this.units.splice(i,1); this.budgetLeft+=u.cost; UI.refreshDeploy();
+  },
+
   unitAt(x,y,side=null){
     return this.units.find(u=>u.alive && (side===null||u.side===side) && Math.hypot(u.x-x,u.y-y)<=u.r+6);
   },
@@ -331,7 +509,12 @@ const Game = {
   cmdClick(x,y){
     if (Net.connected && Net.myside!==this.turnOwner){ UI.log("等待對方行動…"); return; }
     const u = this.unitAt(x,y,this.playerSide);
-    if (!u) return;
+    if (u) this.cmdUnit(u);
+  },
+
+  cmdUnit(u){
+    if (!u || !u.alive || u.side!==this.playerSide) return;
+    if (Net.connected && Net.myside!==this.turnOwner){ UI.log("等待對方行動…"); return; }
     let cost = (u.cls==="tank" || u.big || u.domain==="air") ? 2 : 1; // 坦克/大艦/戰機花 2 CP
     if (u.cls==="tank" && NATIONS[u.nationId].trait.id==="panzer_doctrine" && !this.germanyTankDiscountUsed){
       cost = 1; // 德國：每回合首次坦克指令 1 CP
@@ -343,7 +526,7 @@ const Game = {
   },
 
   enterAction(u){
-    this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null; this._steer3d = null;
+    this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null; this._steer3d = null; this._actUiT=0;
     if (typeof Sfx!=="undefined") Sfx.play("select");
     let mult = Math.pow(0.7, u.actedCount);
     if (NATIONS[u.nationId].trait.id==="rapid_reaction" && this.turn===1) mult *= 1.2; // 法國
@@ -355,7 +538,7 @@ const Game = {
   },
 
   endAction(){
-    this.sel=null; this.aimTarget=null; this.moveTarget=null; this._steer3d=null; UI.hideAim();
+    this.sel=null;this.aimTarget=null;this.moveTarget=null;this._clearControls();UI.hideAim();
     this.state="cmd";
     this.checkVictory();
     if (Net.connected && !this.over) Net.sendState();
@@ -364,7 +547,7 @@ const Game = {
   },
 
   endTurn(){
-    this.sel=null; this.aimTarget=null; UI.hideAim();
+    this.sel=null;this.aimTarget=null;this._clearControls();UI.hideAim();
     if (this.over) return;
     if (Net.connected){ if(Net.myside===this.turnOwner) this.mpEndTurn(); return; }
     this.state="enemy";
@@ -377,9 +560,18 @@ const Game = {
   actClick(x,y){
     if (Net.connected && Net.myside!==this.turnOwner) return;
     const foe = this.unitAt(x,y);
+    if (foe){ this.actUnitClick(foe); return; }
+    // 空地：開始操控移動（按住拖曳持續操控、放開即停；快速輕點=走到該點）
+    this.moveTarget = { x: clamp(x, this.sel.r, (this.map.w||960)-this.sel.r), y: clamp(y, this.sel.r, (this.map.h||600)-this.sel.r) };
+    this._steer = { t: Date.now(), sx:x, sy:y, moved:false };
+  },
+
+  actUnitClick(foe){
+    if (!foe || !foe.alive || !this.sel) return;
     if (foe && foe.side!==this.playerSide && Combat.canSee(this.map,this.sel,foe,this.turn)){
       this.aimTarget = foe; UI.showAim(this.sel, foe); this._steer=null; return;
     }
+    if(foe.side!==this.playerSide){UI.hint("目前單位與目標之間沒有可用射線");return;}
     // 工兵修理：點自己坦克
     if (this.sel.cls==="engineer" && foe && foe.side===this.playerSide && foe.cls==="tank"
         && dist(this.sel,foe)<60 && !this.selFired && foe.hp<foe.maxhp){
@@ -387,15 +579,11 @@ const Game = {
       this.selFired = true;
       this.fx.push({type:"hitfx", x:foe.x,y:foe.y, dmg:"+300", t:0, heal:true});
       UI.log(`${this.sel.label} 修理了 ${foe.label}（+300）`);
+      UI.refreshActBar();
       return;
     }
     // 點自己選中的部隊 → 立刻停止
     if (foe===this.sel){ this.moveTarget=null; this._steer=null; return; }
-    // 空地：開始操控移動（按住拖曳持續操控、放開即停；快速輕點=走到該點）
-    if (!foe){
-      this.moveTarget = { x: clamp(x, this.sel.r, (this.map.w||960)-this.sel.r), y: clamp(y, this.sel.r, (this.map.h||600)-this.sel.r) };
-      this._steer = { t: Date.now(), sx:x, sy:y, moved:false };
-    }
   },
 
   /* 拖曳操控：手指/滑鼠移動時持續更新移動目標 */
@@ -405,7 +593,8 @@ const Game = {
     if (this._mapDrag){
       const [cx,cy]=this._toWorld(clientX,clientY);
       const dx = cx - this._mapDrag.sx, dy = cy - this._mapDrag.sy;
-      if (Math.hypot(dx,dy) > 10) this._mapDrag.moved = true;
+      const slop=this._mapDrag.pointerType==="touch"?12:6;
+      if (Math.hypot(clientX-this._mapDrag.cx,clientY-this._mapDrag.cy) > slop) this._mapDrag.moved = true;
       if (this._mapDrag.moved){
         Camera3D.panBy(dx, dy, this.map);
         this._mapDrag.sx = cx; this._mapDrag.sy = cy;
@@ -416,34 +605,29 @@ const Game = {
     if (Net.connected && Net.myside!==this.turnOwner) return;
     const [cx,cy]=this._toWorld(clientX,clientY);           // 螢幕(canvas)座標
     const dxs = cx - this._steer3d.sx, dys = this._steer3d.sy - cy; // 上為正
-    if (Math.hypot(dxs,dys) > 8) this._steer3d.moved = true;
+    const slop=this._steer3d.pointerType==="touch"?12:6;
+    const drag=Math.hypot(clientX-this._steer3d.cx,clientY-this._steer3d.cy);
+    if(!this._steer3d.moved&&drag<=slop){this._steer3d.fwd=0;this._steer3d.turn=0;return;}
+    if(drag>slop)this._steer3d.moved=true;
     this._steer3d.fwd  = clamp(dys/70, -1, 1);              // 拖上→前進、拖下→後退
     this._steer3d.turn = clamp(dxs/110, -1, 1);             // 拖右→右轉、拖左→左轉
   },
-  /* 放開：快速輕點=瞄準/停；拖曳=結束操控（停止移動） */
+  /* 放開：未越 dead-zone=瞄準/停（按住多久都有效）；拖曳=結束操控 */
   _pointerUp(){
     // 俯瞰：輕點才觸發原本的選兵/部署
     if (this._mapDrag){
       const d = this._mapDrag; this._mapDrag = null;
-      if (!d.moved && Date.now()-d.t < 500 && d.wx!=null){
-        if (this.state==="deploy") this.deployClick(d.wx, d.wy, 0);
-        else if (this.state==="cmd") this.cmdClick(d.wx, d.wy);
+      if (!d.moved){
+        if (this.state==="deploy" && d.wx!=null) this.deployClick(d.wx, d.wy, 0);
+        else if (this.state==="cmd") d.pick ? this.cmdUnit(d.pick) : (d.wx!=null&&this.cmdClick(d.wx,d.wy));
       }
       return;
     }
     if (!this._steer3d) return;
-    const held = Date.now() - this._steer3d.t;
-    if (held < 260 && !this._steer3d.moved){
+    if (!this._steer3d.moved){
       // 輕點：點到敵人立繪 → 瞄準；否則視為停止
-      const wx=this._steer3d.wx, wy=this._steer3d.wy;
-      if (wx!=null && this.sel){
-        const foe = this.unitAt(wx,wy);
-        if (foe && foe.side!==this.playerSide && Combat.canSee(this.map,this.sel,foe,this.turn)){
-          this.aimTarget=foe; UI.showAim(this.sel,foe);
-        } else if (foe && foe.side===this.playerSide && foe.cls==="tank" && this.sel.cls==="engineer"){
-          this.actClick(wx,wy);   // 工兵修理沿用原邏輯
-        }
-      }
+      const foe=this._steer3d.pick;
+      if (foe && this.sel) this.actUnitClick(foe);
     }
     this._steer3d = null;   // 放開即停
   },
@@ -464,7 +648,7 @@ const Game = {
       "background:rgba(255,255,255,0.38);border:1.5px solid rgba(255,255,255,0.5);transform:translate(-50%,-50%);";
     joy.appendChild(knob);
     document.getElementById("stage").appendChild(joy);
-    this._joyEl=joy; this._joy=null;
+    this._joyEl=joy;this._joyKnob=knob;this._joy=null;
     const setJoy=(t)=>{
       const r=joy.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
       let dx=t.clientX-cx, dy=t.clientY-cy;
@@ -489,6 +673,7 @@ const Game = {
     this.selFired = true;
     this.aimTarget = null; UI.hideAim();
     UI.log(`${this.sel.label}（${this.sel.weaponName}）開火`);
+    UI.refreshActBar();
     this.checkVictory();
     if (this.map.tutorial && this.hintIdx<4){ this.hintIdx=4; UI.hint(this.map.hints[4]); }
   },
@@ -510,17 +695,88 @@ const Game = {
     const dt = Math.min(0.05,(ts-this.lastTs)/1000||0.016); this.lastTs=ts;
     if (this.state==="act")   this.updateAct(dt);
     if (this.state==="enemy"){
-      // 敵方回合逐幀單步會讓玩家枯等近一分鐘（見 lessons L-007）。
-      // 每個可見幀推進多個固定子步，把牆鐘壓到數秒，動畫仍連續。
-      for (let i=0;i<ENEMY_SUBSTEPS && this.state==="enemy"; i++) this.updateEnemy(0.033);
+      // 依實際 dt 快轉，但每個可見幀只產生一個位置，避免一幀跳過 6 個中間狀態。
+      this.updateEnemy(dt*ENEMY_TIME_SCALE);
     }
     this.fx = this.fx.filter(f=>(f.t+=dt) < (f.type==="tracer"?0.25:f.type==="boom"?0.5:0.9));
     if (this._joyEl) this._joyEl.style.display = (this.state==="act" && this._touch) ? "block" : "none";
-    this.render();
+    this.render(dt);
   },
 
   inAny(rects,x,y){ return rects && rects.some(r=>ptInRect(x,y,r)); },
   isWater(x,y){ const m=this.map; return this.inAny(m.waters,x,y)||this.inAny(m.deepwaters,x,y)||this.inAny(m.shallows,x,y); },
+
+  /* 兵種地形輪廓（GDD/04 §2c）：null=不可進入，倍率=AP 成本。 */
+  terrainProfile(u){
+    const key = u.mobility || (CLASS_BASE[u.cls] && CLASS_BASE[u.cls].mobility) || u.domain || "foot";
+    return TERRAIN_MOBILITY[key] || TERRAIN_MOBILITY.foot;
+  },
+
+  terrainMoveFactor(u,x,y){
+    if ((u.mobility||u.domain)==="air" || u.domain==="air") return 1;
+    const m=this.map, p=this.terrainProfile(u);
+    const mobility=u.mobility||(CLASS_BASE[u.cls]&&CLASS_BASE[u.cls].mobility)||u.domain||"foot";
+    let baseKey="ground";
+    if (this.inAny(m.deepwaters,x,y)) baseKey="deepwater";
+    else if (this.inAny(m.waters,x,y)) baseKey="water";
+    else if (this.inAny(m.shallows,x,y)) baseKey="shallow";
+    let f=p[baseKey];
+    if (f==null) return Infinity;
+    const layers=[];
+    if ((m.hills||[]).some(h=>Math.hypot(h.x-x,h.y-y)<=h.r)) layers.push("hill");
+    if (this.inAny(m.trenches,x,y)) layers.push("trench");
+    if ((m.craters||[]).concat(m.foxholes||[]).some(c=>Math.hypot(c.x-x,c.y-y)<=c.r)) layers.push("crater");
+    if (this.inAny(m.wires,x,y)) layers.push("wire");
+    if ((m.bushes||[]).some(b=>Math.hypot(b.x-x,b.y-y)<=b.r)) layers.push("bush");
+    for (const key of layers){ if (p[key]==null) return Infinity; f*=p[key]; }
+    if(this.inAny(m.roadblocks,x,y))f*=mobility==="engineer"?1.08:mobility==="tracked"?2.35:mobility==="heavy"?1.45:1.25;
+    if(this.inAny(m.tanktraps,x,y)){
+      if(mobility==="tracked")return Infinity;
+      f*=mobility==="engineer"?1.0:mobility==="heavy"?1.3:1.12;
+    }
+    const onRoad=(m.roads||[]).some(r=>{
+      const vx=r.x2-r.x1,vy=r.y2-r.y1,den=vx*vx+vy*vy||1;
+      const t=clamp(((x-r.x1)*vx+(y-r.y1)*vy)/den,0,1);
+      return Math.hypot(x-(r.x1+vx*t),y-(r.y1+vy*t))<=r.w*.5;
+    });
+    if(onRoad)f*=mobility==="tracked"?.72:mobility==="scout"?.86:mobility==="foot"?.92:.96;
+    return f;
+  },
+
+  canOccupyTerrain(u,x,y){ return Number.isFinite(this.terrainMoveFactor(u,x,y)); },
+
+  /* Terrain Action（GDD/01 §5a）：地面人員須主動蹲伏才取得掩體／高草隱蔽。 */
+  terrainActionAt(u){
+    if (!u || u.domain!=="land" || u.cls==="tank") return null;
+    const m=this.map; if(!m) return null;
+    if ((m.bunkers||[]).some(r=>ptInRect(u.x,u.y,r))) return {id:"bunker",label:"碉堡",factor:0.3};
+    if ((m.trenches||[]).some(r=>ptInRect(u.x,u.y,r))) return {id:"trench",label:"壕溝",factor:0.4};
+    if ((m.foxholes||[]).some(h=>Math.hypot(u.x-h.x,u.y-h.y)<=h.r)) return {id:"foxhole",label:"散兵坑",factor:0.5};
+    if ((m.craters||[]).some(h=>Math.hypot(u.x-h.x,u.y-h.y)<=h.r)) return {id:"crater",label:"彈坑",factor:0.5};
+    if ((m.sandbags||[]).some(sb=>{
+      const nx=clamp(u.x,sb.x,sb.x+sb.w),ny=clamp(u.y,sb.y,sb.y+sb.h);
+      return Math.hypot(u.x-nx,u.y-ny)<=28;
+    })) return {id:"sandbag",label:"沙包",factor:0.5};
+    if ((m.solids||[]).some(s=>{
+      const nx=clamp(u.x,s.x,s.x+s.w),ny=clamp(u.y,s.y,s.y+s.h);
+      return !ptInRect(u.x,u.y,s)&&Math.hypot(u.x-nx,u.y-ny)<=24;
+    })) return {id:"building",label:"建築外牆",factor:0.65};
+    if ((m.bushes||[]).some(b=>Math.hypot(u.x-b.x,u.y-b.y)<=b.r)) return {id:"bush",label:"高草",factor:1};
+    return null;
+  },
+
+  toggleTerrainAction(){
+    const u=this.sel; if(this.state!=="act"||!u||!u.alive)return false;
+    if(u.crouched){u.crouched=false;u.terrainAction=null;UI.log(`${u.label} 站起`);}
+    else{
+      const action=this.terrainActionAt(u);
+      if(!action){UI.hint("靠近沙包或建築外牆，或進入高草、壕溝、散兵坑、彈坑、碉堡後才能蹲伏");return false;}
+      u.crouched=true;u.terrainAction=action.id;
+      if(action.id==="bush")u.revealed=false;
+      UI.log(`${u.label} 在${action.label}蹲伏掩蔽`);
+    }
+    Fog.recompute();UI.refreshActBar();if(Net.connected)Net.sendState();return true;
+  },
 
   moveUnit(u, dx, dy, dt, setFacing=true){
     let speed = u.domain==="air" ? 160 : u.domain==="sea" ? (u.big?60:95) : (u.cls==="tank"?70:100); // px/s
@@ -528,15 +784,22 @@ const Game = {
     if (this.state==="enemy") speed *= 2.5; // 敵方階段快轉（戰棋慣例，不影響規則）
     let nx = u.x + dx*speed*dt, ny = u.y + dy*speed*dt;
     nx = clamp(nx, u.r, (this.map.w||960)-u.r); ny = clamp(ny, u.r, (this.map.h||600)-u.r);
-    // 作戰域地形限制（GDD/04 §1-2）
-    if (u.domain==="sea"){
-      if (!this.isWater(nx,ny)) return false;                                  // 艦艇不能上陸
-    } else if (u.domain==="land"){
-      if (this.inAny(this.map.waters,nx,ny)||this.inAny(this.map.deepwaters,nx,ny)) return false; // 陸軍只能涉淺灘
+    // 資料化地形限制（GDD/04 §2c）；斜貼邊界時沿合法單軸滑行。
+    const terrainBlocked=(px,py)=>!this.canOccupyTerrain(u,px,py);
+    if(terrainBlocked(nx,ny)){
+      if(!terrainBlocked(nx,u.y))ny=u.y;
+      else if(!terrainBlocked(u.x,ny))nx=u.x;
+      else return false;
     }
     if (u.domain!=="air" && this.map.solids.some(s=>circleRectHit(nx,ny,u.r,s))){ // 空軍飛越地形
       if (!this.map.solids.some(s=>circleRectHit(nx,u.y,u.r,s))) ny=u.y;
       else if (!this.map.solids.some(s=>circleRectHit(u.x,ny,u.r,s))) nx=u.x;
+      else return false;
+    }
+    const mobility=u.mobility||(CLASS_BASE[u.cls]&&CLASS_BASE[u.cls].mobility)||u.domain;
+    if(mobility==="tracked"&&(this.map.tanktraps||[]).some(s=>circleRectHit(nx,ny,u.r,s))){
+      if(!(this.map.tanktraps||[]).some(s=>circleRectHit(nx,u.y,u.r,s)))ny=u.y;
+      else if(!(this.map.tanktraps||[]).some(s=>circleRectHit(u.x,ny,u.r,s)))nx=u.x;
       else return false;
     }
     if (u.domain==="land"){
@@ -545,12 +808,6 @@ const Game = {
       if (trunk(nx,ny)){
         if (!trunk(nx,u.y)) ny=u.y;
         else if (!trunk(u.x,ny)) nx=u.x;
-        else return false;
-      }
-      // 壕溝＝反戰車壕：坦克不可越（步兵可下壕）
-      if (u.cls==="tank" && this.inAny(this.map.trenches,nx,ny)){
-        if (!this.inAny(this.map.trenches,nx,u.y)) ny=u.y;
-        else if (!this.inAny(this.map.trenches,u.x,ny)) nx=u.x;
         else return false;
       }
     }
@@ -565,17 +822,14 @@ const Game = {
         else return false;
       }
     }
-    const moved = Math.hypot(nx-u.x, ny-u.y);
+    let moved = Math.hypot(nx-u.x, ny-u.y);
+    if(moved<=0.0001)return false;
     let apCost = moved/(3*(this.map._k||1)); // 1 AP = 3px；大地圖依 _k 折算維持節奏（data-maps 檔頭）
-    if (u.domain==="land"){
-      if (this.inAny(this.map.shallows,nx,ny)) apCost*=2;                       // 涉淺灘
-      if (this.inAny(this.map.wires,nx,ny)) apCost *= (u.cls==="tank"?1.2:2.5); // 鐵絲網：步兵受阻、坦克輾壓
-      else if (this.inAny(this.map.trenches,nx,ny)) apCost*=1.5;               // 步兵下壕較慢
-      else if ((this.map.craters||[]).some(cr=>Math.hypot(cr.x-nx,cr.y-ny)<=cr.r)) apCost*=1.3; // 彈坑崎嶇
-    }
+    apCost *= this.terrainMoveFactor(u,nx,ny);
     if (Combat.inBush(this.map,u) && NATIONS[u.nationId].trait.id==="tunnel_war") apCost*=0.5; // 越南
-    if (u.ap < apCost) return false;
-    u.ap -= apCost; u.x=nx; u.y=ny; if (setFacing) u.facing=Math.atan2(dy,dx);
+    if(u.ap<apCost&&apCost>0){const ratio=clamp(u.ap/apCost,0,1);nx=u.x+(nx-u.x)*ratio;ny=u.y+(ny-u.y)*ratio;moved*=ratio;apCost=u.ap;}
+    u.ap=Math.max(0,u.ap-apCost);u.x=nx;u.y=ny;if(setFacing)u.facing=Math.atan2(dy,dx);
+    if(moved>0&&u.crouched){u.crouched=false;u.terrainAction=null;}
     if (this.state==="act" && u.side===this.playerSide){ this._fogT=(this._fogT||0)+dt; if(this._fogT>0.1){ this._fogT=0; Fog.recompute(); } }
     return moved>0;
   },
@@ -600,7 +854,8 @@ const Game = {
         if (this.map.tutorial && this.hintIdx<3 && u.ap<u.maxap*0.6){ this.hintIdx=3; UI.hint(this.map.hints[3]); }
       }
     }
-    UI.refreshActBar();
+    this._actUiT=(this._actUiT||0)+dt;
+    if (this._actUiT>=0.1){ this._actUiT%=0.1; UI.refreshActBar(); }
     this.checkVictory();
   },
 
@@ -619,7 +874,7 @@ const Game = {
       }
       const p=this.curPlan, mult=Math.pow(0.7,p.unit.actedCount);
       p.unit.ap = p.unit.maxap*mult; p.unit.actedCount++;
-      p.fired=false; p.stuck=0; p.age=0; p.detourT=0;
+      p.fired=false; p.didFire=false; p.stuck=0; p.age=0; p.detourT=0;
       for (const e of this.units) e._iceTimer=0;
     }
     const p=this.curPlan, u=p.unit;
@@ -656,10 +911,13 @@ const Game = {
         this.fx.push({type:"hitfx",x:repair.x,y:repair.y,dmg:"+300",t:0,heal:true});
       } else if (canShoot){
         this.pushFx(Combat.fire(this.map,u,target,p.part||"body"));
+        p.didFire=true;
         UI.log(`敵 ${u.label}（${u.weaponName}）開火`);
       }
       p.fired=true;
     }
+    const terrain=this.terrainActionAt(u);
+    if(terrain){u.crouched=true;u.terrainAction=terrain.id;if(terrain.id==="bush"&&!p.didFire)u.revealed=false;}
     this.checkVictory();
     this.curPlan=null;
   },
@@ -790,21 +1048,28 @@ const Game = {
     }
   },
 
-  render(){
+  render(dt){
     const c=this.ctx, m=this.map;
     c.clearRect(0,0,960,600);
     if (this.state==="menu"||!m) return;
     // 真 3D（GDD/08）：WebGL 畫世界、2D canvas 疊 HUD
     if (typeof Engine3D!=="undefined" && Engine3D.ok){
-      Camera3D.applyFor(this);
+      Camera3D.applyFor(this,false,dt);
       Engine3D.render(this);
+      Fog.renderProjected(c,Camera3D,(x,y)=>Engine3D.heightAt(x,y));
       Engine3D.overlay(c, this);
       this.drawHint(c);
       return;
     }
-    // 後備：偽 3D 斜角戰場（GDD/07）
-    if (typeof Render3D!=="undefined"){ Render3D.draw(c, this); this.drawHint(c); return; }
-    // 後備：Render3D 未載入時回到俯視（零依賴保險）
+    // 正式流程禁止靜默回退偽 3D／俯視；否則使用者會看到舊地圖卻不知道 WebGL 已失效。
+    c.save();c.fillStyle="#111820";c.fillRect(0,0,960,600);
+    c.fillStyle="#ff665a";c.textAlign="center";c.font="bold 30px sans-serif";
+    c.fillText("真 3D 引擎啟動失敗",480,250);
+    c.fillStyle="#eef3f7";c.font="18px sans-serif";
+    const reason=(typeof Engine3D!=="undefined"&&Engine3D.failureReason)||"瀏覽器不支援 WebGL 或 Three.js 未載入";
+    c.fillText(reason,480,292);c.font="15px sans-serif";
+    c.fillText("已阻止切回舊 2D／偽 3D 戰場，請開啟開發者主控台查看錯誤。",480,330);c.restore();return;
+    // 下方舊俯視碼只保留作歷史診斷；正式流程不可抵達。
     if (!this._bg || this._bgMap!==m) this.buildTerrain(m);
     c.drawImage(this._bg, 0, 0);
     for (const b of m.bases){
@@ -844,7 +1109,7 @@ const Game = {
 
   /* 敵方單位是否對我方可見（迷霧 + 視線 + 隱蔽） */
   enemyVisible(u){
-    if (this.state==="deploy") return true;   // 部署階段看得到敵軍佈署，才好佈署對策
+    if (this.state==="deploy") return false;  // 部署屬隱藏資訊；開戰後才套用迷霧與視線
     if (Fog.enabled && !Fog.visibleAt(u.x,u.y)) return false;
     return this.units.some(o=>o.alive && o.side===this.playerSide && Combat.canSee(this.map,o,u,this.turn));
   },
@@ -852,14 +1117,15 @@ const Game = {
   drawUnit(c,u){
     const isPlayer = u.side===this.playerSide;
     if (!isPlayer && !this.enemyVisible(u)) return;
-    const hidden = Combat.inBush(this.map,u) && !u.revealed && isPlayer;
+    const hidden = Combat.inBush(this.map,u) && u.crouched && !u.revealed && isPlayer;
     c.globalAlpha = hidden ? 0.6 : 1;
     Sprites.tryLoad(u);
     Sprites.drawBody(c,u,isPlayer);
     // 血條/AP條
     const w = u.big?34 : u.cls==="tank"?32 : 22, x0=u.x-w/2, y0=u.y-u.r-9;
     c.fillStyle="#222"; c.fillRect(x0,y0,w,3);
-    c.fillStyle=u.hp>u.maxhp*0.3?"#4fd05e":"#e04b3a"; c.fillRect(x0,y0,w*clamp(u.hp/u.maxhp,0,1),3);
+    c.fillStyle=isPlayer?(u.hp>u.maxhp*0.3?"#4fd05e":"#e04b3a"):"#e53935";
+    c.fillRect(x0,y0,w*clamp(u.hp/u.maxhp,0,1),3);
     if (this.sel===u){ c.fillStyle="#222"; c.fillRect(x0,y0+4,w,3);
       c.fillStyle="#ffd83d"; c.fillRect(x0,y0+4,w*clamp(u.ap/u.maxap,0,1),3);
       c.strokeStyle="#ffd83d"; c.lineWidth=2; c.beginPath(); c.arc(u.x,u.y,u.r+6,0,7); c.stroke(); c.lineWidth=1;
@@ -923,3 +1189,6 @@ const Game = {
     return rate;
   }
 };
+
+// 發布閘門與瀏覽器反驗證入口；指向實際遊戲單例，不複製或繞過任何規則。
+if(typeof window!=="undefined")window.BATTLEFIELD_GAME=Game;

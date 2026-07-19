@@ -78,7 +78,9 @@ const Net = {
   sendState(){ this.send("state", this.serialize()); },
 
   serUnit(u){ return { id:u.id, side:u.side, nationId:u.nationId, cls:u.cls,
-    x:Math.round(u.x), y:Math.round(u.y), hp:u.hp, ap:u.ap, alive:u.alive, facing:u.facing }; },
+    x:Math.round(u.x), y:Math.round(u.y), hp:u.hp, ap:u.ap, alive:u.alive, facing:u.facing,
+    crouched:!!u.crouched, terrainAction:u.terrainAction||null,
+    carried:(u.carried||[]).map(c=>this.serUnit(c)) }; },
 
   serialize(){
     const g = Game;
@@ -88,7 +90,9 @@ const Net = {
       units: g.units.map(u=>({
         id:u.id, side:u.side, nationId:u.nationId, cls:u.cls,
         x:Math.round(u.x), y:Math.round(u.y), hp:u.hp, ap:u.ap,
-        alive:u.alive, facing:u.facing, actedCount:u.actedCount, revealed:u.revealed
+        alive:u.alive, facing:u.facing, actedCount:u.actedCount, revealed:u.revealed,
+        crouched:!!u.crouched, terrainAction:u.terrainAction||null,
+        carried:(u.carried||[]).map(c=>this.serUnit(c))
       }))
     };
   },

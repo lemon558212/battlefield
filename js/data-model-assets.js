@@ -1,0 +1,26 @@
+/* 17 兵種 3D 來源清單。status=approved 才算正式資產。
+ * 步兵策略（2026-07-19 定案）：共用輕量動畫人形（Quaternius CC0，含 idle/walk/shoot）
+ * ＋ engine3d._classGear 兵種專屬裝備差異化（狙擊長槍/機槍腳架/火箭筒…）。
+ * 未來升級路線：Quaternius Ultimate Modular Men + Universal Animation Library（CC0）
+ * 可組出真正的每兵種專屬模型，屆時逐兵種替換 url 並改 status。 */
+"use strict";
+
+const MODEL_ASSETS = Object.freeze({
+  rifleman: {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  assault:  {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  mg:       {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  mortar:   {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  sniper:   {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  at:       {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  engineer: {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  specops:  {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  sam:      {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  tank:      {url:"assets/models/tank.glb", len:34, rotY:Math.PI, source:"Quaternius CC0", status:"approved"},
+  destroyer: {url:"assets/models/destroyer.glb", len:46, rotY:Math.PI, source:"Original project guided-missile destroyer", status:"provisional"},
+  missileboat:{url:"assets/models/missileboat.glb", len:32, rotY:Math.PI, source:"Original project fast missile craft", status:"provisional"},
+  lst:        {url:"assets/models/lst.glb", len:42, rotY:Math.PI, source:"Original project LST mesh", status:"provisional"},
+  submarine: {url:"assets/models/submarine.glb", len:34, rotY:Math.PI, source:"Original project modern attack submarine", status:"provisional"},
+  fighter:   {url:"assets/models/fighter.glb", len:34, rotY:0, source:"Original project modern fighter", status:"provisional"},
+  attacker:  {url:"assets/models/attacker.glb", len:36, rotY:0, source:"Original project twin-engine attacker", status:"provisional"},
+  gunship:   {url:"assets/models/gunship.glb", len:30, rotY:0, source:"Original project armed rotorcraft", status:"provisional"}
+});

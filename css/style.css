@@ -17,10 +17,38 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #log { margin-top:8px; font-size:11px; color:#9aa88a; line-height:1.6; }
 .fine { font-size:11px; color:#8a967a; margin:6px 0; line-height:1.4; }
 
-.ulist .unitBtn { text-align:left; font-size:12px; line-height:1.35; position:relative; }
-.ulist .unitBtn span { color:#aebf95; font-size:11px; }
+#side .ulist .unitBtn { text-align:left; font-size:12px; line-height:1.35; position:relative; min-height:72px;
+  padding:8px 82px 8px 82px; overflow:hidden; }
+.ulist .unitBtn .unitCopy { display:block; color:#e8e6d8; }
+.ulist .unitBtn .weapon { color:#aebf95; font-size:11px; }
 .ulist .unitBtn em { position:absolute; right:8px; top:8px; color:#ffd83d; font-style:normal; }
 .ulist .unitBtn.on { outline:2px solid #ffd83d; }
+.ulist .unitArt { position:absolute; left:5px; top:5px; bottom:5px; width:70px; display:block;
+  border:1px solid #68705f; border-radius:3px; background-color:#77716a; background-repeat:no-repeat;
+  filter:saturate(.95) contrast(1.04); box-shadow:inset 0 0 10px rgba(0,0,0,.22); }
+
+/* 寫實召喚圖集：卡片與戰場 Sprite 共用同一格位（GDD/06）。 */
+.art-rifleman,.art-assault,.art-mg,.art-mortar,.art-sniper,.art-at,.art-engineer,.art-specops,.art-sam,.art-tank {
+  background-image:url("../assets/art-direction/land-roster-concept-v1.png"); background-size:500% 200%; }
+.art-rifleman { background-position:0 0; }
+.art-assault   { background-position:25% 0; }
+.art-mg        { background-position:50% 0; }
+.art-mortar    { background-position:75% 0; }
+.art-sniper    { background-position:100% 0; }
+.art-at        { background-position:0 100%; }
+.art-engineer  { background-position:25% 100%; }
+.art-specops   { background-position:50% 100%; }
+.art-sam       { background-position:75% 100%; }
+.art-tank      { background-position:100% 100%; }
+.art-destroyer,.art-missileboat,.art-lst,.art-submarine,.art-fighter,.art-attacker,.art-gunship {
+  background-image:url("../assets/art-direction/sea-air-roster-concept-v1.png"); background-size:400% 200%; }
+.art-destroyer   { background-position:0 0; }
+.art-missileboat { background-position:33.333% 0; }
+.art-lst         { background-position:66.667% 0; }
+.art-submarine   { background-position:100% 0; }
+.art-fighter     { background-position:0 100%; }
+.art-attacker    { background-position:33.333% 100%; }
+.art-gunship     { background-position:66.667% 100%; }
 .grpHead { color:#cfe3a8; font-size:12px; font-weight:bold; margin:8px 0 3px; border-bottom:1px solid #3a4232; padding-bottom:2px; }
 
 #menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
@@ -47,6 +75,8 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
   #wrap{ flex-direction:row; align-items:center; justify-content:center; gap:6px; height:100vh; width:100%; padding:4px; }
   #stage{ height:94vh; width:auto; max-width:62vw; }
   #side{ width:36vw; max-width:340px; max-height:96vh; overflow-y:auto; font-size:12px; padding:6px; }
+  #side .ulist .unitBtn{ min-height:62px; padding-left:68px; padding-right:76px; }
+  .ulist .unitArt{ width:58px; }
   #menu{ font-size:12px; padding:12px; max-height:96vh; overflow-y:auto; }
   #menu h1{ font-size:22px; }
 }

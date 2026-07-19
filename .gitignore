@@ -1,2 +1,4 @@
-# Claude Code 個人本機設定（含權限授權，不進版控）
-.claude/settings.local.json
+_codex-graveyard/
+output/
+tools/
+closeouts/

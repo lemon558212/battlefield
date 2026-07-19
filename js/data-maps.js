@@ -4,6 +4,7 @@
  *       bush 草叢隱蔽｜water 近海(陸不可)｜deepwater 深海｜shallow 淺灘(陸涉水×2)
  *   工事(GDD/04 §2b)：trench 壕溝(×0.4掩體,AP×1.5)｜foxhole 散兵坑{x,y,r}(×0.5)
  *       crater 彈坑{x,y,r}(×0.5)｜wire 鐵絲網(AP×2.5)｜bunker 碉堡(可進,×0.3,擋穿越視線)
+ *       roadblock 混凝土路障(車輛高成本)｜tanktrap 反戰車拒馬(履帶不可直接通過、步兵可穿越)
  * 地圖放大：檔尾 SCALE 表一次性把座標×k，m.w/m.h=世界大小、m._k=倍率
  *   （移動 AP 消耗除以 _k → 每回合「相對地圖」的行動距離維持原設計節奏）
  * allow：允許的作戰域（land/sea/air），部署與敵方組兵依此（GDD/04 §1-2）
@@ -20,6 +21,8 @@ plain: {
   sandbags:[ {x:330,y:180,w:40,h:12}, {x:330,y:300,w:40,h:12}, {x:590,y:220,w:40,h:12}, {x:590,y:360,w:12,h:40}, {x:460,y:270,w:12,h:44} ],
   bunkers:[ {x:150,y:280,w:44,h:44}, {x:770,y:280,w:44,h:44} ],
   foxholes:[ {x:400,y:250,r:18}, {x:560,y:350,r:18} ],
+  roadblocks:[ {x:445,y:205,w:70,h:14}, {x:445,y:375,w:70,h:14} ],
+  tanktraps:[ {x:520,y:285,w:58,h:26} ],
   trees:[ {x:240,y:90,r:24}, {x:620,y:480,r:26}, {x:820,y:150,r:22}, {x:140,y:480,r:22} ],
   hills:[ {x:250,y:120,r:115,h:12}, {x:700,y:490,r:135,h:10}, {x:560,y:60,r:85,h:7} ],
   bushes:[ {x:270,y:470,r:34}, {x:320,y:500,r:30}, {x:660,y:100,r:32}, {x:700,y:460,r:36}, {x:480,y:180,r:28} ],
@@ -38,6 +41,7 @@ verdun: {
             {x:250,y:120,w:40,h:40}, {x:670,y:440,w:40,h:40} ],   // 前沿機槍堡
   wires:[ {x:330,y:90,w:16,h:420}, {x:610,y:90,w:16,h:420},        // 無人地帶兩道鐵絲網
           {x:346,y:150,w:120,h:12}, {x:490,y:400,w:120,h:12} ],
+  tanktraps:[ {x:435,y:270,w:90,h:24} ],
   craters:[ {x:420,y:160,r:30}, {x:500,y:230,r:34}, {x:460,y:320,r:28}, {x:540,y:400,r:32},
             {x:400,y:440,r:26}, {x:560,y:130,r:24}, {x:480,y:300,r:36} ],
   foxholes:[ {x:300,y:250,r:16}, {x:660,y:350,r:16}, {x:380,y:520,r:16}, {x:580,y:80,r:16} ],
@@ -54,6 +58,8 @@ town: {
   solids:[ {x:250,y:120,w:120,h:80}, {x:250,y:400,w:120,h:80}, {x:590,y:120,w:120,h:80},
            {x:590,y:400,w:120,h:80}, {x:430,y:250,w:100,h:100}, {x:120,y:260,w:60,h:60}, {x:780,y:260,w:60,h:60} ],
   sandbags:[ {x:400,y:150,w:44,h:12}, {x:520,y:440,w:44,h:12}, {x:380,y:300,w:12,h:44}, {x:568,y:260,w:12,h:44} ],
+  roadblocks:[ {x:432,y:205,w:96,h:15}, {x:432,y:380,w:96,h:15} ],
+  tanktraps:[ {x:462,y:292,w:36,h:18} ],
   bushes:[ {x:200,y:560,r:28}, {x:760,y:40,r:28} ],
   bases:[ {x:60,y:300,side:0}, {x:900,y:300,side:1} ],
   deploy:[ {x:0,y:80,w:160,h:440}, {x:800,y:80,w:160,h:440} ]
@@ -63,6 +69,7 @@ desert: {
   id:"desert", name:"沙漠關隘", ground:"#c9b285", budget:1400, allow:["land","air"],
   solids:[ {x:300,y:60,w:90,h:120}, {x:560,y:420,w:110,h:120}, {x:440,y:250,w:80,h:80}, {x:180,y:430,w:70,h:70}, {x:720,y:120,w:70,h:70} ],
   sandbags:[ {x:360,y:280,w:48,h:12}, {x:560,y:300,w:48,h:12}, {x:460,y:400,w:12,h:48}, {x:500,y:170,w:12,h:48} ],
+  tanktraps:[ {x:420,y:210,w:120,h:22} ],
   hills:[ {x:130,y:120,r:105,h:13}, {x:820,y:500,r:125,h:14}, {x:520,y:550,r:90,h:8} ],  // 沙丘
   bushes:[ {x:240,y:200,r:26}, {x:700,y:470,r:26} ],
   bases:[ {x:65,y:300,side:0}, {x:895,y:300,side:1} ],
@@ -88,6 +95,8 @@ urban: {
   solids:[ {x:220,y:80,w:90,h:110}, {x:220,y:410,w:90,h:110}, {x:650,y:80,w:90,h:110}, {x:650,y:410,w:90,h:110},
            {x:420,y:140,w:120,h:70}, {x:420,y:390,w:120,h:70}, {x:120,y:270,w:70,h:60}, {x:770,y:270,w:70,h:60}, {x:450,y:270,w:60,h:60} ],
   sandbags:[ {x:360,y:260,w:12,h:48}, {x:590,y:260,w:12,h:48}, {x:470,y:220,w:44,h:12}, {x:470,y:380,w:44,h:12} ],
+  roadblocks:[ {x:405,y:245,w:150,h:16}, {x:405,y:340,w:150,h:16} ],
+  tanktraps:[ {x:330,y:292,w:72,h:22}, {x:558,y:292,w:72,h:22} ],
   bushes:[ {x:180,y:560,r:26}, {x:790,y:40,r:26} ],
   bases:[ {x:60,y:300,side:0}, {x:900,y:300,side:1} ],
   deploy:[ {x:0,y:80,w:150,h:440}, {x:810,y:80,w:150,h:440} ]
@@ -167,12 +176,18 @@ tutorial: {
     const m = MAPS[id], k = SCALE[id] || 1;
     m.w = Math.round(960*k); m.h = Math.round(600*k); m._k = k;
     if (k === 1) continue;
-    for (const key of ["solids","sandbags","reefs","waters","deepwaters","shallows","trenches","wires","bunkers","deploy"])
+    for (const key of ["solids","sandbags","reefs","waters","deepwaters","shallows","trenches","wires","bunkers","roadblocks","tanktraps","deploy"])
       (m[key]||[]).forEach(r=>rect(r,k));
     for (const key of ["bushes","craters","foxholes"]) (m[key]||[]).forEach(c=>circ(c,k));
     (m.hills||[]).forEach(hh=>{ hh.x*=k; hh.y*=k; hh.r*=k; });   // 山丘：座標/半徑縮放，高度 h 不縮
     (m.trees||[]).forEach(t=>{ t.x*=k; t.y*=k; });
     (m.bases||[]).forEach(b=>{ b.x*=k; b.y*=k; });
     m.budget = Math.round(m.budget * (1 + (k-1)*0.7));   // 大地圖多給兵力預算
+  }
+  for(const id in MAPS){
+    const m=MAPS[id];
+    if((m.allow||[]).includes("land")&&m.bases&&m.bases.length===2){
+      m.roads=[{x1:m.bases[0].x,y1:m.bases[0].y,x2:m.bases[1].x,y2:m.bases[1].y,w:20*(m._k||1)}];
+    }
   }
 })();

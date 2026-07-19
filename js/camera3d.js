@@ -43,14 +43,15 @@ const Camera3D = {
   cx: 0, cy: 0, ch: 0, yaw: 0,
   // 目標狀態（applyFor 每幀朝此平滑內插 = P4 進出轉場）
   t: { cx: 0, cy: 0, ch: 0, yaw: 0, pitch: 0.36, focal: 470, mode: "overview" },
-  _init: false, easeK: 0.16,
+  _init: false,
+  easeRate: 10.46,      // 秒制指數阻尼；60fps 時 k≈0.16
 
-  /* 依遊戲狀態算目標相機並平滑靠近（instant=true 立即到位，供點擊反投影精準） */
-  applyFor(G, instant){
+  /* 依遊戲狀態算目標相機並平滑靠近。輸入事件只讀最後渲染狀態，不得呼叫 instant。 */
+  applyFor(G, instant, dt){
     if (G.state === "act" && G.sel) this.update(G.sel, this.t);
     else this.setOverview(G.map, G.playerSide, this.t);
     if (instant || !this._init){ this._snap(); this._init = true; }
-    else this._ease();
+    else this._ease(dt);
     return this;
   },
 
@@ -58,8 +59,9 @@ const Camera3D = {
     const t = this.t; this.cx = t.cx; this.cy = t.cy; this.ch = t.ch;
     this.yaw = t.yaw; this.pitch = t.pitch; this.focal = t.focal; this.mode = t.mode;
   },
-  _ease(){
-    const t = this.t, k = this.easeK;
+  _ease(dt){
+    dt = Math.max(0, Math.min(0.05, Number.isFinite(dt) ? dt : 1 / 60));
+    const t = this.t, k = 1 - Math.exp(-this.easeRate * dt);
     this.cx += (t.cx - this.cx) * k; this.cy += (t.cy - this.cy) * k; this.ch += (t.ch - this.ch) * k;
     this.pitch += (t.pitch - this.pitch) * k; this.focal += (t.focal - this.focal) * k;
     let d = t.yaw - this.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
