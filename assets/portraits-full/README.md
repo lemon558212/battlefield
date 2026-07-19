@@ -8,6 +8,8 @@
 - `probe2.bin`：API 探測殘留暫存，可刪
 - `<key>_<angry|hurt|smile>.jpg`：表情差分（gpt-image-2 images/edits 以基底立繪編輯，
   腳本 `tools/gen-expressions.py`；首批：sniper/mg/engineer 三名主線角色）
+- 載具立繪 8 張（tank/destroyer/missileboat/lst/submarine/fighter/attacker/gunship，1536x1024 橫式，
+  gpt-image-2，掛載於 js/data-characters.js 的 VEHICLE_ART，角色卡選中載具時顯示）
 - 對應角色：見 `js/data-characters.js` 的 `fullPortrait` 欄位（sniper=韓沐霜、mg=雷諾．佛斯、
   rifleman=丁小滿、assault=艾拉．科瓦奇、at=巴頓．歐克、mortar=賽琳．杜瓦、engineer=白老師、
   sam=汀娜．烏梅、specops=影山靜）
