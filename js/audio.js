@@ -45,28 +45,30 @@ const Sfx = {
     return this._noiseBuf;
   },
 
-  /* 白噪音經濾波＋音量包絡：槍聲/爆炸的基底 */
-  _burst({ dur = 0.1, vol = 0.5, type = "lowpass", freq = 800, freqEnd = 0, q = 1, at = 0 }){
+  /* 白噪音經濾波＋音量包絡：槍聲/爆炸的基底。atk=起音秒數（消喀噠聲） */
+  _burst({ dur = 0.1, vol = 0.5, type = "lowpass", freq = 800, freqEnd = 0, q = 1, at = 0, atk = 0.004 }){
     const c = this.ctx, t0 = c.currentTime + at;
     const src = c.createBufferSource(); src.buffer = this._noise(); src.loop = true;
     const flt = c.createBiquadFilter(); flt.type = type; flt.Q.value = q;
     flt.frequency.setValueAtTime(freq, t0);
     if (freqEnd) flt.frequency.exponentialRampToValueAtTime(Math.max(30, freqEnd), t0 + dur);
     const g = c.createGain();
-    g.gain.setValueAtTime(vol, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + atk);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     src.connect(flt); flt.connect(g); g.connect(this.master);
     src.start(t0); src.stop(t0 + dur + 0.05);
   },
 
-  /* 振盪器單音：滑音包絡（砲擊低鳴/介面音/勝敗旋律） */
-  _tone({ freq = 440, freqEnd = 0, dur = 0.15, vol = 0.25, type = "sine", at = 0 }){
+  /* 振盪器單音：滑音包絡（砲擊低鳴/介面音/配樂）。atk=起音秒數 */
+  _tone({ freq = 440, freqEnd = 0, dur = 0.15, vol = 0.25, type = "sine", at = 0, atk = 0.008 }){
     const c = this.ctx, t0 = c.currentTime + at;
     const o = c.createOscillator(); o.type = type;
     o.frequency.setValueAtTime(freq, t0);
     if (freqEnd) o.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur);
     const g = c.createGain();
-    g.gain.setValueAtTime(vol, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + atk);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     o.connect(g); g.connect(this.master);
     o.start(t0); o.stop(t0 + dur + 0.05);
@@ -162,19 +164,29 @@ const Sfx = {
       const at = B.nextAt - c.currentTime, s = B.step;
       try {
         if (B.cur === "battle"){
+          // 小鼓：鼓身共鳴(190Hz 速降)＋響線(帶通噪音)，皆有起音——不再是喀噠聲
           const snare = [1,0,0,1, 0,0,1,0, 1,0,1,0, 0,1,1,1][s % 16];
-          if (snare) this._burst({ dur: .05, vol: .05 + (s % 4 === 0 ? .03 : 0), type: "highpass", freq: 1800, at });
-          if (s % 8 === 0) this._tone({ freq: 73.4, dur: .45, vol: .06, type: "sine", at });      // D2 低音行進
-          if (s % 8 === 4) this._tone({ freq: 65.4, dur: .45, vol: .05, type: "sine", at });      // C2
-          const motif = [220,0,0,196, 0,175,0,0, 220,0,247,0, 196,0,0,0][s % 16];                 // A 小調動機
-          if (motif && s % 32 >= 16) this._tone({ freq: motif, dur: .3, vol: .028, type: "triangle", at });
+          if (snare){
+            const acc = s % 4 === 0 ? .022 : 0;
+            this._tone({ freq: 190, freqEnd: 120, dur: .1, vol: .05 + acc, type: "triangle", at, atk: .003 });
+            this._burst({ dur: .11, vol: .04 + acc, type: "bandpass", freq: 2600, q: 0.8, at, atk: .003 });
+          }
+          // 低音行進提高到手機喇叭放得出的音域（D3/C3），並疊八度加厚
+          if (s % 8 === 0){ this._tone({ freq: 146.8, dur: .5, vol: .05, type: "triangle", at, atk: .02 });
+                            this._tone({ freq: 73.4,  dur: .5, vol: .04, type: "sine", at, atk: .02 }); }
+          if (s % 8 === 4){ this._tone({ freq: 130.8, dur: .5, vol: .045, type: "triangle", at, atk: .02 });
+                            this._tone({ freq: 65.4,  dur: .5, vol: .035, type: "sine", at, atk: .02 }); }
+          const motif = [440,0,0,392, 0,349,0,0, 440,0,494,0, 392,0,0,0][s % 16];                 // A 小調動機(高八度)
+          if (motif && s % 32 >= 16) this._tone({ freq: motif, dur: .32, vol: .03, type: "triangle", at, atk: .03 });
         } else {                                                                                   // menu 氛圍墊
           if (s % 8 === 0){
-            const chords = [[110,164.8,220],[87.3,130.8,174.6],[98,146.8,196],[82.4,123.5,164.8]]; // Am F G E
+            const chords = [[220,329.6,440],[174.6,261.6,349.2],[196,293.7,392],[164.8,246.9,329.6]]; // Am F G Em(高八度)
             const ch = chords[(s / 8 | 0) % 4];
-            for (const f of ch) this._tone({ freq: f, dur: beat * 8.4, vol: .02, type: "sine", at });
-            this._tone({ freq: ch[0] / 2, dur: beat * 8, vol: .03, type: "triangle", at });        // 低八度根音
+            for (const f of ch){ this._tone({ freq: f, dur: beat * 8.4, vol: .022, type: "triangle", at, atk: .8 });
+                                 this._tone({ freq: f * 1.003, dur: beat * 8.4, vol: .014, type: "sine", at, atk: .9 }); } // 微失諧加寬
+            this._tone({ freq: ch[0] / 2, dur: beat * 8, vol: .03, type: "triangle", at, atk: .6 });   // 根音
           }
+          if (s % 8 === 5) this._tone({ freq: 880, dur: 1.6, vol: .012, type: "sine", at, atk: .5 });  // 高空泛音點綴
         }
       } catch (e) { /* 配樂失敗不得影響遊戲 */ }
       B.step++; B.nextAt += beat;
@@ -185,3 +197,17 @@ const Sfx = {
 /* 手機/桌機自動播放政策：首次手勢建立 AudioContext */
 addEventListener("pointerdown", () => Sfx._ac(), { passive: true });
 addEventListener("touchstart",  () => Sfx._ac(), { passive: true });
+
+/* 切到背景/關閉頁面 → 立即停聲；回前景 → 恢復（修「關掉還在響」） */
+document.addEventListener("visibilitychange", () => {
+  if (!Sfx.ctx) return;
+  if (document.hidden){
+    if (Sfx._bgm.timer){ clearInterval(Sfx._bgm.timer); Sfx._bgm.timer = null; }
+    Sfx.ctx.suspend();
+  } else {
+    Sfx.ctx.resume();
+    if (Sfx._bgm.cur){ const w = Sfx._bgm.cur; Sfx._bgm.cur = null; Sfx.bgm(w); }
+  }
+});
+addEventListener("pagehide", () => { if (Sfx.ctx){ try{ Sfx.ctx.close(); }catch(e){} Sfx.ctx = null;
+  if (Sfx._bgm.timer){ clearInterval(Sfx._bgm.timer); Sfx._bgm.timer = null; } Sfx._bgm.cur = null; } });

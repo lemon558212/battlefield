@@ -15,6 +15,7 @@ const UI = {
     const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}（${(m.allow||["land"]).map(d=>({land:"陸",sea:"海",air:"空"}[d])).join("")}）</option>`).join("");
     this.el("menu").innerHTML = `
       <h1>戰　場</h1><p class="sub">真實軍備 × 戰場女武神式戰術</p>
+      <button id="btnStory" class="big" style="background:#7a4a2a">📖 劇情模式：曙光作戰（15 章）</button>
       <button id="btnTutorial" class="big">教學關：台海防衛</button>
       <div class="panel">
         <h3>遭遇戰</h3>
@@ -27,7 +28,8 @@ const UI = {
       <p class="fine">各國兵種與武器均取自公開資訊（見 research/），數值為遊戲化平衡。</p>`;
     this.el("menu").style.display="flex";
     this.el("selAtk").value="china"; this.el("selDef").value="taiwan";
-    this.el("btnTutorial").onclick = ()=>{ const f=MAPS.tutorial.fixedNations; Game.startBattle("tutorial", f.atk, f.def, f.playerSide); };
+    this.el("btnTutorial").onclick = ()=>{ Game.storyChapter=null; const f=MAPS.tutorial.fixedNations; Game.startBattle("tutorial", f.atk, f.def, f.playerSide); };
+    this.el("btnStory").onclick = ()=>this.showStory();
     const mpBtn=document.createElement("button"); mpBtn.className="big";
     mpBtn.textContent="🌐 連線對戰（跨裝置）"; mpBtn.style.marginTop="6px";
     mpBtn.onclick=()=>this.showConnect();
@@ -36,6 +38,45 @@ const UI = {
       const a=this.el("selAtk").value, d=this.el("selDef").value;
       Game.startBattle(this.el("selMap").value, a, d, parseInt(this.el("selSide").value,10));
     };
+  },
+
+  /* ---------- 劇情模式 ---------- */
+  showStory(){
+    this.hideAll();
+    if (typeof Sfx!=="undefined") Sfx.bgm("menu");
+    const unlocked = StoryProgress.get();
+    const rows = STORY.map(ch=>{
+      const lock = ch.n > unlocked;
+      return `<button class="storyCh${lock?" locked":""}" data-ch="${ch.n}" ${lock?"disabled":""}>
+        第 ${ch.n} 章｜${lock?"🔒 ？？？":ch.title}</button>`;
+    }).join("");
+    const M=this.el("menu"); M.style.display="flex";
+    M.innerHTML=`
+      <h1 style="font-size:26px">📖 曙光作戰</h1>
+      <p class="sub">2034，無旗幟的戰爭。反派「灰幕兵團」為虛構勢力。</p>
+      <div class="panel storyList">${rows}</div>
+      <button id="stBack">返回主選單</button>`;
+    M.querySelectorAll(".storyCh:not(.locked)").forEach(b=>{
+      b.onclick=()=>this.showBriefing(parseInt(b.dataset.ch,10));
+    });
+    this.el("stBack").onclick=()=>this.showMenu();
+  },
+  showBriefing(n){
+    const ch = STORY[n-1];
+    const M=this.el("menu"); M.style.display="flex";
+    M.innerHTML=`
+      <h1 style="font-size:24px">第 ${ch.n} 章｜${ch.title}</h1>
+      <div class="panel briefing"><p>${ch.brief}</p>
+        <p class="fine">地圖：${MAPS[ch.map].name}　我方：${NATIONS[ch.player].name}（${ch.side===0?"進攻":"防守"}）</p></div>
+      <button id="stGo" class="big">🎖 出擊</button>
+      <button id="stBack2">返回章節</button>`;
+    this.el("stGo").onclick=()=>{
+      Game.storyChapter = n;
+      const atk = ch.side===0 ? ch.player : ch.enemy;
+      const def = ch.side===0 ? ch.enemy : ch.player;
+      Game.startBattle(ch.map, atk, def, ch.side);
+    };
+    this.el("stBack2").onclick=()=>this.showStory();
   },
 
   /* ---------- 連線對戰介面 ---------- */
@@ -217,12 +258,25 @@ const UI = {
   showEnd(){
     const win = Game.over.winner===Game.playerSide;
     if (typeof Sfx!=="undefined"){ Sfx.bgm(null); Sfx.play(win?"victory":"defeat"); }
+    const chN = Game.storyChapter, ch = chN ? STORY[chN-1] : null;
+    let extra = "";
+    if (ch && win){
+      StoryProgress.unlock(chN + 1);
+      extra = `<div class="panel briefing"><p>${ch.debrief}</p></div>` +
+        (chN < STORY.length ? `<button id="btnNextCh" class="big">▶ 下一章：${STORY[chN].title}</button>` : "");
+    } else if (ch && !win){
+      extra = `<button id="btnRetry" class="big">↻ 重打本章</button>`;
+    }
     this.el("menu").innerHTML = `
       <h1>${win?"🏆 勝利":"💀 敗北"}</h1>
       <p class="sub">${Game.over.why}（${NATIONS[Game.nations[Game.over.winner]].name} 獲勝）</p>
+      ${extra}
       <button id="btnAgain" class="big">回主選單</button>`;
     this.el("menu").style.display="flex";
-    this.el("btnAgain").onclick=()=>{ Game.state="menu"; Game.map=null; Game.units=[]; this.showMenu(); };
+    const reset=()=>{ Game.state="menu"; Game.map=null; Game.units=[]; };
+    if (this.el("btnNextCh")) this.el("btnNextCh").onclick=()=>{ reset(); this.showBriefing(chN+1); };
+    if (this.el("btnRetry"))  this.el("btnRetry").onclick =()=>{ reset(); this.showBriefing(chN); };
+    this.el("btnAgain").onclick=()=>{ reset(); Game.storyChapter=null; this.showMenu(); };
   },
   hideAll(){ this.el("menu").style.display="none"; this.el("side").style.display="none"; this.hideAim(); }
 };

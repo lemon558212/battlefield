@@ -52,16 +52,27 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .grpHead { color:#cfe3a8; font-size:12px; font-weight:bold; margin:8px 0 3px; border-bottom:1px solid #3a4232; padding-bottom:2px; }
 
 #menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
-  gap:14px; background:rgba(15,18,12,0.93); z-index:5; }
-#menu h1 { font-size:52px; letter-spacing:18px; color:#cfe3a8; }
-#menu .sub { color:#9aa88a; }
-#menu .panel { width:340px; }
+  gap:14px; z-index:5; overflow-y:auto; padding:20px 0;
+  background:
+    linear-gradient(to bottom, rgba(12,14,10,0.55) 0%, rgba(12,14,10,0.35) 40%, rgba(12,14,10,0.82) 100%),
+    url("../assets/art/title-bg.jpg") center/cover no-repeat, #0f120c; }
+#menu h1 { font-size:52px; letter-spacing:18px; color:#f4ead2;
+  text-shadow:0 2px 6px rgba(0,0,0,0.85), 0 0 28px rgba(255,190,90,0.35); }
+#menu .sub { color:#e8dcc0; text-shadow:0 1px 4px rgba(0,0,0,0.9); }
+#menu .panel { width:340px; background:rgba(22,26,17,0.82); border:1px solid #55643f;
+  padding:12px; backdrop-filter:blur(2px); }
 #menu label { display:block; margin:6px 0; font-size:14px; }
 #menu select { width:170px; float:right; background:#39442e; color:#e8e6d8; border:1px solid #55643f; padding:3px; }
-#menu button { padding:10px 24px; background:#39442e; color:#e8e6d8; border:1px solid #55643f; cursor:pointer;
-  font-family:inherit; font-size:14px; width:100%; margin-top:6px; }
-#menu button.big { background:#5a7a3a; font-weight:bold; font-size:16px; }
+#menu button { padding:10px 24px; background:rgba(57,68,46,0.92); color:#e8e6d8; border:1px solid #55643f; cursor:pointer;
+  font-family:inherit; font-size:14px; width:100%; margin-top:6px; box-shadow:0 2px 8px rgba(0,0,0,0.5); }
+#menu button.big { background:rgba(90,122,58,0.95); font-weight:bold; font-size:16px; }
 #menu button:hover { background:#4a5a3a; }
+#menu .fine { text-shadow:0 1px 3px rgba(0,0,0,0.9); }
+/* 劇情模式 */
+#menu .storyList { max-height:46vh; overflow-y:auto; }
+#menu .storyCh { text-align:left; }
+#menu .storyCh.locked { opacity:0.45; cursor:not-allowed; }
+#menu .briefing { line-height:1.8; font-size:14px; text-align:left; }
 
 #aim { position:absolute; left:50%; top:18%; transform:translateX(-50%); display:none; z-index:6;
   background:#242b1f; border:2px solid #8a7f34; padding:12px; font-size:13px; line-height:1.6; min-width:230px; }
