@@ -121,11 +121,12 @@ const UI = {
       const d = script[i];
       const chr = Object.values(CHARACTERS).find(c => c.name === d.who);
       const img = d.img || (chr && ((d.mood && chr.moods && chr.moods[d.mood]) || chr.fullPortrait || chr.portrait)) || "";
+      const callsign = chr && chr.callsign && chr.callsign !== d.who ? `<span class="dlgCallsign">「${chr.callsign}」</span>` : "";
       M.innerHTML = `
         <div class="dlgWrap" id="dlgNext">
           ${img ? `<img class="dlgFace ${d.pos==="right"?"r":""}" src="${img}" alt="">` : ""}
           <div class="dlgBox">
-            <div class="dlgName">${d.who || ""}</div>
+            <div class="dlgName">${d.who || ""}${callsign}</div>
             <div class="dlgText">${d.text}</div>
             <div class="dlgHint">▼ 點擊繼續（${i+1}/${script.length}）</div>
           </div>
@@ -226,9 +227,23 @@ const UI = {
     this.el("btnBack").onclick = ()=>{ Game.state="menu"; Game.map=null; this.showMenu(); };
   },
   /* ---------- 戰鬥 HUD ---------- */
+  /* 任務目標橫幅：開戰時斜切橫幅滑入，數秒後淡出（鳴潮式） */
+  showMissionBanner(){
+    const old = document.getElementById("missionBanner"); if (old) old.remove();
+    const atk = Game.playerSide === 0;
+    const goal = atk ? "殲滅敵軍部隊，或佔領敵方主堡" : "堅守 30 回合，或殲滅來犯敵軍";
+    const chN = Game.storyChapter, title = chN ? `第 ${chN} 章｜${STORY[chN-1].title}` : (Game.map ? Game.map.name : "遭遇戰");
+    const b = document.createElement("div"); b.id = "missionBanner";
+    b.innerHTML = `<div class="mb-title">${title}</div><div class="mb-goal">◤ 任務目標：${goal} ◢</div>`;
+    document.getElementById("stage").appendChild(b);
+    setTimeout(()=>{ b.classList.add("out"); }, 3400);
+    setTimeout(()=>{ b.remove(); }, 4300);
+  },
+
   showBattle(){
     this.hideAll();
     this.el("side").style.display="block";
+    this.showMissionBanner();
     this.el("side").innerHTML = `
       <h3 id="hudTurn"></h3><div id="hudCp" class="cp"></div>
       <div id="selInfo" class="panel"></div>
@@ -323,8 +338,20 @@ const UI = {
     } else if (ch && !win){
       extra = `<button id="btnRetry" class="big">↻ 重打本章</button>`;
     }
+    /* 戰場評價（GDD/01 戰場評價節）：勝利才評，S/A/B/C 拍章 */
+    let rankHtml = "";
+    if (win){
+      const dead = Game.units.filter(x=>x.side===Game.playerSide && !x.alive).length;
+      const timeout30 = /30 回合/.test(Game.over.why || "");
+      const rank = timeout30
+        ? (dead===0?"S":dead<=2?"A":dead<=4?"B":"C")
+        : (Game.turn<=6&&dead===0?"S":Game.turn<=8||dead===0?"A":Game.turn<=12?"B":"C");
+      rankHtml = `<div class="rankWrap"><div class="rankStamp rank-${rank}">${rank}</div>
+        <div class="rankInfo">${Game.turn} 回合｜陣亡 ${dead}</div></div>`;
+    }
     this.el("menu").innerHTML = `
       <h1>${win?"🏆 勝利":"💀 敗北"}</h1>
+      ${rankHtml}
       <p class="sub">${Game.over.why}（${NATIONS[Game.nations[Game.over.winner]].name} 獲勝）</p>
       ${extra}
       <button id="btnAgain" class="big">回主選單</button>`;
