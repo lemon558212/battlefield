@@ -28,27 +28,26 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
   filter:saturate(.95) contrast(1.04); box-shadow:inset 0 0 10px rgba(0,0,0,.22); }
 
 /* 寫實召喚圖集：卡片與戰場 Sprite 共用同一格位（GDD/06）。 */
-.art-rifleman,.art-assault,.art-mg,.art-mortar,.art-sniper,.art-at,.art-engineer,.art-specops,.art-sam,.art-tank {
-  background-image:url("../assets/art-direction/land-roster-concept-v1.png"); background-size:500% 200%; }
-.art-rifleman { background-position:0 0; }
-.art-assault   { background-position:25% 0; }
-.art-mg        { background-position:50% 0; }
-.art-mortar    { background-position:75% 0; }
-.art-sniper    { background-position:100% 0; }
-.art-at        { background-position:0 100%; }
-.art-engineer  { background-position:25% 100%; }
-.art-specops   { background-position:50% 100%; }
-.art-sam       { background-position:75% 100%; }
-.art-tank      { background-position:100% 100%; }
-.art-destroyer,.art-missileboat,.art-lst,.art-submarine,.art-fighter,.art-attacker,.art-gunship {
-  background-image:url("../assets/art-direction/sea-air-roster-concept-v1.png"); background-size:400% 200%; }
-.art-destroyer   { background-position:0 0; }
-.art-missileboat { background-position:33.333% 0; }
-.art-lst         { background-position:66.667% 0; }
-.art-submarine   { background-position:100% 0; }
-.art-fighter     { background-position:0 100%; }
-.art-attacker    { background-position:33.333% 100%; }
-.art-gunship     { background-position:66.667% 100%; }
+/* 部署清單縮圖＝水彩立繪（2026-07-19 換裝；步兵取上半身、載具取全圖） */
+.ulist .unitArt { background-size:cover; background-position:center 10%; border-radius:4px; }
+.art-rifleman { background-image:url("../assets/portraits-full/rifleman.jpg"); }
+.art-assault  { background-image:url("../assets/portraits-full/assault.jpg"); }
+.art-mg       { background-image:url("../assets/portraits-full/mg.jpg"); }
+.art-mortar   { background-image:url("../assets/portraits-full/mortar.jpg"); }
+.art-sniper   { background-image:url("../assets/portraits-full/sniper.jpg"); }
+.art-at       { background-image:url("../assets/portraits-full/at.jpg"); }
+.art-engineer { background-image:url("../assets/portraits-full/engineer.jpg"); }
+.art-specops  { background-image:url("../assets/portraits-full/specops.jpg"); }
+.art-sam      { background-image:url("../assets/portraits-full/sam.jpg"); }
+.art-tank,.art-destroyer,.art-missileboat,.art-lst,.art-submarine,.art-fighter,.art-attacker,.art-gunship { background-position:center; }
+.art-tank        { background-image:url("../assets/portraits-full/tank.jpg"); }
+.art-destroyer   { background-image:url("../assets/portraits-full/destroyer.jpg"); }
+.art-missileboat { background-image:url("../assets/portraits-full/missileboat.jpg"); }
+.art-lst         { background-image:url("../assets/portraits-full/lst.jpg"); }
+.art-submarine   { background-image:url("../assets/portraits-full/submarine.jpg"); }
+.art-fighter     { background-image:url("../assets/portraits-full/fighter.jpg"); }
+.art-attacker    { background-image:url("../assets/portraits-full/attacker.jpg"); }
+.art-gunship     { background-image:url("../assets/portraits-full/gunship.jpg"); }
 .grpHead { color:#cfe3a8; font-size:12px; font-weight:bold; margin:8px 0 3px; border-bottom:1px solid #3a4232; padding-bottom:2px; }
 
 #menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
