@@ -96,7 +96,7 @@ const UI = {
     }
     if (!u || u.domain !== "land" || u.cls === "tank"){ el.style.display = "none"; return; }
     const chr = (typeof CHARACTERS !== "undefined") ? CHARACTERS[u.cls] : null;
-    const img = chr ? chr.portrait : null;
+    const img = chr ? (chr.fullPortrait || chr.portrait) : null;
     if (!img){ el.style.display = "none"; return; }
     const named = !!u.charName;
     el.innerHTML = `
@@ -118,7 +118,7 @@ const UI = {
       if (i >= script.length){ onDone && onDone(); return; }
       const d = script[i];
       const chr = Object.values(CHARACTERS).find(c => c.name === d.who);
-      const img = d.img || (chr && chr.portrait) || "";
+      const img = d.img || (chr && ((d.mood && chr.moods && chr.moods[d.mood]) || chr.fullPortrait || chr.portrait)) || "";
       M.innerHTML = `
         <div class="dlgWrap" id="dlgNext">
           ${img ? `<img class="dlgFace ${d.pos==="right"?"r":""}" src="${img}" alt="">` : ""}

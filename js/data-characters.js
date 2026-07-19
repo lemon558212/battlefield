@@ -8,11 +8,13 @@
 const CHARACTERS = {
   sniper: {
     name: "韓沐霜", callsign: "霜", portrait: "assets/portraits/sniper.jpg", fullPortrait: "assets/portraits-full/sniper.jpg",
+    moods: { angry: "assets/portraits-full/sniper_angry.jpg", hurt: "assets/portraits-full/sniper_hurt.jpg", smile: "assets/portraits-full/sniper_smile.jpg" },
     line: "每一發子彈都要有名字。",
     trait: { desc: "神射手：命中 +6%", mods: { acc: 0.06 } }
   },
   mg: {
     name: "雷諾．佛斯", callsign: "老雷", portrait: "assets/portraits/mg.jpg", fullPortrait: "assets/portraits-full/mg.jpg",
+    moods: { angry: "assets/portraits-full/mg_angry.jpg", hurt: "assets/portraits-full/mg_hurt.jpg", smile: "assets/portraits-full/mg_smile.jpg" },
     line: "我知道他們怎麼想——因為我曾是他們。",
     trait: { desc: "壓制本能：攻擊 +2、HP +40", mods: { atk: 2, hp: 40 } }
   },
@@ -38,6 +40,7 @@ const CHARACTERS = {
   },
   engineer: {
     name: "白老師", callsign: "白老師", portrait: "assets/portraits/engineer.jpg", fullPortrait: "assets/portraits-full/engineer.jpg",
+    moods: { angry: "assets/portraits-full/engineer_angry.jpg", hurt: "assets/portraits-full/engineer_hurt.jpg", smile: "assets/portraits-full/engineer_smile.jpg" },
     line: "壞掉的東西都能修，人心也是。",
     trait: { desc: "巧手：HP +40、AP +8", mods: { hp: 40, ap: 8 } }
   },
