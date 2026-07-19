@@ -1841,5 +1841,25 @@ const Engine3D = {
     }
     for (const f of G.fx){ if (f.type === "tracer" || f.type === "boom") continue; Render3D._fx(ctx, cam, f); } // 曳光/爆炸已 3D 化
     if (cam.mode === "follow") Render3D._crosshair(ctx, cam.W, cam.H, cam.horizonY());
+    this._paperGrade(ctx, cam.W, cam.H);
+  },
+
+  /* 手繪紙質後製（真3D 版）：邊角壓暗＋紙紋顆粒＋暖色水彩罩染。
+   * 美術方向唯一權威：本作走「水彩手繪風」而非寫實風（GDD/06），低模在此風格下才成立。 */
+  _paperGrade(ctx, W, H){
+    const vig = ctx.createRadialGradient(W / 2, H * 0.52, H * 0.42, W / 2, H * 0.52, H * 0.95);
+    vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(20,14,6,0.28)");
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+    if (!this._grainPat){
+      const g = document.createElement("canvas"); g.width = g.height = 96;
+      const gc = g.getContext("2d"), im = gc.createImageData(96, 96);
+      let s = 54321; const rn = () => ((s = s * 16807 % 2147483647) / 2147483647);
+      for (let i = 0; i < im.data.length; i += 4){ const v = 118 + rn() * 20 | 0; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+      gc.putImageData(im, 0, 0);
+      this._grainPat = ctx.createPattern(g, "repeat");
+    }
+    ctx.save(); ctx.globalAlpha = 0.14; ctx.globalCompositeOperation = "overlay";
+    ctx.fillStyle = this._grainPat; ctx.fillRect(0, 0, W, H); ctx.restore();
+    ctx.save(); ctx.globalAlpha = 0.055; ctx.fillStyle = "#e8d9b0"; ctx.fillRect(0, 0, W, H); ctx.restore();
   }
 };

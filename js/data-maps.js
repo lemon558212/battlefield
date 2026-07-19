@@ -169,7 +169,7 @@ tutorial: {
 /* ---- 地圖放大（一次性座標縮放）----
  * 引擎以 m.w/m.h 為世界大小（未設=960×600）；m._k 供移動 AP 折算維持節奏。 */
 (function(){
-  const SCALE = { plain:1.5, town:1.3, desert:1.5, forest:1.4, urban:1.3, beach:1.6, strait:1.5, harbor:1.5, verdun:1.5 };
+  const SCALE = { plain:2.0, town:1.7, desert:2.0, forest:1.9, urban:1.7, beach:2.1, strait:2.0, harbor:2.0, verdun:2.0 };
   const rect = (r,k)=>{ r.x*=k; r.y*=k; if(r.w!=null) r.w*=k; if(r.h!=null) r.h*=k; };
   const circ = (c,k)=>{ c.x*=k; c.y*=k; if(c.r!=null) c.r*=k; };
   for (const id in MAPS){
