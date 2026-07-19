@@ -1750,26 +1750,16 @@ const Engine3D = {
 
   /* GLB clip 之上的小幅次級動作：補足呼吸、落腳重心、負重與後座。
    * mixer 每幀先寫入正式骨架 clip，本函式再做微量 additive，不改原始動畫資產。 */
+  /* 次級動作鐵則：骨骼由 AnimationMixer 全權驅動，禁止在骨骼上做 +=/*= 疊加——
+   * 動畫未覆蓋的通道（如 scale）不會被 mixer 歸位，每幀疊加＝頭變長/姿勢歪斜（殭屍 bug 前科）。
+   * 這裡只准對「非骨骼掛件」做絕對值(=)賦值。 */
   _applyCharacterSecondary(G, now){
     for(const u of G.units){
-      const g=this._units[u.id],bones=g&&g.userData.characterBones;
-      if(!g||!bones||u.domain!=="land"||u.cls==="tank")continue;
-      const bone=(...names)=>{for(const name of names)if(bones[name])return bones[name];return null;};
-      const hips=bone("Hips","hips"),spine=bone("Spine","spine"),chest=bone("Chest","chest"),head=bone("Head","head");
+      const g=this._units[u.id];
+      if(!g||u.domain!=="land"||u.cls==="tank")continue;
       const move=g.userData.motion||0,phase=g.userData.motionPhase||0;
       const heavy={mg:.58,mortar:.62,at:.68,sam:.66,engineer:.76}[u.cls]||1;
-      const stealth=u.cls==="specops"?.72:1;
       const stride=Math.sin(phase),landing=Math.abs(Math.sin(phase));
-      if(hips){hips.position.y-=landing*.018*move*heavy;hips.rotation.z+=stride*.035*move*heavy;}
-      if(spine){spine.rotation.y-=stride*.028*move*heavy;spine.rotation.x-=move*(.018+(1-heavy)*.045);}
-      if(chest){
-        chest.rotation.y-=stride*.035*move*heavy;
-        chest.rotation.x+=u.cls==="specops"?.055*move:0;
-        chest.scale.y*=1+Math.sin(now*.0022+u.id)*.008*(1-move);
-        if(g.userData.secondaryShoot)chest.rotation.x-=.055*heavy;
-        if(g.userData.secondaryHit)chest.rotation.z+=Math.sin(now*.045)*.08;
-      }
-      if(head){head.rotation.y+=Math.sin(now*.0011+u.id*2.1)*.045*(1-move);head.rotation.x-=move*.018*stealth;}
       const gear=g.userData.classGear;
       if(gear){gear.position.y=-landing*.16*move*heavy;gear.rotation.z=-stride*.012*move*heavy;}
     }

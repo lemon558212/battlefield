@@ -10,6 +10,7 @@ const UI = {
   /* ---------- 主選單 ---------- */
   showMenu(){
     this.hideAll();
+    if (typeof Sfx!=="undefined") Sfx.bgm("menu");
     const natOpts = Object.values(NATIONS).map(n=>`<option value="${n.id}">${n.name}</option>`).join("");
     const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}（${(m.allow||["land"]).map(d=>({land:"陸",sea:"海",air:"空"}[d])).join("")}）</option>`).join("");
     this.el("menu").innerHTML = `
@@ -215,7 +216,7 @@ const UI = {
   },
   showEnd(){
     const win = Game.over.winner===Game.playerSide;
-    if (typeof Sfx!=="undefined") Sfx.play(win?"victory":"defeat");
+    if (typeof Sfx!=="undefined"){ Sfx.bgm(null); Sfx.play(win?"victory":"defeat"); }
     this.el("menu").innerHTML = `
       <h1>${win?"🏆 勝利":"💀 敗北"}</h1>
       <p class="sub">${Game.over.why}（${NATIONS[Game.nations[Game.over.winner]].name} 獲勝）</p>

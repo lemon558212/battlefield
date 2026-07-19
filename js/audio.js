@@ -21,6 +21,9 @@ const Sfx = {
       this.master.connect(this.ctx.destination);
     }
     if (this.ctx.state === "suspended") this.ctx.resume();
+    if (this._bgm.want && !this._bgm.timer && this._bgm.cur !== this._bgm.want){
+      const w = this._bgm.want; this._bgm.cur = null; this.bgm(w);   // 解鎖後補啟動配樂
+    }
     return this.ctx;
   },
 
@@ -134,6 +137,48 @@ const Sfx = {
     else if (e.type === "boom")   this.play("boom");
     else if (e.type === "hitfx"){ if (!e.heal) this.play("hit"); }
     else if (e.type === "death")  this.play(e.vehicle ? "vboom" : "death");
+  },
+
+  /* ---------- 程序化配樂（BGM）----------
+   * 零素材：WebAudio 前瞻排程合成。menu=低音氛圍和聲墊；battle=軍鼓行進＋小調動機。
+   * 音量刻意壓低（墊在音效底下）。首次手勢解鎖前呼叫會記住意圖，_ac() 就緒後自動開始。 */
+  _bgm: { want: null, cur: null, timer: null, step: 0, nextAt: 0 },
+  bgm(theme){
+    const B = this._bgm;
+    B.want = theme;
+    if (!this.ctx) return;                       // 尚未解鎖：_ac() 會補啟動
+    if (B.cur === theme) return;
+    if (B.timer){ clearInterval(B.timer); B.timer = null; }
+    B.cur = theme;
+    if (!theme) return;
+    B.step = 0; B.nextAt = this.ctx.currentTime + 0.15;
+    B.timer = setInterval(() => this._bgmTick(), 120);
+  },
+  _bgmTick(){
+    const B = this._bgm, c = this.ctx;
+    if (!c || !B.cur){ if (B.timer){ clearInterval(B.timer); B.timer = null; } return; }
+    const beat = B.cur === "battle" ? 0.24 : 0.5;            // 每步秒數
+    while (B.nextAt < c.currentTime + 0.7){                  // 前瞻 0.7s 排程
+      const at = B.nextAt - c.currentTime, s = B.step;
+      try {
+        if (B.cur === "battle"){
+          const snare = [1,0,0,1, 0,0,1,0, 1,0,1,0, 0,1,1,1][s % 16];
+          if (snare) this._burst({ dur: .05, vol: .05 + (s % 4 === 0 ? .03 : 0), type: "highpass", freq: 1800, at });
+          if (s % 8 === 0) this._tone({ freq: 73.4, dur: .45, vol: .06, type: "sine", at });      // D2 低音行進
+          if (s % 8 === 4) this._tone({ freq: 65.4, dur: .45, vol: .05, type: "sine", at });      // C2
+          const motif = [220,0,0,196, 0,175,0,0, 220,0,247,0, 196,0,0,0][s % 16];                 // A 小調動機
+          if (motif && s % 32 >= 16) this._tone({ freq: motif, dur: .3, vol: .028, type: "triangle", at });
+        } else {                                                                                   // menu 氛圍墊
+          if (s % 8 === 0){
+            const chords = [[110,164.8,220],[87.3,130.8,174.6],[98,146.8,196],[82.4,123.5,164.8]]; // Am F G E
+            const ch = chords[(s / 8 | 0) % 4];
+            for (const f of ch) this._tone({ freq: f, dur: beat * 8.4, vol: .02, type: "sine", at });
+            this._tone({ freq: ch[0] / 2, dur: beat * 8, vol: .03, type: "triangle", at });        // 低八度根音
+          }
+        }
+      } catch (e) { /* 配樂失敗不得影響遊戲 */ }
+      B.step++; B.nextAt += beat;
+    }
   }
 };
 

@@ -101,6 +101,7 @@ const Game = {
   },
 
   startBattle(mapId, atkNation, defNation, playerSide){
+    if (typeof Sfx!=="undefined") Sfx.bgm("battle");
     this.map = MAPS[mapId];
     this.enrichMap(this.map); this._bg = null;
     this.nations[0]=atkNation; this.nations[1]=defNation;
