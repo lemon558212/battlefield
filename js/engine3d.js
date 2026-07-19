@@ -1601,6 +1601,19 @@ const Engine3D = {
       const activeMove=moved||now<(g.userData.moveUntil||0);
       const tookHit=Number.isFinite(g.userData.lastHp)&&u.hp<g.userData.lastHp;
       if(tookHit)g.userData.hitUntil=now+220;
+      // 受擊閃白：材質 emissive 短促打亮（步兵與載具通用；材質清單首次受擊時快取）
+      if (tookHit){
+        if (!g.userData.flashMats){ const fm=[]; g.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) fm.push(o.material); }); g.userData.flashMats=fm; }
+        g.userData.flashUntil = now + 150;
+      }
+      if (g.userData.flashMats){
+        const fl = Math.max(0, ((g.userData.flashUntil||0) - now) / 150);
+        const fv = fl > 0 ? 0.85 * fl : 0;
+        if (g.userData.flashCur !== fv){
+          for (const fmt of g.userData.flashMats) fmt.emissive.setScalar(fv);
+          g.userData.flashCur = fv;
+        }
+      }
       const targetMotion=activeMove?1:0;
       g.userData.motion=(g.userData.motion||0)+(targetMotion-(g.userData.motion||0))*(1-Math.exp(-(moved?14:8)*dt));
       g.userData.activeMove=activeMove;
@@ -1777,6 +1790,14 @@ const Engine3D = {
       }
       const spark = new THREE.PointLight(0xffd070, 1.4, 55);    // 命中火花
       spark.position.set(f.x, hb + 8, f.y); objs.push(spark);
+      for (let i = 0; i < 6; i++){                              // 飛濺火星（拋物線＋加法混色）
+        const sp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 4, 3),
+          new THREE.MeshBasicMaterial({ color: 0xffd070, transparent: true, blending: THREE.AdditiveBlending }));
+        sp.position.set(f.x, hb + 9, f.y);
+        const a = Math.random() * Math.PI * 2, v = 26 + Math.random() * 30;
+        sp.userData.vel = new THREE.Vector3(Math.cos(a) * v, 18 + Math.random() * 26, Math.sin(a) * v);
+        sp.userData.spark = true; objs.push(sp);
+      }
     } else if (f.type === "death"){                             // 死亡：黑煙柱（載具更大＋餘燼火光）
       const hb = this.heightAt(f.x, f.y) + 3;
       const n = f.vehicle ? 5 : 3, base = f.vehicle ? 4.5 : 2.2;
@@ -1809,6 +1830,12 @@ const Engine3D = {
       const k = Math.min(1, f.t / 0.9);
       for (const o of e.objs){
         if (o.isPointLight){ o.intensity *= 0.9; continue; }                 // 火光快速熄滅
+        if (o.userData.spark){                                               // 火星：拋物線飛濺急滅
+          o.userData.vel.y -= 90 * 0.016;
+          o.position.addScaledVector(o.userData.vel, 0.016);
+          o.material.opacity = Math.max(0, 1 - f.t / 0.4);
+          continue;
+        }
         o.position.y += o.userData.rise * 0.016;                             // 煙塵上飄
         o.scale.setScalar(1 + k * (f.type === "death" ? 2.2 : 1.4));         // 擴散
         o.material.opacity = Math.max(0, (f.type === "death" ? 0.6 : 0.55) * (1 - k));

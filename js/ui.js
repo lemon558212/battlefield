@@ -94,13 +94,15 @@ const UI = {
       el = document.createElement("div"); el.id = "charCard";
       document.getElementById("stage").appendChild(el);
     }
-    if (!u || u.domain !== "land" || u.cls === "tank"){ el.style.display = "none"; return; }
-    const chr = (typeof CHARACTERS !== "undefined") ? CHARACTERS[u.cls] : null;
-    const img = chr ? (chr.fullPortrait || chr.portrait) : null;
+    if (!u){ el.style.display = "none"; return; }
+    const isInf = u.domain === "land" && u.cls !== "tank";
+    const chr = (isInf && typeof CHARACTERS !== "undefined") ? CHARACTERS[u.cls] : null;
+    const vart = (!isInf && typeof VEHICLE_ART !== "undefined") ? VEHICLE_ART[u.cls] : null;
+    const img = chr ? (chr.fullPortrait || chr.portrait) : vart;
     if (!img){ el.style.display = "none"; return; }
     const named = !!u.charName;
     el.innerHTML = `
-      <img src="${img}" alt="">
+      <img src="${img}" alt="" class="${vart ? "veh" : ""}">
       <div class="cc-info">
         <div class="cc-name">${named ? "★" + u.charName : u.label}</div>
         ${named && chr ? `<div class="cc-trait">${chr.trait.desc}</div>` : ""}

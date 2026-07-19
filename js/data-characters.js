@@ -56,6 +56,18 @@ const CHARACTERS = {
   }
 };
 
+/* 載具立繪（無具名角色的兵種：戰車/海軍/空軍，角色卡用） */
+const VEHICLE_ART = {
+  tank:        "assets/portraits-full/tank.jpg",
+  destroyer:   "assets/portraits-full/destroyer.jpg",
+  missileboat: "assets/portraits-full/missileboat.jpg",
+  lst:         "assets/portraits-full/lst.jpg",
+  submarine:   "assets/portraits-full/submarine.jpg",
+  fighter:     "assets/portraits-full/fighter.jpg",
+  attacker:    "assets/portraits-full/attacker.jpg",
+  gunship:     "assets/portraits-full/gunship.jpg"
+};
+
 /* 劇情模式：套用角色到單位（每兵種每場一次）。回傳角色或 null。 */
 function assignCharacter(u){
   if (!Game.storyChapter || u.side !== Game.playerSide) return null;
