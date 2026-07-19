@@ -25,7 +25,8 @@ const UI = {
         <label>我操作 <select id="selSide"><option value="0">進攻方</option><option value="1" selected>防守方</option></select></label>
         <button id="btnSkirmish" class="big">開始遭遇戰</button>
       </div>
-      <p class="fine">各國兵種與武器均取自公開資訊（見 research/），數值為遊戲化平衡。</p>`;
+      <p class="fine">各國兵種與武器均取自公開資訊（見 research/），數值為遊戲化平衡。</p>
+      <p class="fine">Music: Kevin MacLeod (incompetech.com), CC-BY 4.0｜3D: Quaternius (CC0)</p>`;
     this.el("menu").style.display="flex";
     this.el("selAtk").value="china"; this.el("selDef").value="taiwan";
     this.el("btnTutorial").onclick = ()=>{ Game.storyChapter=null; const f=MAPS.tutorial.fixedNations; Game.startBattle("tutorial", f.atk, f.def, f.playerSide); };

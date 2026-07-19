@@ -120,6 +120,10 @@ const Sfx = {
            death: 150, vboom: 300, select: 120, move: 150 },
 
   play(name){
+    if (name === "victory" || name === "defeat"){            // 結算短曲優先用檔案版
+      const el = this._el(name);
+      if (el && !this.muted){ el.currentTime = 0; el.volume = 0.5; el.play().catch(() => {}); return; }
+    }
     if (!this._ac()) return;
     const f = this._lib[name];
     if (!f || !this._gate(name, this._gaps[name] || 80)) return;
@@ -135,6 +139,8 @@ const Sfx = {
 
   /* 戰鬥事件入口（Game.pushFx 逐事件轉呼） */
   event(e){
+    if (e.type === "tracer" || e.type === "boom" || e.type === "death")
+      this._lastCombatAt = performance.now();               // 供 BGM 平時↔激戰切換
     if (e.type === "tracer")      this.play(this._wmap[e.w] || "rifle");
     else if (e.type === "boom")   this.play("boom");
     else if (e.type === "hitfx"){ if (!e.heal) this.play("hit"); }
@@ -145,14 +151,62 @@ const Sfx = {
    * 零素材：WebAudio 前瞻排程合成。menu=低音氛圍和聲墊；battle=軍鼓行進＋小調動機。
    * 音量刻意壓低（墊在音效底下）。首次手勢解鎖前呼叫會記住意圖，_ac() 就緒後自動開始。 */
   _bgm: { want: null, cur: null, timer: null, step: 0, nextAt: 0 },
+
+  /* ---------- 檔案版 BGM（Kevin MacLeod / incompetech, CC-BY 4.0，署名見 assets/audio/README.md）
+   * battle 主題依「6 秒內有無交火」在 battle_calm / battle_intense 間交叉淡切。
+   * 任一檔載入失敗 → 該主題自動退回下方程序化合成（_bgmTick），遊戲不中斷。 */
+  _files: { menu: "assets/audio/menu.mp3", battle: "assets/audio/battle_calm.mp3",
+            battle_intense: "assets/audio/battle_intense.mp3",
+            victory: "assets/audio/victory.mp3", defeat: "assets/audio/defeat.mp3" },
+  _audio: {}, _fileBroken: {}, _fadeTimer: null, _lastCombatAt: 0, muted: false,
+  _vols: { menu: 0.35, battle: 0.4, battle_intense: 0.42 },
+  _el(name){
+    if (this._fileBroken[name] || !this._files[name]) return null;
+    let a = this._audio[name];
+    if (!a){
+      a = new Audio(this._files[name]); a.preload = "auto";
+      a.loop = (name !== "victory" && name !== "defeat"); a.volume = 0;
+      a.addEventListener("error", () => { this._fileBroken[name] = true; });
+      this._audio[name] = a;
+    }
+    return a;
+  },
+  setMuted(m){
+    this.muted = m;
+    if (m){ for (const k in this._audio){ this._audio[k].pause(); }
+      if (this.ctx) this.ctx.suspend(); }
+    else if (this.ctx) this.ctx.resume();
+  },
+  _fadeTick(){
+    const B = this._bgm;
+    let want = B.want;
+    if (want === "battle" && performance.now() - this._lastCombatAt < 6000) want = "battle_intense";
+    for (const name of ["menu", "battle", "battle_intense"]){
+      const el = this._el(name); if (!el) continue;
+      const target = (!this.muted && !document.hidden && name === want) ? this._vols[name] : 0;
+      const dv = target - el.volume;
+      el.volume = Math.abs(dv) < 0.045 ? target : el.volume + Math.sign(dv) * 0.045;
+      if (target > 0 && el.paused) el.play().catch(() => {});
+      if (target === 0 && el.volume <= 0.001 && !el.paused) el.pause();
+    }
+    if (!B.want && this._fadeTimer && ["menu","battle","battle_intense"].every(n => { const e = this._audio[n]; return !e || e.paused; })){
+      clearInterval(this._fadeTimer); this._fadeTimer = null;
+    }
+  },
   bgm(theme){
     const B = this._bgm;
     B.want = theme;
-    if (!this.ctx) return;                       // 尚未解鎖：_ac() 會補啟動
-    if (B.cur === theme) return;
-    if (B.timer){ clearInterval(B.timer); B.timer = null; }
+    if (B.timer){ clearInterval(B.timer); B.timer = null; }   // 停程序化合成
     B.cur = theme;
+    const baseFile = theme === "battle" ? "battle" : theme;
+    if (theme && this._el(baseFile)){                          // 檔案模式
+      if (!this._fadeTimer) this._fadeTimer = setInterval(() => this._fadeTick(), 200);
+      this._fadeTick();
+      return;
+    }
+    if (this._fadeTimer) this._fadeTick();                     // 淡出殘留檔案音軌
     if (!theme) return;
+    if (!this.ctx) return;                                     // 合成 fallback 需 ctx；_ac() 會補啟動
     B.step = 0; B.nextAt = this.ctx.currentTime + 0.15;
     B.timer = setInterval(() => this._bgmTick(), 120);
   },
@@ -200,6 +254,7 @@ addEventListener("touchstart",  () => Sfx._ac(), { passive: true });
 
 /* 切到背景/關閉頁面 → 立即停聲；回前景 → 恢復（修「關掉還在響」） */
 document.addEventListener("visibilitychange", () => {
+  if (document.hidden){ for (const k in Sfx._audio) Sfx._audio[k].pause(); }
   if (!Sfx.ctx) return;
   if (document.hidden){
     if (Sfx._bgm.timer){ clearInterval(Sfx._bgm.timer); Sfx._bgm.timer = null; }
