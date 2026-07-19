@@ -14,8 +14,8 @@ const UI = {
     const natOpts = Object.values(NATIONS).map(n=>`<option value="${n.id}">${n.name}</option>`).join("");
     const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}（${(m.allow||["land"]).map(d=>({land:"陸",sea:"海",air:"空"}[d])).join("")}）</option>`).join("");
     this.el("menu").innerHTML = `
-      <h1>戰　場</h1><p class="sub">真實軍備 × 戰場女武神式戰術</p>
-      <button id="btnStory" class="big" style="background:#7a4a2a">📖 劇情模式：曙光作戰（15 章）</button>
+      <h1>曙光之戰</h1><p class="sub">DAYBREAK OFFENSIVE｜真實軍備 × 小隊戰術</p>
+      <button id="btnStory" class="big" style="border-left-color:#e07a3a">📖 劇情模式：曙光作戰（15 章）</button>
       <button id="btnTutorial" class="big">教學關：台海防衛</button>
       <div class="panel">
         <h3>遭遇戰</h3>

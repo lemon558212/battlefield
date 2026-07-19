@@ -387,6 +387,22 @@ const Engine3D = {
     const byUrl = {}; byUrl[d.url] = [key];
     this._loadGroups(byUrl);
   },
+  /* 模型下載進度提示（右上小條；ratio=null 表示該檔完成/失敗即移除） */
+  _loading: {},
+  _loadHint(url, ratio){
+    if (ratio === null) delete this._loading[url]; else this._loading[url] = ratio;
+    let el = document.getElementById("modelLoadHint");
+    const urls = Object.keys(this._loading);
+    if (!urls.length){ if (el) el.style.display = "none"; return; }
+    if (!el){
+      el = document.createElement("div"); el.id = "modelLoadHint";
+      const stage = document.getElementById("stage"); if (!stage) return;
+      stage.appendChild(el);
+    }
+    const pct = Math.round(100 * urls.reduce((s,u)=>s+this._loading[u],0) / urls.length);
+    el.textContent = `⟳ 高精度模型載入中 ${pct}%`;
+    el.style.display = "block";
+  },
   _loadGroups(byUrl){
     if (typeof THREE.GLTFLoader === "undefined") return;
     const loader = new THREE.GLTFLoader();
@@ -418,9 +434,11 @@ const Engine3D = {
       };
       const onFailed = error => {
         console.warn("3D model load failed:", keys.join("/"), error || "unknown error");
+        this._loadHint(url, null);
         for (const key of keys) this._modelState[key] = "failed";      // 走幾何 fallback
       };
-      loader.load(url, onLoaded, undefined, onFailed);
+      const onProgress = ev => { if (ev && ev.total) this._loadHint(url, ev.loaded / ev.total); };
+      loader.load(url, g => { this._loadHint(url, null); onLoaded(g); }, onProgress, onFailed);
     }
   },
   /* 複製模型（骨架安全 clone）＋國家染色＋動畫 mixer（idle/walk） */

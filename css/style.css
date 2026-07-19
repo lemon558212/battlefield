@@ -50,22 +50,27 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .art-gunship     { background-image:url("../assets/portraits-full/gunship.jpg"); }
 .grpHead { color:#cfe3a8; font-size:12px; font-weight:bold; margin:8px 0 3px; border-bottom:1px solid #3a4232; padding-bottom:2px; }
 
+/* 標題畫面（《曙光之戰》2026-07-19 改版：主視覺＋鳴潮式斜切深色 UI） */
 #menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
-  gap:14px; z-index:5; overflow-y:auto; padding:20px 0;
+  gap:12px; z-index:5; overflow-y:auto; padding:20px 0;
   background:
-    linear-gradient(to bottom, rgba(12,14,10,0.55) 0%, rgba(12,14,10,0.35) 40%, rgba(12,14,10,0.82) 100%),
-    url("../assets/art/title-bg.jpg") center/cover no-repeat, #0f120c; }
-#menu h1 { font-size:52px; letter-spacing:18px; color:#f4ead2;
-  text-shadow:0 2px 6px rgba(0,0,0,0.85), 0 0 28px rgba(255,190,90,0.35); }
-#menu .sub { color:#e8dcc0; text-shadow:0 1px 4px rgba(0,0,0,0.9); }
-#menu .panel { width:340px; background:rgba(22,26,17,0.82); border:1px solid #55643f;
-  padding:12px; backdrop-filter:blur(2px); }
+    linear-gradient(105deg, rgba(10,13,18,0.88) 0%, rgba(10,13,18,0.55) 34%, rgba(10,13,18,0.06) 62%, rgba(10,13,18,0.42) 100%),
+    url("../assets/art/title-key-visual.jpg") center/cover no-repeat, #0a0d12; }
+#menu h1 { font-size:54px; letter-spacing:16px; color:#f4ead2; text-indent:16px;
+  text-shadow:0 2px 6px rgba(0,0,0,0.9), 0 0 30px rgba(255,196,90,0.4);
+  border-bottom:1px solid rgba(216,197,106,0.65); padding-bottom:10px; }
+#menu .sub { color:#cfd8e4; letter-spacing:4px; font-size:13px; text-shadow:0 1px 4px rgba(0,0,0,0.9); }
+#menu .panel { width:340px; background:rgba(13,17,23,0.82); border:1px solid #3c4656;
+  border-left:2px solid #d8c56a; padding:12px; backdrop-filter:blur(3px); }
 #menu label { display:block; margin:6px 0; font-size:14px; }
-#menu select { width:170px; float:right; background:#39442e; color:#e8e6d8; border:1px solid #55643f; padding:3px; }
-#menu button { padding:10px 24px; background:rgba(57,68,46,0.92); color:#e8e6d8; border:1px solid #55643f; cursor:pointer;
-  font-family:inherit; font-size:14px; width:100%; margin-top:6px; box-shadow:0 2px 8px rgba(0,0,0,0.5); }
-#menu button.big { background:rgba(90,122,58,0.95); font-weight:bold; font-size:16px; }
-#menu button:hover { background:#4a5a3a; }
+#menu select { width:170px; float:right; background:#1c2430; color:#e8e6d8; border:1px solid #3c4656; padding:3px; }
+#menu button { padding:10px 24px; background:rgba(20,26,34,0.92); color:#e8e6d8; border:1px solid #3c4656;
+  border-left:3px solid #7a8698; cursor:pointer;
+  clip-path:polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  font-family:inherit; font-size:14px; width:100%; margin-top:6px; box-shadow:0 2px 8px rgba(0,0,0,0.55); }
+#menu button.big { background:rgba(26,34,46,0.95); font-weight:bold; font-size:16px;
+  border-left:3px solid #d8c56a; letter-spacing:2px; }
+#menu button:hover { background:rgba(46,58,76,0.95); border-color:#d8c56a; color:#ffe9a8; }
 #menu .fine { text-shadow:0 1px 3px rgba(0,0,0,0.9); }
 /* 劇情模式 */
 #menu .storyList { max-height:46vh; overflow-y:auto; }
@@ -96,6 +101,10 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #missionBanner .mb-title { color:#fff; font-size:20px; font-weight:bold; letter-spacing:4px; transform:skewX(8deg); }
 #missionBanner .mb-goal { color:#f1d46a; font-size:13px; margin-top:4px; letter-spacing:2px; transform:skewX(8deg); }
 @keyframes mbIn { from { opacity:0; transform:translateX(-50%) skewX(-8deg) scaleX(1.6); } }
+/* 模型載入提示 */
+#modelLoadHint { position:absolute; right:10px; top:10px; z-index:8; display:none;
+  background:rgba(13,17,23,0.85); color:#f1d46a; font-size:12px; letter-spacing:1px;
+  border:1px solid #3c4656; border-left:2px solid #d8c56a; padding:5px 12px; pointer-events:none; }
 /* 戰場評價拍章 */
 .rankWrap { display:flex; align-items:center; gap:14px; justify-content:center; margin:6px 0 2px; }
 .rankStamp { font-size:64px; font-weight:900; line-height:1; padding:6px 22px;
