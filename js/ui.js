@@ -87,6 +87,29 @@ const UI = {
     this.el("stBack2").onclick=()=>this.showStory();
   },
 
+  /* ---------- 戰場角色卡：選中單位常駐大立繪（人的靈魂在立繪，3D 是棋子） ---------- */
+  showCharCard(u){
+    let el = document.getElementById("charCard");
+    if (!el){
+      el = document.createElement("div"); el.id = "charCard";
+      document.getElementById("stage").appendChild(el);
+    }
+    if (!u || u.domain !== "land" || u.cls === "tank"){ el.style.display = "none"; return; }
+    const chr = (typeof CHARACTERS !== "undefined") ? CHARACTERS[u.cls] : null;
+    const img = chr ? chr.portrait : null;
+    if (!img){ el.style.display = "none"; return; }
+    const named = !!u.charName;
+    el.innerHTML = `
+      <img src="${img}" alt="">
+      <div class="cc-info">
+        <div class="cc-name">${named ? "★" + u.charName : u.label}</div>
+        ${named && chr ? `<div class="cc-trait">${chr.trait.desc}</div>` : ""}
+        <div class="cc-hp">HP ${Math.max(0, Math.round(u.hp))}/${u.maxhp}</div>
+      </div>`;
+    el.style.display = "flex";
+  },
+  hideCharCard(){ const el = document.getElementById("charCard"); if (el) el.style.display = "none"; },
+
   /* ---------- 對話演出（演出部門）：立繪＋名牌＋逐句推進 ---------- */
   showDialog(script, onDone){
     let i = 0;

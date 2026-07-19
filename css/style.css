@@ -89,6 +89,16 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .dlgText { line-height:1.9; font-size:15px; color:#eee8d5; min-height:56px; }
 .dlgHint { text-align:right; color:#8a967a; font-size:12px; margin-top:6px; animation:dlgblink 1.2s infinite; }
 @keyframes dlgblink { 50% { opacity:0.35; } }
+/* 戰場角色卡：選中單位大立繪（左下，不遮準心） */
+#charCard { position:absolute; left:10px; bottom:12px; z-index:4; display:none;
+  align-items:center; gap:10px; background:rgba(18,22,14,0.85); border:1px solid #6b7a4f;
+  border-radius:6px; padding:6px 12px 6px 6px; pointer-events:none;
+  box-shadow:0 3px 12px rgba(0,0,0,0.5); }
+#charCard img { width:72px; height:72px; object-fit:cover; border-radius:4px;
+  border:1.5px solid #8a9a6a; }
+#charCard .cc-name { color:#f1d46a; font-weight:bold; font-size:15px; }
+#charCard .cc-trait { color:#b7c69a; font-size:12px; margin-top:2px; }
+#charCard .cc-hp { color:#e8e6d8; font-size:12px; margin-top:2px; }
 
 #aim { position:absolute; left:50%; top:18%; transform:translateX(-50%); display:none; z-index:6;
   background:#242b1f; border:2px solid #8a7f34; padding:12px; font-size:13px; line-height:1.6; min-width:230px; }

@@ -1,7 +1,13 @@
 # 專案《戰場》(Codename: BATTLEFIELD-VC)
 
-戰場女武神（Valkyria Chronicles）式 2D 戰術遊戲，使用真實各國軍事公開資料。
-零依賴 HTML5 Canvas，開瀏覽器即玩。全域工作守則見 `~/.claude/CLAUDE.md`（鐵律與 harness 路由）。
+戰場女武神（Valkyria Chronicles）式戰術遊戲，使用真實各國軍事公開資料。
+零依賴 HTML5 Canvas + Three.js（vendored），開瀏覽器即玩。全域工作守則見 `~/.claude/CLAUDE.md`。
+
+## ⚑ 開發體制（2026-07-20 使用者核定）
+
+**任何開發工作先呼叫 `/vc-dev`（總路由 skill）**，依十五部門體系定位主辦部門後，
+照對應 `/dept-XX-*` skill 的職責、SOP 與完成定義執行。部門體系原始文件＝
+專案根目錄《戰場女武神類型遊戲開發部門與工作項目.docx》，skills 是其執行化版本。
 
 ## 鐵律（專案層）
 

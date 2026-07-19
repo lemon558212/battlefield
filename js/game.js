@@ -540,6 +540,7 @@ const Game = {
   enterAction(u){
     this.sel = u; this.selFired = false; this.state="act"; this.moveTarget = null; this._steer3d = null; this._actUiT=0;
     if (typeof Sfx!=="undefined") Sfx.play("select");
+    UI.showCharCard && UI.showCharCard(u);
     let mult = Math.pow(0.7, u.actedCount);
     if (NATIONS[u.nationId].trait.id==="rapid_reaction" && this.turn===1) mult *= 1.2; // 法國
     u.ap = u.maxap * mult;
@@ -551,6 +552,7 @@ const Game = {
 
   endAction(){
     this.sel=null;this.aimTarget=null;this.moveTarget=null;this._clearControls();UI.hideAim();
+    UI.hideCharCard && UI.hideCharCard();
     this.state="cmd";
     this.checkVictory();
     if (Net.connected && !this.over) Net.sendState();
