@@ -50,20 +50,30 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .art-gunship     { background-image:url("../assets/portraits-full/gunship.jpg"); }
 .grpHead { color:#cfe3a8; font-size:12px; font-weight:bold; margin:8px 0 3px; border-bottom:1px solid #3a4232; padding-bottom:2px; }
 
+/* 標題字型：思源宋體 TC Bold 子集（OFL，僅含標題與選單字） */
+@font-face { font-family:"TitleSerif"; src:url("../assets/fonts/title-subset.woff2") format("woff2");
+  font-display:swap; }
 /* 標題畫面（《曙光之戰》2026-07-19 改版：主視覺＋鳴潮式斜切深色 UI） */
 #menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
   gap:12px; z-index:5; overflow-y:auto; padding:20px 0 28px;
   background:
     linear-gradient(105deg, rgba(10,13,18,0.88) 0%, rgba(10,13,18,0.55) 34%, rgba(10,13,18,0.06) 62%, rgba(10,13,18,0.42) 100%),
     url("../assets/art/title-key-visual.jpg") center/cover no-repeat, #0a0d12; }
-#menu h1 { font-size:54px; letter-spacing:16px; color:#f4ead2; text-indent:16px;
-  text-shadow:0 2px 6px rgba(0,0,0,0.9), 0 0 30px rgba(255,196,90,0.4);
-  border-bottom:1px solid rgba(216,197,106,0.65); padding-bottom:10px; }
+#menu h1 { font-family:"TitleSerif","Microsoft JhengHei",serif; font-size:46px; letter-spacing:12px;
+  color:#f2e3c2; text-indent:12px; align-self:flex-end; margin-right:6%;
+  text-shadow:0 2px 8px rgba(0,0,0,0.75), 0 0 34px rgba(255,196,90,0.28);
+  border-bottom:1px solid rgba(216,197,106,0.5); padding-bottom:8px; }
 #menu .sub { color:#cfd8e4; letter-spacing:4px; font-size:13px; text-shadow:0 1px 4px rgba(0,0,0,0.9); }
 #menu .menuSpacer { flex:1 1 auto; min-height:60px; }
-#menu h1:first-child { margin-top:5%; }
-#menu .menuBtns { width:min(320px, 82%); display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
-#menu .menuBtns button { font-size:20px; letter-spacing:10px; padding:14px 24px; }
+#menu h1:first-child { margin-top:4%; }
+#menu .menuBtns { width:min(280px, 72%); display:flex; flex-direction:column; gap:12px;
+  margin-bottom:16px; align-self:flex-end; margin-right:6%; }
+#menu .menuBtns button { font-family:"TitleSerif","Microsoft JhengHei",serif;
+  font-size:21px; letter-spacing:14px; text-indent:14px; padding:12px 24px;
+  background:rgba(10,13,18,0.42); border:none; border-left:2px solid rgba(216,197,106,0.75);
+  color:#efe6d0; clip-path:none; backdrop-filter:blur(2px); }
+#menu .menuBtns button:hover { background:rgba(30,38,50,0.6); color:#ffe9a8;
+  border-left-color:#ffd83d; letter-spacing:16px; }
 #menu .panel { width:340px; background:rgba(13,17,23,0.82); border:1px solid #3c4656;
   border-left:2px solid #d8c56a; padding:12px; backdrop-filter:blur(3px); }
 #menu label { display:block; margin:6px 0; font-size:14px; }

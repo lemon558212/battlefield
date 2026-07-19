@@ -388,7 +388,16 @@ const Engine3D = {
     this._loadGroups(byUrl);
   },
   /* 模型下載進度提示（右上小條；ratio=null 表示該檔完成/失敗即移除） */
-  _loading: {},
+  _loading: {}, _loadRetries: {},
+  _loadError(url, error){
+    let el = document.getElementById("modelLoadHint");
+    const stage = document.getElementById("stage"); if (!stage) return;
+    if (!el){ el = document.createElement("div"); el.id = "modelLoadHint"; stage.appendChild(el); }
+    const msg = (error && (error.message || error.type || String(error))) || "未知錯誤";
+    el.textContent = `⚠ 模型載入失敗：${url.split("/").pop()}（${String(msg).slice(0,120)}）`;
+    el.style.display = "block"; el.style.color = "#ff9a7a";
+    setTimeout(() => { if (el.textContent.startsWith("⚠")) el.style.display = "none"; }, 30000);
+  },
   _loadHint(url, ratio){
     if (ratio === null) delete this._loading[url]; else this._loading[url] = ratio;
     let el = document.getElementById("modelLoadHint");
@@ -435,6 +444,14 @@ const Engine3D = {
       const onFailed = error => {
         console.warn("3D model load failed:", keys.join("/"), error || "unknown error");
         this._loadHint(url, null);
+        const n = this._loadRetries[url] || 0;
+        if (n < 2){                                                    // 自動重試 2 次（網路抖動）
+          this._loadRetries[url] = n + 1;
+          for (const key of keys) delete this._modelState[key];
+          setTimeout(() => { const again = {}; again[url] = keys; this._loadGroups(again); }, 1200 * (n + 1));
+          return;
+        }
+        this._loadError(url, error);                                   // 最終失敗：畫面明示原因
         for (const key of keys) this._modelState[key] = "failed";      // 走幾何 fallback
       };
       const onProgress = ev => { if (ev && ev.total) this._loadHint(url, ev.loaded / ev.total); };
@@ -459,6 +476,8 @@ const Engine3D = {
         o.frustumCulled = false;
         if (u.cls === "specops" && /uniform|combat_pants|olive_gear|plate_|pouches/.test(materialName) && o.material.color) o.material.color.multiplyScalar(0.5); }   // 特種兵低視度黑
     });
+    if (this._defs && this._defs[key] && this._defs[key].selfGear)
+      c.traverse(o => { if (o.isMesh) o.userData.noToon = true; });   // 專屬模型保留原貼圖光影（貼圖已含手繪陰影，硬色階會糊細節）
     if (m.anims.length){
       const mixer = new THREE.AnimationMixer(c);
       const pick = re => m.anims.find(a => re.test(a.name));
