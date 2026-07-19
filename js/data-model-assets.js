@@ -12,7 +12,7 @@ const MODEL_ASSETS = Object.freeze({
   assault:  {url:"assets/models/chars/assault.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Punk CC0", status:"approved", lazy:true},
   mg:       {url:"assets/models/chars/mg.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Farmer CC0", status:"approved", lazy:true},
   mortar:   {url:"assets/models/chars/mortar.glb",   h:19, rotY:Math.PI/2, source:"Quaternius UMM Suit CC0", status:"approved", lazy:true},
-  sniper:   {url:"assets/models/chars/sniper.glb",   h:19, rotY:Math.PI/2, source:"Quaternius UMM Casual_Hoodie CC0", status:"approved", lazy:true},
+  sniper:   {url:"assets/models/chars/sniper-tripo.glb", h:19, rotY:Math.PI/2, source:"Tripo image-to-3D（自有立繪韓沐霜生成，試點）", status:"provisional", lazy:true},
   at:       {url:"assets/models/chars/at.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Casual_2 CC0", status:"approved", lazy:true},
   engineer: {url:"assets/models/chars/engineer.glb", h:19, rotY:Math.PI/2, source:"Quaternius UMM Worker CC0", status:"approved", lazy:true},
   specops:  {url:"assets/models/chars/specops.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Swat CC0", status:"approved", lazy:true},

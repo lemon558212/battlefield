@@ -29,3 +29,6 @@ CC-BY 署名即此檔；引擎（js/engine3d.js loadModels）自動縮放置底�
 來源：Quaternius「Ultimate Modular Men Pack」（CC0 公有領域，quaternius.com）。
 對應：rifleman=Adventurer, assault=Punk, mg=Farmer, mortar=Suit, sniper=Casual_Hoodie,
 at=Casual_2, engineer=Worker, specops=Swat, sam=Spacesuit（各含 24 動畫，按需載入）。
+
+## Tripo 試點（2026-07-19）
+- chars/sniper-tripo.glb：韓沐霜，由自有立繪（assets/portraits-full/sniper.jpg）經 Tripo image-to-3D+rig+retarget 生成，動畫 idle/walk/run/shoot/hit/death 以 tools/merge-tripo-anims.py 合併。輸出權利依 Tripo 服務條款歸使用者。status=provisional，待效能瘦身（22MB）。
