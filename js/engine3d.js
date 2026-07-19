@@ -374,7 +374,7 @@ const Engine3D = {
     for (const key in MODEL_ASSETS){
       const a=MODEL_ASSETS[key];
       if(!a.url){this._modelState[key]="missing";continue;}
-      defs[key]={url:a.url,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy};
+      defs[key]={url:a.url,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy,selfGear:!!a.selfGear};
     }
     const byUrl = {};                                     // 同 URL 只下載/解析一次
     for (const key in defs){ if (!defs[key].lazy) (byUrl[defs[key].url] = byUrl[defs[key].url] || []).push(key); }
@@ -1341,7 +1341,10 @@ const Engine3D = {
         visual.add(fallback);g.userData.rig=fallback.userData.rig;g.userData.riggedModel=false;
         g.userData.assetStatus="procedural-fallback";g.userData.cleanCharacter=false;
       }
-      visual.add(this._classGear(u));   // 兵種專屬裝備剪影（共用基底模型的差異化層，勿再移除）
+      // 兵種專屬裝備剪影（共用基底模型的差異化層，勿再移除）。
+      // 例外：selfGear 模型（如 Tripo 專屬角色模型）武器已內建，掛配件會因骨名不符糊在模型上。
+      const selfGear = this._defs && this._defs[u.cls] && this._defs[u.cls].selfGear && g.userData.loadedModel;
+      if (!selfGear) visual.add(this._classGear(u));
     }
     return this._finishUnit(g, visual, u, G, preview);
   },

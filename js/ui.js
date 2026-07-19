@@ -14,9 +14,24 @@ const UI = {
     const natOpts = Object.values(NATIONS).map(n=>`<option value="${n.id}">${n.name}</option>`).join("");
     const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}（${(m.allow||["land"]).map(d=>({land:"陸",sea:"海",air:"空"}[d])).join("")}）</option>`).join("");
     this.el("menu").innerHTML = `
-      <h1>曙光之戰</h1><p class="sub">DAYBREAK OFFENSIVE｜真實軍備 × 小隊戰術</p>
-      <button id="btnStory" class="big" style="border-left-color:#e07a3a">📖 劇情模式：曙光作戰（15 章）</button>
-      <button id="btnTutorial" class="big">教學關：台海防衛</button>
+      <h1>曙光之戰</h1>
+      <div class="menuSpacer"></div>
+      <div class="menuBtns">
+        <button id="btnStory" class="big">劇　情</button>
+        <button id="btnVersus" class="big">對　戰</button>
+      </div>
+      <p class="fine">Music: Kevin MacLeod (incompetech.com) CC-BY 4.0</p>`;
+    this.el("menu").style.display="flex";
+    this.el("btnStory").onclick = ()=>this.showStory();
+    this.el("btnVersus").onclick = ()=>this.showVersus();
+  },
+
+  /* 對戰選單：教學關／遭遇戰／連線對戰 */
+  showVersus(){
+    this.hideAll();
+    const natOpts = Object.values(NATIONS).map(n=>`<option value="${n.id}">${n.name}</option>`).join("");
+    const mapOpts = Object.values(MAPS).filter(m=>!m.tutorial).map(m=>`<option value="${m.id}">${m.name}（${(m.allow||["land"]).map(d=>({land:"陸",sea:"海",air:"空"}[d])).join("")}）</option>`).join("");
+    this.el("menu").innerHTML = `
       <div class="panel">
         <h3>遭遇戰</h3>
         <label>進攻方（左） <select id="selAtk">${natOpts}</select></label>
@@ -25,20 +40,18 @@ const UI = {
         <label>我操作 <select id="selSide"><option value="0">進攻方</option><option value="1" selected>防守方</option></select></label>
         <button id="btnSkirmish" class="big">開始遭遇戰</button>
       </div>
-      <p class="fine">各國兵種與武器均取自公開資訊（見 research/），數值為遊戲化平衡。</p>
-      <p class="fine">Music: Kevin MacLeod (incompetech.com), CC-BY 4.0｜3D: Quaternius (CC0)</p>`;
+      <button id="btnTutorial">教學關：台海防衛</button>
+      <button id="btnConnect">🌐 連線對戰（跨裝置）</button>
+      <button id="btnMenuBack">返回標題</button>`;
     this.el("menu").style.display="flex";
     this.el("selAtk").value="china"; this.el("selDef").value="taiwan";
-    this.el("btnTutorial").onclick = ()=>{ Game.storyChapter=null; const f=MAPS.tutorial.fixedNations; Game.startBattle("tutorial", f.atk, f.def, f.playerSide); };
-    this.el("btnStory").onclick = ()=>this.showStory();
-    const mpBtn=document.createElement("button"); mpBtn.className="big";
-    mpBtn.textContent="🌐 連線對戰（跨裝置）"; mpBtn.style.marginTop="6px";
-    mpBtn.onclick=()=>this.showConnect();
-    this.el("menu").appendChild(mpBtn);
     this.el("btnSkirmish").onclick = ()=>{
       const a=this.el("selAtk").value, d=this.el("selDef").value;
       Game.startBattle(this.el("selMap").value, a, d, parseInt(this.el("selSide").value,10));
     };
+    this.el("btnTutorial").onclick = ()=>{ Game.storyChapter=null; const f=MAPS.tutorial.fixedNations; Game.startBattle("tutorial", f.atk, f.def, f.playerSide); };
+    this.el("btnConnect").onclick = ()=>this.showConnect();
+    this.el("btnMenuBack").onclick = ()=>this.showMenu();
   },
 
   /* ---------- 劇情模式 ---------- */
