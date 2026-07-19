@@ -24,3 +24,8 @@ CC-BY 署名即此檔；引擎（js/engine3d.js loadModels）自動縮放置底�
 - `fighter.glb` 實際為紅色民用噴射機，並非現代制空戰機。
 - `attacker.glb` 實際為橘色雙翼機，並非現代攻擊機。
 - 兩檔保留授權與來源紀錄，但 `engine3d.js` 不再載入；遊戲改用可染色的現代軍機 Three.js 組裝模型，之後找到合規 GLB 再替換。
+
+## chars/（九兵種專屬角色，2026-07-19）
+來源：Quaternius「Ultimate Modular Men Pack」（CC0 公有領域，quaternius.com）。
+對應：rifleman=Adventurer, assault=Punk, mg=Farmer, mortar=Suit, sniper=Casual_Hoodie,
+at=Casual_2, engineer=Worker, specops=Swat, sam=Spacesuit（各含 24 動畫，按需載入）。

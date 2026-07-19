@@ -370,15 +370,27 @@ const Engine3D = {
   _modelState: {},
   loadModels(){
     if (typeof THREE.GLTFLoader === "undefined") return;
-    const loader = new THREE.GLTFLoader();
-    const defs = {};
+    const defs = this._defs = {};
     for (const key in MODEL_ASSETS){
       const a=MODEL_ASSETS[key];
       if(!a.url){this._modelState[key]="missing";continue;}
-      defs[key]={url:a.url,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status};
+      defs[key]={url:a.url,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy};
     }
-    const byUrl = {};                                     // 同 URL 只下載/解析一次（步兵共用基底）
-    for (const key in defs) (byUrl[defs[key].url] = byUrl[defs[key].url] || []).push(key);
+    const byUrl = {};                                     // 同 URL 只下載/解析一次
+    for (const key in defs){ if (!defs[key].lazy) (byUrl[defs[key].url] = byUrl[defs[key].url] || []).push(key); }
+    this._loadGroups(byUrl);
+  },
+  /* 按需載入：兵種首次出現才抓模型（_mkUnit 呼叫），載完自動重建單位 */
+  _ensureModel(key){
+    const d = this._defs && this._defs[key];
+    if (!d || this._modelState[key]) return;
+    const byUrl = {}; byUrl[d.url] = [key];
+    this._loadGroups(byUrl);
+  },
+  _loadGroups(byUrl){
+    if (typeof THREE.GLTFLoader === "undefined") return;
+    const loader = new THREE.GLTFLoader();
+    const defs = this._defs;
     for (const url in byUrl){
       const keys = byUrl[url];
       for (const key of keys) this._modelState[key] = "loading";
@@ -527,7 +539,7 @@ const Engine3D = {
    * 免 vendored 後製鏈：自建 RT + 全屏四邊形，autoClear=false 疊加。 */
   _initOutline(){
     if (this._outline) return this._outline;
-    const rtW = 480, rtH = 300;
+    const rtW = 960, rtH = 600;              // 全解析度：半解析度放大會造成整片糊邊（模糊事故）
     const rt = new THREE.WebGLRenderTarget(rtW, rtH);
     const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     const quadScene = new THREE.Scene();
@@ -546,9 +558,9 @@ const Engine3D = {
                   +abs(unpack(texture2D(tDepth,vUv-vec2(texel.x,0.)))-d0);
           float dy=abs(unpack(texture2D(tDepth,vUv+vec2(0.,texel.y)))-d0)
                   +abs(unpack(texture2D(tDepth,vUv-vec2(0.,texel.y)))-d0);
-          float e=clamp((dx+dy)*140.0-0.02,0.,1.);
+          float e=step(0.035,(dx+dy)*140.0);                /* 硬閾值：細而俐落的線，不暈開 */
           e*=smoothstep(1.0,0.96,d0);                       /* 遠景(天空)不描 */
-          gl_FragColor=vec4(vec3(0.10,0.08,0.05), e*strength);
+          gl_FragColor=vec4(vec3(0.10,0.08,0.05), e*strength*0.8);
         }`
     });
     quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
@@ -1290,6 +1302,7 @@ const Engine3D = {
       visual.add(this._airGear(u));
     } else {
       const usePrimitive=typeof location!=="undefined"&&new URLSearchParams(location.search).get("primitiveCharacters")==="1";
+      this._ensureModel(u.cls);              // 兵種模型按需載入（載完自動重建單位）
       const soldier=usePrimitive?null:this._cloneModel(u.cls,u,preview);
       if(soldier){
         visual.add(soldier);

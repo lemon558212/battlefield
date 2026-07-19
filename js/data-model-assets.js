@@ -5,16 +5,18 @@
  * 可組出真正的每兵種專屬模型，屆時逐兵種替換 url 並改 status。 */
 "use strict";
 
+/* 步兵九兵種＝九個不同角色模型（Quaternius Ultimate Modular Men, CC0，各含 24 動畫）。
+ * lazy:true＝按需載入（該兵種首次出現才下載，避免一次載入 28MB）。 */
 const MODEL_ASSETS = Object.freeze({
-  rifleman: {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  assault:  {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  mg:       {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  mortar:   {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  sniper:   {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  at:       {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  engineer: {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  specops:  {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
-  sam:      {url:"assets/models/soldier.glb", h:19, rotY:Math.PI/2, source:"Quaternius CC0", status:"approved-shared-base"},
+  rifleman: {url:"assets/models/chars/rifleman.glb", h:19, rotY:Math.PI/2, source:"Quaternius UMM Adventurer CC0", status:"approved", lazy:true},
+  assault:  {url:"assets/models/chars/assault.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Punk CC0", status:"approved", lazy:true},
+  mg:       {url:"assets/models/chars/mg.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Farmer CC0", status:"approved", lazy:true},
+  mortar:   {url:"assets/models/chars/mortar.glb",   h:19, rotY:Math.PI/2, source:"Quaternius UMM Suit CC0", status:"approved", lazy:true},
+  sniper:   {url:"assets/models/chars/sniper.glb",   h:19, rotY:Math.PI/2, source:"Quaternius UMM Casual_Hoodie CC0", status:"approved", lazy:true},
+  at:       {url:"assets/models/chars/at.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Casual_2 CC0", status:"approved", lazy:true},
+  engineer: {url:"assets/models/chars/engineer.glb", h:19, rotY:Math.PI/2, source:"Quaternius UMM Worker CC0", status:"approved", lazy:true},
+  specops:  {url:"assets/models/chars/specops.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Swat CC0", status:"approved", lazy:true},
+  sam:      {url:"assets/models/chars/sam.glb",      h:19, rotY:Math.PI/2, source:"Quaternius UMM Spacesuit CC0", status:"approved", lazy:true},
   tank:      {url:"assets/models/tank.glb", len:34, rotY:Math.PI, source:"Quaternius CC0", status:"approved"},
   destroyer: {url:"assets/models/destroyer.glb", len:46, rotY:Math.PI, source:"Original project guided-missile destroyer", status:"provisional"},
   missileboat:{url:"assets/models/missileboat.glb", len:32, rotY:Math.PI, source:"Original project fast missile craft", status:"provisional"},
