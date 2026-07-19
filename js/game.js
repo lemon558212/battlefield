@@ -1058,6 +1058,12 @@ const Game = {
       c.strokeStyle="#4a473f"; c.lineWidth=2; c.strokeRect(b.x,b.y,b.w,b.h); c.lineWidth=1;
       c.fillStyle="#2a2723"; c.fillRect(b.x+b.w*0.2,b.y+b.h*0.42,b.w*0.6,Math.max(4,b.h*0.16)); // 射口(embrasure)
     }
+    // 出圖前整體提飽和（視覺感官部門：對照上市遊戲，死灰地面是廉價感主因）
+    try{
+      const tmp=document.createElement("canvas"); tmp.width=W; tmp.height=H;
+      const tc=tmp.getContext("2d"); tc.drawImage(cv,0,0);
+      c.filter="saturate(1.32) brightness(1.04)"; c.drawImage(tmp,0,0); c.filter="none";
+    }catch(e){ /* 舊瀏覽器無 canvas filter：跳過 */ }
   },
 
   render(dt){

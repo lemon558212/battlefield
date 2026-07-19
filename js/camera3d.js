@@ -16,7 +16,7 @@ const Camera3D = {
 
   // 兩種相機模式的參數
   // follow：跟隨選中單位的第三人稱（行動模式）
-  fDist: 84, fHeight: 104, fPitch: 0.36, fFocal: 470,
+  fDist: 62, fHeight: 76, fPitch: 0.34, fFocal: 470,   // 2026-07-19 拉近：操作角色要有主角存在感（原 84/104/0.36）
   // overview：斜角俯瞰整個戰場（部署/指令/敵方回合）—露出天空與前景地面
   oPitch: 0.50, oFocal: 430, oHeight: 430, oBack: 400,
 

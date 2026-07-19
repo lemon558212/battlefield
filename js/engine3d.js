@@ -1014,22 +1014,28 @@ const Engine3D = {
     {
       const ok = (x, y) => !(G.isWater && G.isWater(x, y)) &&
         !G.inAny(m.solids, x, y) && !G.inAny(m.bunkers, x, y) && !G.inAny(m.waters, x, y);
+      // 植被密度對照上市遊戲全面上調（關卡設計部門 2026-07-19）：雙色草交錯、體型加大
       const tufts = [];
-      for (let i = 0, tries = 0; i < 130 * S && tries < 600; tries++){
+      for (let i = 0, tries = 0; i < 430 * S && tries < 2200; tries++){
         const x = rnd() * mw, y = rnd() * mh;
         if (!ok(x, y)) continue;
-        tufts.push({ x, y, r: rnd() * Math.PI, s: 0.8 + rnd() * 1.1 }); i++;
+        tufts.push({ x, y, r: rnd() * Math.PI, s: 1.0 + rnd() * 1.6 }); i++;
       }
       if (tufts.length){
-        const gMat = new THREE.MeshLambertMaterial({color:0x557b36});
-        const inst = new THREE.InstancedMesh(new THREE.ConeGeometry(.42,4.8,4), gMat, tufts.length);
-        const d = new THREE.Object3D();inst.name="terrain-grass-3d";
-        tufts.forEach((t, i) => {
-          d.position.set(t.x, 2.25*t.s+this.heightAt(t.x,t.y),t.y);
-          d.rotation.set(Math.sin(t.r)*.13,t.r,Math.cos(t.r)*.13);d.scale.set(t.s*.65,t.s,t.s*.65);
-          d.updateMatrix();inst.setMatrixAt(i,d.matrix);
-        });
-        inst.castShadow=true;grp.add(inst);
+        const cols = [0x5a8438, 0x6f9440];
+        for (let ci = 0; ci < 2; ci++){
+          const mine = tufts.filter((_, i) => i % 2 === ci);
+          if (!mine.length) continue;
+          const gMat = new THREE.MeshLambertMaterial({ color: cols[ci] });
+          const inst = new THREE.InstancedMesh(new THREE.ConeGeometry(.5, 5.6, 4), gMat, mine.length);
+          const d = new THREE.Object3D(); inst.name = "terrain-grass-3d";
+          mine.forEach((t, i) => {
+            d.position.set(t.x, 2.6 * t.s + this.heightAt(t.x, t.y), t.y);
+            d.rotation.set(Math.sin(t.r) * .13, t.r, Math.cos(t.r) * .13); d.scale.set(t.s * .7, t.s, t.s * .7);
+            d.updateMatrix(); inst.setMatrixAt(i, d.matrix);
+          });
+          inst.castShadow = true; grp.add(inst);
+        }
       }
       const rocks = [];
       for (let i = 0, tries = 0; i < 36 * S && tries < 300; tries++){

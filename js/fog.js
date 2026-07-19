@@ -87,9 +87,16 @@ const Fog = {
     }
   },
 
-  /* 真 3D 主路徑：把世界格投影成透視四邊形，禁止沿用俯視座標整屏覆蓋。 */
+  /* 真 3D 主路徑：把世界格投影成透視四邊形，禁止沿用俯視座標整屏覆蓋。
+   * 視覺規範（視覺感官部門 2026-07-19）：迷霧＝「晨霧藍灰紗」不是「黑色柏油」——
+   * 低解析離屏＋平滑放大得到柔邊，濃度壓低保留地形可讀性。 */
   renderProjected(ctx, cam, heightAt){
     if(!this.enabled||!cam)return;
+    const W=ctx.canvas.width,H=ctx.canvas.height,K=4;          // 1/4 解析度離屏 → 放大自帶柔邊
+    if(!this._soft||this._soft.width!==W/K){ this._soft=document.createElement("canvas");
+      this._soft.width=Math.ceil(W/K); this._soft.height=Math.ceil(H/K); }
+    const sc=this._soft.getContext("2d");
+    sc.clearRect(0,0,this._soft.width,this._soft.height);
     const buckets=[[],[]];
     for(let cx=0;cx<this._cols;cx++){
       for(let cy=0;cy<this._rows;cy++){
@@ -103,14 +110,17 @@ const Fog = {
     }
     for(const s of [0,1]){
       if(!buckets[s].length)continue;
-      ctx.beginPath();
+      sc.beginPath();
       for(const pts of buckets[s]){
-        ctx.moveTo(pts[0].sx,pts[0].sy);
-        for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].sx,pts[i].sy);
-        ctx.closePath();
+        sc.moveTo(pts[0].sx/K,pts[0].sy/K);
+        for(let i=1;i<pts.length;i++)sc.lineTo(pts[i].sx/K,pts[i].sy/K);
+        sc.closePath();
       }
-      ctx.fillStyle=s===1?"rgba(10,14,20,0.45)":"rgba(8,12,20,0.85)";
-      ctx.fill();
+      sc.fillStyle=s===1?"rgba(52,64,84,0.20)":"rgba(38,48,66,0.48)";   // 藍灰紗，非黑塊
+      sc.fill();
     }
+    ctx.save(); ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(this._soft,0,0,W,H);
+    ctx.restore();
   }
 };
