@@ -65,7 +65,7 @@ const UI = {
   showBriefing(n){
     const ch = STORY[n-1];
     const roster = Object.values(CHARACTERS).map(c =>
-      `<img class="rosterFace" src="${c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`).join("");
+      `<img class="rosterFace" src="${c.fullPortrait || c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`).join("");
     const M=this.el("menu"); M.style.display="flex";
     M.innerHTML=`
       <h1 style="font-size:24px">第 ${ch.n} 章｜${ch.title}</h1>
@@ -207,9 +207,13 @@ const UI = {
         const c = unitCost(nat.id,k), u=nat.units[k];
         const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
         const on = Game.deployCls===k?" on":"";
+        const chr = (typeof CHARACTERS !== "undefined") ? CHARACTERS[k] : null;
+        const zh = CLASS_BASE[k].zh;
+        const title = chr ? `<b>${chr.name}</b>｜${zh}` : `<b>${zh}</b>${u.label !== zh ? "｜" + u.label : ""}`;
+        const sub = u.weapon + (chr && u.label !== zh ? "｜" + u.label : "");
         return `<button class="unitBtn${on}" data-cls="${k}">
           <span class="unitArt art-${k}" aria-hidden="true"></span>
-          <span class="unitCopy"><b>${CLASS_BASE[k].zh}</b>｜${u.label}<br><span class="weapon">${u.weapon}</span></span>
+          <span class="unitCopy">${title}<br><span class="weapon">${sub}</span></span>
           <em>${c}點·${cp}CP</em></button>`;
       }).join("");
     }

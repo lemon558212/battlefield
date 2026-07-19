@@ -79,7 +79,7 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #menu .briefing { line-height:1.8; font-size:14px; text-align:left; }
 /* 小隊名冊 */
 #menu .roster { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px; }
-#menu .rosterFace { width:44px; height:44px; object-fit:cover; border:2px solid #55643f;
+#menu .rosterFace { width:44px; height:44px; object-fit:cover; object-position:50% 8%; border:2px solid #55643f;
   border-radius:4px; background:#2a2f22; }
 /* 對話演出 */
 .dlgWrap { position:relative; width:min(92vw,560px); cursor:pointer; user-select:none; }
