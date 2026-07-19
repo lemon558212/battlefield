@@ -492,6 +492,80 @@ const Engine3D = {
     return h;
   },
 
+  /* ---------- 水彩渲染管線（技術美術部門，GDD/06 定調：手繪風非寫實風） ---------- */
+  /* 三階賽璐璐漸層（暗/中/亮），NearestFilter 產生硬色階 */
+  _gradientTex(){
+    if (this._gradTex) return this._gradTex;
+    const data = new Uint8Array([110, 110, 110, 255, 200, 200, 200, 255, 255, 255, 255, 255]);
+    const t = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
+    t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
+    return (this._gradTex = t);
+  },
+  /* 全場景賽璐璐化：Lambert/Standard → Toon（保留色/貼圖/透明設定）。
+   * 排除：Basic(特效/UI)、天空、地面(貼圖水彩感靠 buildTerrain 手繪) */
+  _toonify(root){
+    const grad = this._gradientTex();
+    root.traverse(o => {
+      if (!o.isMesh && !o.isInstancedMesh) return;
+      if (o.userData.noToon) return;
+      const conv = mt => {
+        if (!mt || mt._toon || !(mt.isMeshLambertMaterial || mt.isMeshStandardMaterial)) return mt;
+        const nm = new THREE.MeshToonMaterial({
+          color: mt.color ? mt.color.clone() : new THREE.Color(0xffffff),
+          map: mt.map || null, gradientMap: grad,
+          transparent: mt.transparent, opacity: mt.opacity,
+          alphaTest: mt.alphaTest || 0, side: mt.side, skinning: !!mt.skinning
+        });
+        nm._toon = true; nm._lin = mt._lin;
+        return nm;
+      };
+      if (Array.isArray(o.material)) o.material = o.material.map(conv);
+      else o.material = conv(o.material);
+    });
+  },
+  /* 深度描邊後製：半解析度深度圖 → 全螢幕邊緣偵測疊描邊（鉛筆速寫輪廓）。
+   * 免 vendored 後製鏈：自建 RT + 全屏四邊形，autoClear=false 疊加。 */
+  _initOutline(){
+    if (this._outline) return this._outline;
+    const rtW = 480, rtH = 300;
+    const rt = new THREE.WebGLRenderTarget(rtW, rtH);
+    const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    const quadScene = new THREE.Scene();
+    const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthTest: false, depthWrite: false,
+      uniforms: { tDepth: { value: rt.texture }, texel: { value: new THREE.Vector2(1 / rtW, 1 / rtH) },
+                  strength: { value: 0.55 } },
+      vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }",
+      fragmentShader: `
+        uniform sampler2D tDepth; uniform vec2 texel; uniform float strength; varying vec2 vUv;
+        float unpack(vec4 c){ return dot(c, vec4(1.0, 1.0/255.0, 1.0/65025.0, 1.0/16581375.0)); }
+        void main(){
+          float d0=unpack(texture2D(tDepth,vUv));
+          float dx=abs(unpack(texture2D(tDepth,vUv+vec2(texel.x,0.)))-d0)
+                  +abs(unpack(texture2D(tDepth,vUv-vec2(texel.x,0.)))-d0);
+          float dy=abs(unpack(texture2D(tDepth,vUv+vec2(0.,texel.y)))-d0)
+                  +abs(unpack(texture2D(tDepth,vUv-vec2(0.,texel.y)))-d0);
+          float e=clamp((dx+dy)*140.0-0.02,0.,1.);
+          e*=smoothstep(1.0,0.96,d0);                       /* 遠景(天空)不描 */
+          gl_FragColor=vec4(vec3(0.10,0.08,0.05), e*strength);
+        }`
+    });
+    quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+    return (this._outline = { rt, depthMat, quadScene, quadCam, mat });
+  },
+  _renderOutline(){
+    const O = this._initOutline(), r = this.renderer;
+    const fogSave = this.scene.fog; this.scene.fog = null;
+    this.scene.overrideMaterial = O.depthMat;
+    r.setRenderTarget(O.rt); r.clear(); r.render(this.scene, this.camera);
+    r.setRenderTarget(null);
+    this.scene.overrideMaterial = null; this.scene.fog = fogSave;
+    const ac = r.autoClear; r.autoClear = false;
+    r.render(O.quadScene, O.quadCam);
+    r.autoClear = ac;
+  },
+
   /* 修正 sRGB 輸出下的純色材質：hex 色值是 sRGB 直覺色，需轉線性才不會渲染偏白 */
   _linearize(root){
     root.traverse(o => {
@@ -654,6 +728,7 @@ const Engine3D = {
     geo.computeVertexNormals();
     const gnd = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map:tex, roughness:0.94, metalness:0.01 }));
     gnd.name="terrain-heightfield";gnd.receiveShadow = true;
+    gnd.userData.noToon = true;          // 地面手繪貼圖不做色階化（避免把水彩底圖分色）
     grp.add(gnd);
 
     // 地圖厚度讓邊界與凹地有真正體積，不再像一張漂浮平面。
@@ -980,6 +1055,7 @@ const Engine3D = {
       }
     }
     this._linearize(grp);
+    this._toonify(grp);
     this.scene.add(grp);
     // 舊單位快取全清（換圖重建）
     for (const id in this._units){ this.scene.remove(this._units[id]); }
@@ -1261,6 +1337,7 @@ const Engine3D = {
     g.userData.observedMovement=false;
     g.userData.observedRotorMotion=false;
     this._linearize(g);
+    this._toonify(g);
     return g;
   },
 
@@ -1811,6 +1888,7 @@ const Engine3D = {
     const cp = Math.cos(cam.pitch);
     this.camera.lookAt(cam.cx + Math.cos(cam.yaw) * cp, cam.ch - Math.sin(cam.pitch), cam.cy + Math.sin(cam.yaw) * cp);
     this.renderer.render(this.scene, this.camera);
+    if (this.outlineOn !== false) this._renderOutline();   // 鉛筆速寫描邊（過慢時可設 false 關閉）
   },
 
   /* ---------- 2D HUD 疊層（畫在透明的 #game 上，投影同 Camera3D） ---------- */

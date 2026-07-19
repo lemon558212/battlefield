@@ -73,6 +73,22 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #menu .storyCh { text-align:left; }
 #menu .storyCh.locked { opacity:0.45; cursor:not-allowed; }
 #menu .briefing { line-height:1.8; font-size:14px; text-align:left; }
+/* 小隊名冊 */
+#menu .roster { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px; }
+#menu .rosterFace { width:44px; height:44px; object-fit:cover; border:2px solid #55643f;
+  border-radius:4px; background:#2a2f22; }
+/* 對話演出 */
+.dlgWrap { position:relative; width:min(92vw,560px); cursor:pointer; user-select:none; }
+.dlgFace { width:128px; height:128px; object-fit:cover; border:2px solid #6b7a4f; border-radius:6px;
+  position:relative; z-index:1; margin-bottom:-18px; margin-left:8px; background:#2a2f22;
+  box-shadow:0 4px 14px rgba(0,0,0,0.6); }
+.dlgFace.r { float:right; margin-right:8px; }
+.dlgBox { clear:both; background:rgba(20,24,15,0.94); border:1px solid #6b7a4f; padding:14px 16px 10px;
+  border-radius:6px; text-align:left; box-shadow:0 4px 18px rgba(0,0,0,0.55); }
+.dlgName { color:#f1d46a; font-weight:bold; margin-bottom:6px; }
+.dlgText { line-height:1.9; font-size:15px; color:#eee8d5; min-height:56px; }
+.dlgHint { text-align:right; color:#8a967a; font-size:12px; margin-top:6px; animation:dlgblink 1.2s infinite; }
+@keyframes dlgblink { 50% { opacity:0.35; } }
 
 #aim { position:absolute; left:50%; top:18%; transform:translateX(-50%); display:none; z-index:6;
   background:#242b1f; border:2px solid #8a7f34; padding:12px; font-size:13px; line-height:1.6; min-width:230px; }

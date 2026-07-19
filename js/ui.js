@@ -63,20 +63,51 @@ const UI = {
   },
   showBriefing(n){
     const ch = STORY[n-1];
+    const roster = Object.values(CHARACTERS).map(c =>
+      `<img class="rosterFace" src="${c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`).join("");
     const M=this.el("menu"); M.style.display="flex";
     M.innerHTML=`
       <h1 style="font-size:24px">第 ${ch.n} 章｜${ch.title}</h1>
       <div class="panel briefing"><p>${ch.brief}</p>
-        <p class="fine">地圖：${MAPS[ch.map].name}　我方：${NATIONS[ch.player].name}（${ch.side===0?"進攻":"防守"}）</p></div>
+        <p class="fine">地圖：${MAPS[ch.map].name}　我方：${NATIONS[ch.player].name}（${ch.side===0?"進攻":"防守"}）</p>
+        <div class="roster">${roster}</div>
+        <p class="fine">曙光小隊：部署時各兵種首位由具名隊員出任（附特質加成）</p></div>
       <button id="stGo" class="big">🎖 出擊</button>
       <button id="stBack2">返回章節</button>`;
-    this.el("stGo").onclick=()=>{
+    const launch=()=>{
       Game.storyChapter = n;
       const atk = ch.side===0 ? ch.player : ch.enemy;
       const def = ch.side===0 ? ch.enemy : ch.player;
       Game.startBattle(ch.map, atk, def, ch.side);
     };
+    this.el("stGo").onclick=()=>{
+      if (ch.dialog && ch.dialog.length) this.showDialog(ch.dialog, launch);
+      else launch();
+    };
     this.el("stBack2").onclick=()=>this.showStory();
+  },
+
+  /* ---------- 對話演出（演出部門）：立繪＋名牌＋逐句推進 ---------- */
+  showDialog(script, onDone){
+    let i = 0;
+    const M = this.el("menu"); M.style.display = "flex";
+    const step = () => {
+      if (i >= script.length){ onDone && onDone(); return; }
+      const d = script[i];
+      const chr = Object.values(CHARACTERS).find(c => c.name === d.who);
+      const img = d.img || (chr && chr.portrait) || "";
+      M.innerHTML = `
+        <div class="dlgWrap" id="dlgNext">
+          ${img ? `<img class="dlgFace ${d.pos==="right"?"r":""}" src="${img}" alt="">` : ""}
+          <div class="dlgBox">
+            <div class="dlgName">${d.who || ""}</div>
+            <div class="dlgText">${d.text}</div>
+            <div class="dlgHint">▼ 點擊繼續（${i+1}/${script.length}）</div>
+          </div>
+        </div>`;
+      this.el("dlgNext").onclick = () => { i++; step(); };
+    };
+    step();
   },
 
   /* ---------- 連線對戰介面 ---------- */

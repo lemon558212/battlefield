@@ -102,6 +102,7 @@ const Game = {
 
   startBattle(mapId, atkNation, defNation, playerSide){
     if (typeof Sfx!=="undefined") Sfx.bgm("battle");
+    this._charAssigned = {};                 // 劇情模式具名角色每場重新指派
     this.map = MAPS[mapId];
     this.enrichMap(this.map); this._bg = null;
     this.nations[0]=atkNation; this.nations[1]=defNation;
@@ -493,13 +494,23 @@ const Game = {
     if (CLASS_BASE[this.deployCls].big && this.units.filter(u=>u.side===this.playerSide&&CLASS_BASE[u.cls].big).length>=2){ UI.log("大型艦每隊最多 2 艘"); return; }
     if (dom==="air" && this.units.filter(u=>u.side===this.playerSide&&u.domain==="air").length>=4){ UI.log("空軍每隊最多 4 架"); return; }
     this.budgetLeft -= c;
-    this.units.push(makeUnit(this.nations[this.playerSide], this.deployCls, this.playerSide, x, y));
+    const nu = makeUnit(this.nations[this.playerSide], this.deployCls, this.playerSide, x, y);
+    this.units.push(nu);
+    if (typeof assignCharacter === "function"){
+      const chr = assignCharacter(nu);
+      if (chr) UI.log(`★${chr.name}：「${chr.line}」（${chr.trait.desc}）`);
+    }
     UI.refreshDeploy();
+  },
+
+  removeCharAssign(u){ // 部署階段移除具名單位時，允許重新指派該兵種角色
+    if (u.charName && this._charAssigned) delete this._charAssigned[u.cls];
   },
 
   removeDeployedUnit(u){
     const i=this.units.indexOf(u);
     if (i<0 || u.side!==this.playerSide) return;
+    this.removeCharAssign(u);
     this.units.splice(i,1); this.budgetLeft+=u.cost; UI.refreshDeploy();
   },
 
