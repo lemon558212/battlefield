@@ -250,6 +250,10 @@ const UI = {
       rows += Object.keys(CHARACTERS).map(k=>{
         const chr = CHARACTERS[k];
         if (!allow.includes(CLASS_BASE[k].domain)) return "";
+        const spBan = Game.storySpecial && Game.storySpecial();
+        if (spBan && spBan.type === "ban" && spBan.cls === k) return `<button class="unitBtn locked" disabled>
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">⛔ 本章停職</span></span></button>`;
         const locked = (chr.unlockCh||1) > story;
         const used = Game._charAssigned && Game._charAssigned[k];
         const c = unitCost(nat.id,k);
@@ -274,6 +278,10 @@ const UI = {
         const c = unitCost(nat.id,k), u=nat.units[k];
         const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
         const zh = CLASS_BASE[k].zh;
+        const spBan2 = story && Game.storySpecial && Game.storySpecial();
+        if (spBan2 && spBan2.type === "ban" && spBan2.cls === k) return `<button class="unitBtn locked" disabled>
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>${zh}</b><br><span class="weapon">⛔ 本章不可用</span></span></button>`;
         const vu = story && (typeof VEHICLE_UNLOCK !== "undefined") && VEHICLE_UNLOCK[k];
         if (vu && vu > story) return `<button class="unitBtn locked" disabled>
           <span class="unitArt art-${k}" aria-hidden="true"></span>

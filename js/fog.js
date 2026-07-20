@@ -14,7 +14,7 @@ const Fog = {
 
   key(cx, cy){ return cx + "," + cy; },
 
-  reset(){ this.visible.clear(); this.explored.clear(); },
+  reset(){ this.visible.clear(); this.explored.clear(); this._dirty = true; this._htsMap = null; },
 
   /* 僅供除錯／觀戰使用；正常開戰不得呼叫，否則會破壞 GDD/05 三態迷霧。 */
   exploreAll(){
@@ -28,7 +28,7 @@ const Fog = {
   /* 依當前我方單位重算可見格（GDD/05 §3）。移動每 0.1s 或回合切換時呼叫 */
   recompute(){
     if (!Game.map) return;
-    this.visible.clear();
+    this.visible.clear(); this._dirty = true;
     this._cols = Math.ceil((Game.map.w||960) / FOG_CELL);
     this._rows = Math.ceil((Game.map.h||600) / FOG_CELL);
     for (const u of Game.units){
@@ -90,22 +90,48 @@ const Fog = {
   /* 真 3D 主路徑：把世界格投影成透視四邊形，禁止沿用俯視座標整屏覆蓋。
    * 視覺規範（視覺感官部門 2026-07-19）：迷霧＝「晨霧藍灰紗」不是「黑色柏油」——
    * 低解析離屏＋平滑放大得到柔邊，濃度壓低保留地形可讀性。 */
+  /* 效能改寫（2026-07-20 dept-10，L-fog）：
+   * 1) 地形高度以「格頂點」預計算一次（地形靜態）——原版每幀每格 4 次 heightAt
+   * 2) 投影以頂點共享：(cols+1)×(rows+1) 次，原版 4×cells 次（3.7 倍差）
+   * 3) 迷霧與相機都沒變 → 直接重貼快取畫面（成本≈0）。原版恆為 40ms/幀等級 */
+  _dirty: true,
+  markDirty(){ this._dirty = true; },
   renderProjected(ctx, cam, heightAt){
     if(!this.enabled||!cam)return;
-    const W=ctx.canvas.width,H=ctx.canvas.height,K=4;          // 1/4 解析度離屏 → 放大自帶柔邊
-    if(!this._soft||this._soft.width!==W/K){ this._soft=document.createElement("canvas");
-      this._soft.width=Math.ceil(W/K); this._soft.height=Math.ceil(H/K); }
+    const W=ctx.canvas.width,H=ctx.canvas.height,K=4;
+    if(!this._soft||this._soft.width!==Math.ceil(W/K)){ this._soft=document.createElement("canvas");
+      this._soft.width=Math.ceil(W/K); this._soft.height=Math.ceil(H/K); this._camSig=null; }
+    // 相機簽名：兩個探針點的投影結果（相機任何改變都會反映）
+    const pa=cam.project(0,0,0), pb=cam.project((Game.map.w||960),(Game.map.h||600),0);
+    const sig=pa&&pb?`${pa.sx|0},${pa.sy|0},${pb.sx|0},${pb.sy|0}`:String(Math.random());
+    if(!this._dirty && sig===this._camSig){
+      ctx.save(); ctx.imageSmoothingEnabled=true; ctx.drawImage(this._soft,0,0,W,H); ctx.restore();
+      return;
+    }
+    this._dirty=false; this._camSig=sig;
+    // 頂點高度預計算（每張地圖一次）
+    const cols=this._cols, rows=this._rows;
+    if(this._htsMap!==Game.map){
+      this._htsMap=Game.map; this._hts=new Float32Array((cols+1)*(rows+1));
+      for(let vx=0;vx<=cols;vx++) for(let vy=0;vy<=rows;vy++)
+        this._hts[vx*(rows+1)+vy]=(heightAt?heightAt(vx*FOG_CELL,vy*FOG_CELL):0)+0.8;
+    }
+    // 頂點投影（共享）
+    const P=new Array((cols+1)*(rows+1));
+    for(let vx=0;vx<=cols;vx++) for(let vy=0;vy<=rows;vy++){
+      const i=vx*(rows+1)+vy;
+      P[i]=cam.project(vx*FOG_CELL,vy*FOG_CELL,this._hts[i]);
+    }
     const sc=this._soft.getContext("2d");
     sc.clearRect(0,0,this._soft.width,this._soft.height);
     const buckets=[[],[]];
-    for(let cx=0;cx<this._cols;cx++){
-      for(let cy=0;cy<this._rows;cy++){
-        const wx=cx*FOG_CELL,wy=cy*FOG_CELL,s=this.state(wx,wy);
+    for(let cx=0;cx<cols;cx++){
+      for(let cy=0;cy<rows;cy++){
+        const s=this.state(cx*FOG_CELL,cy*FOG_CELL);
         if(s===2)continue;
-        const world=[[wx,wy],[wx+FOG_CELL,wy],[wx+FOG_CELL,wy+FOG_CELL],[wx,wy+FOG_CELL]];
-        const pts=world.map(([x,y])=>cam.project(x,y,(heightAt?heightAt(x,y):0)+0.8));
-        if(pts.some(p=>!p))continue;
-        buckets[s].push(pts);
+        const p0=P[cx*(rows+1)+cy], p1=P[(cx+1)*(rows+1)+cy], p2=P[(cx+1)*(rows+1)+cy+1], p3=P[cx*(rows+1)+cy+1];
+        if(!p0||!p1||!p2||!p3)continue;
+        buckets[s].push([p0,p1,p2,p3]);
       }
     }
     for(const s of [0,1]){

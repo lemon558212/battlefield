@@ -293,7 +293,7 @@ const Game = {
     this.nations = { 0:nA, 1:nD };
     this.playerSide = myside;
     this.units = []; this.fx = []; this.turn = 1; this.over = null; this.hintIdx = 0;
-    this.budgetLeft = this.map.budget; this.deployCls = null; this.deployNamed = false; this._charAssigned = {}; this._eventsFired = {}; this._wavesDone = {}; this._silenceBroken = false;
+    this.budgetLeft = this.map.budget; this.deployCls = null; this.deployNamed = false; this._charAssigned = {}; this._eventsFired = {}; this._wavesDone = {}; this._silenceBroken = false; this._stealthBusted = false;
     this._mpReady = false; this._mpGuestUnits = null;
     Fog.reset();
     this.state = "deploy";
@@ -415,6 +415,14 @@ const Game = {
   checkSpecialRules(side){
     const sp = this.storySpecial();
     if (!sp || side !== this.playerSide) return;
+    if (sp.type === "stealth"){
+      const kills = this.units.filter(u => u.side !== this.playerSide && !u.alive).length;
+      if (kills > sp.limit && !this._stealthBusted){
+        this._stealthBusted = true;
+        const got = this.storySpawnEnemies(5, ["assault", "mg", "rifleman", "specops"]);
+        UI.log(`⚠ 行動曝光！擊殺超過 ${sp.limit}——敵軍大批增援（${got} 個單位）`);
+      }
+    }
     if (sp.type === "waves" && sp.turns.includes(this.turn)){
       this._wavesDone = this._wavesDone || {};
       if (!this._wavesDone[this.turn]){
@@ -544,6 +552,8 @@ const Game = {
     if (this.storyChapter){                                   // 名冊制（GDD/09）
       const vu = (typeof VEHICLE_UNLOCK !== "undefined") && VEHICLE_UNLOCK[this.deployCls];
       if (vu && vu > this.storyChapter){ UI.log(`該載具第 ${vu} 章解鎖`); return; }
+      const spB = this.storySpecial();
+      if (spB && spB.type === "ban" && spB.cls === this.deployCls){ UI.log("本章此兵種不可部署（劇情限制）"); return; }
       if (this.deployNamed){
         this._charAssigned = this._charAssigned || {};
         if (this._charAssigned[this.deployCls]){ UI.log("該隊員已出戰（具名角色每場僅一次）"); return; }

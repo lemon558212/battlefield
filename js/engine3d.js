@@ -33,7 +33,7 @@ const Engine3D = {
       this.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
       this.renderer.setSize(960, 600, false);
       this.renderer.shadowMap.enabled = !this._lowPower;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.shadowMap.type = THREE.PCFShadowMap;   // Soft 在內顯上貴 3~4 倍，PCF 視覺差異小
       this.renderer.outputEncoding = THREE.sRGBEncoding;
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 電影級色調映射
       this.renderer.toneMappingExposure = 1.12;
@@ -492,14 +492,15 @@ const Engine3D = {
         continue;
       }
       const onProgress = ev => { if (ev && ev.total) this._loadHint(url, ev.loaded / ev.total); };
-      loader.load(url, g => { this._loadHint(url, null); onLoaded(g); }, onProgress, onFailed);
+      const vurl = url + (typeof BUILD !== "undefined" ? (url.includes("?") ? "&" : "?") + BUILD : "");
+      loader.load(vurl, g => { this._loadHint(url, null); onLoaded(g); }, onProgress, onFailed);
     }
   },
   /* base64-in-js 通道：注入腳本→解碼→GLTFLoader.parse；成功後記住偏好（localStorage） */
   _loadViaB64(d1, keys, url, onLoaded, loader){
     this._loadHint(url, 0.05);
     const tag = document.createElement("script");
-    tag.src = d1.b64;
+    tag.src = d1.b64 + (typeof BUILD !== "undefined" ? "?" + BUILD : "");
     tag.onload = () => {
       try {
         const b64 = window.MODEL_B64 && window.MODEL_B64[d1.b64key];
@@ -516,16 +517,19 @@ const Engine3D = {
     document.head.appendChild(tag);
   },
 
-  /* 動畫交叉淡入淡出（dept-12：硬切→融合，消姿勢跳變） */
+  /* 動畫交叉淡入淡出（dept-12：硬切→融合，消姿勢跳變）
+   * 效能：淡出完成後必須 stop()，否則權重 0 的動作持續累積參與每幀取樣（卡頓元凶） */
   _xfade(mx, want, dur){
     const prev = mx.actions[mx.cur], nxt = mx.actions[want];
     if (!nxt){ return false; }
     if (prev === nxt && mx.cur === want) return true;
     nxt.reset(); nxt.paused = false;
+    const d = dur || 0.22;
     if (prev && prev !== nxt && prev.isRunning()){
-      nxt.play(); prev.crossFadeTo(nxt, dur || 0.22, false);
+      nxt.play(); prev.crossFadeTo(nxt, d, false);
+      setTimeout(() => { if (mx.actions[mx.cur] !== prev && prev.getEffectiveWeight() < 0.02) prev.stop(); }, d * 1000 + 80);
     } else {
-      nxt.fadeIn(dur || 0.22).play();
+      nxt.fadeIn(d).play();
     }
     mx.cur = want;
     return true;
@@ -813,6 +817,18 @@ const Engine3D = {
     sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.far = 3200 * S;
     sc.updateProjectionMatrix();
     sun.target.position.set(mw / 2, 0, mh / 2);
+    // 時段化光照（dept-12：太陽色溫/強度/霧色隨 sky 連動，鳴潮式大氣感）
+    const LIGHTING = {
+      day:  { sun:0xfff1d6, i:0.95, fog:0xd9e3ea, hemi:0.55 },
+      dawn: { sun:0xffc9a0, i:0.82, fog:0xdccbbe, hemi:0.48 },
+      dusk: { sun:0xff9a60, i:0.75, fog:0xcdb2a0, hemi:0.45 },
+      night:{ sun:0x9ab0d8, i:0.50, fog:0x5a687e, hemi:0.38 }
+    };
+    const Lset = LIGHTING[m.sky] || LIGHTING.day;
+    sun.color.setHex(Lset.sun); sun.intensity = Lset.i;
+    this.scene.fog.color.setHex(Lset.fog);
+    if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(Lset.fog);
+    this.scene.traverse(o => { if (o.isHemisphereLight) o.intensity = Lset.hemi; });
     this.scene.fog.near = 1150 * S; this.scene.fog.far = 3400 * S;
     this.camera.far = 6000 * S;
 
@@ -1464,6 +1480,7 @@ const Engine3D = {
         g.userData.loadedModel=true;
         g.userData.riggedModel=Object.keys(soldier.userData.characterBones||{}).length>0;
         g.userData.assetStatus=soldier.userData.assetStatus||"provisional";
+        g.userData.soldierWrap=soldier;
       }else{
         const fallback=this._soldierRig(u,{body:bodyMat,dark:darkMat,metal:metalMat,skin:new THREE.MeshLambertMaterial({color:0xd9b48a})});
         visual.add(fallback);g.userData.rig=fallback.userData.rig;g.userData.riggedModel=false;
@@ -1873,6 +1890,13 @@ const Engine3D = {
           ring.material.color.setHex(u.side === G.playerSide ? 0x5b9bff : 0xff6f5a);
           ring.scale.set(1, 1, 1);
         }
+      }
+      // 蹲伏替代姿態：專屬模型無 crouch 片段時，以前傾+下沉近似（絕對值賦值，遵守 GDD/10 鐵則）
+      const sw = g.userData.soldierWrap;
+      if (sw && this._mixers[u.id] && !this._mixers[u.id].actions.crouch){
+        const ck = u.crouched ? 1 : 0;
+        sw.rotation.x = 0.16 * ck;
+        sw.position.y = -2.0 * ck;
       }
       // 真骨架狀態：移動／蹲伏／瞄準／待機，受擊與射擊為一次性動作。
       const mx = this._mixers[u.id];
