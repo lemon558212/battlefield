@@ -20,7 +20,7 @@ const Game = {
   _steer:null, _mouseDown:false,   // 拖曳操控移動狀態
   _mpReady:false, _mpGuestUnits:null,   // 連線布署狀態
   plans:[], curPlan:null, enemyCpLeft:0, germanyTankDiscountUsed:false,
-  budgetLeft:0, deployCls:null,
+  budgetLeft:0, deployCls:null, deployNamed:false,
   keys:{}, lastTs:0, over:null, hintIdx:0, _pickCycle:null,
 
   /* ---------- 生命週期 ---------- */
@@ -111,7 +111,7 @@ const Game = {
     if (typeof Camera3D!=="undefined") Camera3D.resetView();   // 縮放/平移歸位
     Fog.reset();
     this.budgetLeft = this.map.budget;
-    this.deployCls = null;
+    this.deployCls = null; this.deployNamed = false;
     this.aiDeploy(1-playerSide);
     this.prepareLSTCargo(1-playerSide);
     this.state="deploy";
@@ -293,7 +293,7 @@ const Game = {
     this.nations = { 0:nA, 1:nD };
     this.playerSide = myside;
     this.units = []; this.fx = []; this.turn = 1; this.over = null; this.hintIdx = 0;
-    this.budgetLeft = this.map.budget; this.deployCls = null;
+    this.budgetLeft = this.map.budget; this.deployCls = null; this.deployNamed = false; this._charAssigned = {}; this._eventsFired = {};
     this._mpReady = false; this._mpGuestUnits = null;
     Fog.reset();
     this.state = "deploy";
@@ -390,6 +390,23 @@ const Game = {
     for (const u of this.units){ if(u.side===side){ u.actedCount=0; } u._iceTimer=0; }
     Fog.recompute();
     UI.refreshHud();
+    this.checkStoryEvents(side);
+  },
+
+  /* 戰中事件（GDD/09）：章節 events 於指定回合開始時觸發對白 */
+  checkStoryEvents(side){
+    if (!this.storyChapter || side !== this.playerSide) return;
+    const ch = STORY[this.storyChapter - 1];
+    if (!ch || !ch.events) return;
+    this._eventsFired = this._eventsFired || {};
+    for (let i = 0; i < ch.events.length; i++){
+      const ev = ch.events[i];
+      if (this._eventsFired[i]) continue;
+      if (ev.turn && this.turn !== ev.turn) continue;
+      this._eventsFired[i] = true;
+      UI.showDialog(ev.dialog, () => { UI.el("menu").style.display = "none"; });
+      break;
+    }
   },
 
   onOwnHalf(u){
@@ -483,6 +500,14 @@ const Game = {
       return;
     }
     if (!this.deployCls) { UI.log("先在右側選擇兵種"); return; }
+    if (this.storyChapter){                                   // 名冊制（GDD/09）
+      const vu = (typeof VEHICLE_UNLOCK !== "undefined") && VEHICLE_UNLOCK[this.deployCls];
+      if (vu && vu > this.storyChapter){ UI.log(`該載具第 ${vu} 章解鎖`); return; }
+      if (this.deployNamed){
+        this._charAssigned = this._charAssigned || {};
+        if (this._charAssigned[this.deployCls]){ UI.log("該隊員已出戰（具名角色每場僅一次）"); return; }
+      }
+    }
     if (!ptInRect(x,y,zone)) { UI.log("只能部署在我方藍框區域內"); return; }
     if (this.map.solids.some(s=>circleRectHit(x,y,14,s))) return;
     const base = CLASS_BASE[this.deployCls], dom = base.domain;
@@ -497,8 +522,8 @@ const Game = {
     const nu = makeUnit(this.nations[this.playerSide], this.deployCls, this.playerSide, x, y);
     this.units.push(nu);
     if (typeof assignCharacter === "function"){
-      const chr = assignCharacter(nu);
-      if (chr) UI.log(`★${chr.name}：「${chr.line}」（${chr.trait.desc}）`);
+      const chr = assignCharacter(nu, this.deployNamed);
+      if (chr){ UI.log(`★${chr.name}：「${chr.line}」（${chr.trait.desc}）`); this.deployNamed = false; this.deployCls = null; }
     }
     UI.refreshDeploy();
   },

@@ -78,7 +78,9 @@ const UI = {
   showBriefing(n){
     const ch = STORY[n-1];
     const roster = Object.values(CHARACTERS).map(c =>
-      `<img class="rosterFace" src="${c.fullPortrait || c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`).join("");
+      (c.unlockCh||1) <= n
+        ? `<img class="rosterFace" src="${c.fullPortrait || c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`
+        : `<span class="rosterFace rosterLocked" title="第 ${c.unlockCh} 章加入">？</span>`).join("");
     const M=this.el("menu"); M.style.display="flex";
     M.innerHTML=`
       <h1 style="font-size:24px">第 ${ch.n} 章｜${ch.title}</h1>
@@ -240,17 +242,44 @@ const UI = {
     const nat = NATIONS[Game.nations[Game.playerSide]];
     const allow = Game.mapAllow();
     const groups = { land:"🪖 陸軍", sea:"⚓ 海軍", air:"✈ 空軍" };
+    const story = Game.storyChapter;
     let rows = "";
+    if (story){
+      // 名冊制（GDD/09）：曙光小隊具名條目（唯一）＋通用兵員＋載具依章解鎖
+      rows += `<div class="grpHead">★ 曙光小隊（具名·每場一次）</div>`;
+      rows += Object.keys(CHARACTERS).map(k=>{
+        const chr = CHARACTERS[k];
+        if (!allow.includes(CLASS_BASE[k].domain)) return "";
+        const locked = (chr.unlockCh||1) > story;
+        const used = Game._charAssigned && Game._charAssigned[k];
+        const c = unitCost(nat.id,k);
+        const on = Game.deployCls===k && Game.deployNamed ? " on" : "";
+        if (locked) return `<button class="unitBtn locked" disabled>
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>？？？</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">🔒 第 ${chr.unlockCh} 章加入</span></span></button>`;
+        if (used) return `<button class="unitBtn used" disabled>
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">✔ 已出戰</span></span></button>`;
+        return `<button class="unitBtn${on}" data-cls="${k}" data-named="1">
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">${chr.trait.desc}</span></span>
+          <em>${c}點·1CP</em></button>`;
+      }).join("");
+    }
     for (const dom of ["land","sea","air"]){
       if (!allow.includes(dom)) continue;
       const keys = Object.keys(CLASS_BASE).filter(k=>CLASS_BASE[k].domain===dom);
-      rows += `<div class="grpHead">${groups[dom]}</div>`;
+      rows += `<div class="grpHead">${story ? groups[dom]+"（通用兵員）" : groups[dom]}</div>`;
       rows += keys.map(k=>{
         const c = unitCost(nat.id,k), u=nat.units[k];
         const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
-        const on = Game.deployCls===k?" on":"";
-        const chr = (typeof CHARACTERS !== "undefined") ? CHARACTERS[k] : null;
         const zh = CLASS_BASE[k].zh;
+        const vu = story && (typeof VEHICLE_UNLOCK !== "undefined") && VEHICLE_UNLOCK[k];
+        if (vu && vu > story) return `<button class="unitBtn locked" disabled>
+          <span class="unitArt art-${k}" aria-hidden="true"></span>
+          <span class="unitCopy"><b>${zh}</b><br><span class="weapon">🔒 第 ${vu} 章解鎖</span></span></button>`;
+        const on = Game.deployCls===k && !Game.deployNamed ? " on" : "";
+        const chr = (!story && typeof CHARACTERS !== "undefined") ? CHARACTERS[k] : null;
         const title = chr ? `<b>${chr.name}</b>｜${zh}` : `<b>${zh}</b>${u.label !== zh ? "｜" + u.label : ""}`;
         const sub = u.weapon + (chr && u.label !== zh ? "｜" + u.label : "");
         return `<button class="unitBtn${on}" data-cls="${k}">
@@ -269,7 +298,7 @@ const UI = {
       <button id="btnBack">返回主選單</button>
       <div id="log"></div>`;
     for (const b of this.el("side").querySelectorAll(".unitBtn"))
-      b.onclick = ()=>{ Game.deployCls=b.dataset.cls; this.refreshDeploy(); };
+      b.onclick = ()=>{ Game.deployCls=b.dataset.cls; Game.deployNamed=b.dataset.named==="1"; this.refreshDeploy(); };
     this.el("btnGo").onclick = ()=>Game.finishDeploy();
     this.el("btnBack").onclick = ()=>{ Game.state="menu"; Game.map=null; this.showMenu(); };
   },
