@@ -96,14 +96,32 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #menu .roster { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px; }
 #menu .rosterFace { width:44px; height:44px; object-fit:cover; object-position:50% 8%; border:2px solid #55643f;
   border-radius:4px; background:#2a2f22; }
-/* 對話演出 */
-.dlgWrap { position:relative; width:min(92vw,560px); cursor:pointer; user-select:none; }
-.dlgFace { width:auto; height:min(240px,32vh); object-fit:contain; border:none; border-radius:6px;
-  position:relative; z-index:1; margin-bottom:-18px; margin-left:8px; background:transparent;
-  filter:drop-shadow(0 4px 14px rgba(0,0,0,0.6)); }
-.dlgFace.r { float:right; margin-right:8px; }
-.dlgBox { clear:both; background:rgba(20,24,15,0.94); border:1px solid #6b7a4f; padding:14px 16px 10px;
-  border-radius:6px; text-align:left; box-shadow:0 4px 18px rgba(0,0,0,0.55); }
+/* 章節開場卡 */
+.chIntro { position:absolute; inset:0; background:#07090d; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px; cursor:pointer; animation:chFade 0.6s; }
+.chIntro .ch-num { font-family:"TitleSerif",serif; color:#8a96a8; font-size:20px; letter-spacing:10px;
+  animation:chSlide 1s cubic-bezier(0.2,1,0.4,1); }
+.chIntro .ch-rule { width:180px; height:1px; background:linear-gradient(90deg,transparent,#d8c56a,transparent);
+  animation:chGrow 1.2s cubic-bezier(0.2,1,0.4,1); }
+.chIntro .ch-title { font-family:"TitleSerif","Microsoft JhengHei",serif; color:#f2e3c2; font-size:38px;
+  letter-spacing:14px; text-indent:14px; text-shadow:0 0 30px rgba(216,197,106,0.3);
+  animation:chSlide 1.2s cubic-bezier(0.2,1,0.4,1); }
+@keyframes chFade { from { opacity:0; } }
+@keyframes chSlide { from { opacity:0; transform:translateY(16px); } }
+@keyframes chGrow { from { width:0; } }
+/* 對話演出：雙立繪常駐＋發言者聚光 */
+.dlgStage { position:absolute; inset:0; cursor:pointer; user-select:none;
+  background:linear-gradient(to bottom, rgba(7,9,13,0.35), rgba(7,9,13,0.72) 78%); }
+.dlgFaceL, .dlgFaceR { position:absolute; bottom:112px; height:min(52vh,340px); width:auto;
+  object-fit:contain; transition:filter 0.25s, transform 0.25s, opacity 0.25s;
+  filter:brightness(0.4) grayscale(0.4) drop-shadow(0 4px 14px rgba(0,0,0,0.6));
+  transform:scale(0.94); z-index:1; }
+.dlgFaceL { left:6%; } .dlgFaceR { right:6%; }
+.dlgFaceL.active, .dlgFaceR.active { filter:brightness(1) drop-shadow(0 4px 18px rgba(0,0,0,0.7));
+  transform:scale(1); z-index:2; }
+.dlgBox { position:absolute; left:50%; transform:translateX(-50%); bottom:16px; width:min(94%,720px);
+  background:rgba(13,17,23,0.92); border:1px solid #3c4656; border-left:3px solid #d8c56a;
+  padding:14px 18px 10px; text-align:left; box-shadow:0 4px 18px rgba(0,0,0,0.55); z-index:3; }
 .dlgName { color:#f1d46a; font-weight:bold; margin-bottom:6px; }
 .dlgCallsign { color:#9db07f; font-size:12px; font-weight:normal; margin-left:8px; letter-spacing:1px; }
 /* 任務目標橫幅（鳴潮式斜切） */
@@ -131,6 +149,9 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
   70% { opacity:1; transform:rotate(-8deg) skewX(-6deg) scale(0.92); }
   100% { transform:rotate(-8deg) skewX(-6deg) scale(1); } }
 .dlgText { line-height:1.9; font-size:15px; color:#eee8d5; min-height:56px; }
+.debrief { border-left:3px solid #d8c56a; }
+.debrief .debrief-tag { color:#d8c56a; letter-spacing:4px; font-size:12px; margin-bottom:8px; }
+.debrief p { line-height:2; font-size:14px; }
 .dlgHint { text-align:right; color:#8a967a; font-size:12px; margin-top:6px; animation:dlgblink 1.2s infinite; }
 @keyframes dlgblink { 50% { opacity:0.35; } }
 /* 戰場角色卡：選中單位大立繪（左下，不遮準心） */

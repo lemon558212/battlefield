@@ -95,8 +95,10 @@ const UI = {
       Game.startBattle(ch.map, atk, def, ch.side);
     };
     this.el("stGo").onclick=()=>{
-      if (ch.dialog && ch.dialog.length) this.showDialog(ch.dialog, launch);
-      else launch();
+      this.showChapterIntro(ch.n, ch.title, ()=>{
+        if (ch.dialog && ch.dialog.length) this.showDialog(ch.dialog, launch);
+        else launch();
+      });
     };
     this.el("stBack2").onclick=()=>this.showStory();
   },
@@ -130,26 +132,49 @@ const UI = {
   },
   hideCharCard(){ const el = document.getElementById("charCard"); if (el) el.style.display = "none"; },
 
-  /* ---------- 對話演出（演出部門）：立繪＋名牌＋逐句推進 ---------- */
-  showDialog(script, onDone){
-    let i = 0;
+  /* ---------- 章節開場卡（演出部門）：黑幕大字淡入 ---------- */
+  showChapterIntro(n, title, cb){
     const M = this.el("menu"); M.style.display = "flex";
+    M.innerHTML = `<div class="chIntro" id="chIntro">
+      <div class="ch-num">第　${n}　章</div>
+      <div class="ch-rule"></div>
+      <div class="ch-title">${title}</div></div>`;
+    let done = false;
+    const go = () => { if (!done){ done = true; cb(); } };
+    this.el("chIntro").onclick = go;
+    setTimeout(go, 2400);
+  },
+
+  /* ---------- 對話演出（演出部門）：雙立繪常駐＋發言者聚光＋打字機逐字 ---------- */
+  showDialog(script, onDone){
+    let i = 0, typing = null;
+    const M = this.el("menu"); M.style.display = "flex";
+    const faces = { left: null, right: null };
     const step = () => {
       if (i >= script.length){ onDone && onDone(); return; }
       const d = script[i];
       const chr = Object.values(CHARACTERS).find(c => c.name === d.who);
       const img = d.img || (chr && ((d.mood && chr.moods && chr.moods[d.mood]) || chr.fullPortrait || chr.portrait)) || "";
+      const side = d.pos === "right" ? "right" : "left";
+      if (img) faces[side] = img;
       const callsign = chr && chr.callsign && chr.callsign !== d.who ? `<span class="dlgCallsign">「${chr.callsign}」</span>` : "";
       M.innerHTML = `
-        <div class="dlgWrap" id="dlgNext">
-          ${img ? `<img class="dlgFace ${d.pos==="right"?"r":""}" src="${img}" alt="">` : ""}
+        <div class="dlgStage" id="dlgNext">
+          ${faces.left ? `<img class="dlgFaceL${side==="left"?" active":""}" src="${faces.left}" alt="">` : ""}
+          ${faces.right ? `<img class="dlgFaceR${side==="right"?" active":""}" src="${faces.right}" alt="">` : ""}
           <div class="dlgBox">
             <div class="dlgName">${d.who || ""}${callsign}</div>
-            <div class="dlgText">${d.text}</div>
-            <div class="dlgHint">▼ 點擊繼續（${i+1}/${script.length}）</div>
+            <div class="dlgText" id="dlgText"></div>
+            <div class="dlgHint">▼（${i+1}/${script.length}）</div>
           </div>
         </div>`;
-      this.el("dlgNext").onclick = () => { i++; step(); };
+      const t = this.el("dlgText"), full = d.text; let k = 0;
+      typing = setInterval(() => { k++; t.textContent = full.slice(0, k);
+        if (k >= full.length){ clearInterval(typing); typing = null; } }, 28);
+      this.el("dlgNext").onclick = () => {
+        if (typing){ clearInterval(typing); typing = null; t.textContent = full; }
+        else { i++; step(); }
+      };
     };
     step();
   },
@@ -356,7 +381,7 @@ const UI = {
     let extra = "";
     if (ch && win){
       StoryProgress.unlock(chN + 1);
-      extra = `<div class="panel briefing"><p>${ch.debrief}</p></div>` +
+      extra = `<div class="panel briefing debrief"><div class="debrief-tag">◤ 戰後報告 ◢</div><p>${ch.debrief}</p></div>` +
         (chN < STORY.length ? `<button id="btnNextCh" class="big">▶ 下一章：${STORY[chN].title}</button>` : "");
     } else if (ch && !win){
       extra = `<button id="btnRetry" class="big">↻ 重打本章</button>`;

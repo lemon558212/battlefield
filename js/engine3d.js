@@ -500,6 +500,21 @@ const Engine3D = {
     document.head.appendChild(tag);
   },
 
+  /* 動畫交叉淡入淡出（dept-12：硬切→融合，消姿勢跳變） */
+  _xfade(mx, want, dur){
+    const prev = mx.actions[mx.cur], nxt = mx.actions[want];
+    if (!nxt){ return false; }
+    if (prev === nxt && mx.cur === want) return true;
+    nxt.reset(); nxt.paused = false;
+    if (prev && prev !== nxt && prev.isRunning()){
+      nxt.play(); prev.crossFadeTo(nxt, dur || 0.22, false);
+    } else {
+      nxt.fadeIn(dur || 0.22).play();
+    }
+    mx.cur = want;
+    return true;
+  },
+
   /* 複製模型（骨架安全 clone）＋國家染色＋動畫 mixer（idle/walk） */
   _mixers: {},
   _cloneModel(key, u, preview){
@@ -542,7 +557,7 @@ const Engine3D = {
         const entry={mixer,actions,cur:"idle",modelKey:key,staticIdle};this._mixers[u.id]=entry;
         mixer.addEventListener("finished",e=>{
           if(entry.cur==="death"||!([actions.hit,actions.shoot].includes(e.action)))return;
-          e.action.stop();actions.idle.reset().play();actions.idle.paused=staticIdle;entry.cur="idle";
+          Engine3D._xfade(entry,"idle",0.18);if(staticIdle)actions.idle.paused=true;
         });
       }
     }
@@ -1699,7 +1714,7 @@ const Engine3D = {
         if(g&&mx&&mx.actions.death){
           if(!g.userData.deathStarted){
             if(mx.actions[mx.cur])mx.actions[mx.cur].stop();
-            mx.actions.death.reset().play();mx.cur="death";g.userData.deathStarted=true;
+            this._xfade(mx,"death",0.25);g.userData.deathStarted=true;
             g.userData.actionHistory.push({name:"death",at:Math.round(now)});
             g.userData.deathUntil=now+Math.max(650,(mx.actions.death.getClip().duration||0.8)*1000);
           }
@@ -1846,21 +1861,19 @@ const Engine3D = {
       // 真骨架狀態：移動／蹲伏／瞄準／待機，受擊與射擊為一次性動作。
       const mx = this._mixers[u.id];
       if(tookHit&&mx&&mx.actions.hit&&mx.cur!=="shoot"){
-        if(mx.actions[mx.cur])mx.actions[mx.cur].stop();mx.actions.hit.reset().play();mx.cur="hit";
+        this._xfade(mx,"hit",0.12);
         g.userData.actionHistory.push({name:"hit",at:Math.round(now)});
       }
       // 勝利姿勢：戰鬥結束時勝方步兵揮手歡呼（有 wave 片段才播）
       if (G.over && mx && mx.actions.wave && u.side === G.over.winner && mx.cur !== "wave" && mx.cur !== "death"){
-        if (mx.actions[mx.cur]) mx.actions[mx.cur].stop();
-        mx.actions.wave.reset().play(); mx.cur = "wave";
+        this._xfade(mx,"wave",0.3);
       }
       if (mx && mx.actions.walk && mx.cur !== "shoot" && mx.cur !== "hit" && mx.cur!=="death" && mx.cur!=="wave"){
         const locomotion=mx.actions.run&&(g.userData.motion||0)>.72?"run":"walk";
         const want=activeMove?locomotion:u.crouched&&mx.actions.crouch?"crouch":
           (G.sel===u&&G.aimTarget&&mx.actions.aim?"aim":"idle");
         if (want !== mx.cur && mx.actions[want]){
-          if(mx.actions[mx.cur])mx.actions[mx.cur].stop();
-          mx.actions[want].reset().play();mx.actions[want].paused=want==="idle"&&mx.staticIdle;mx.cur=want;
+          this._xfade(mx, want, 0.22);mx.actions[want].paused=want==="idle"&&mx.staticIdle;
           g.userData.actionHistory.push({name:want,at:Math.round(now)});
           if(g.userData.actionHistory.length>24)g.userData.actionHistory.shift();
         }
@@ -1985,9 +1998,9 @@ const Engine3D = {
         if (!clip) break;
         mx.actions.shoot = mx.mixer.clipAction(clip);
         mx.actions.shoot.setLoop(THREE.LoopOnce); mx.actions.shoot.clampWhenFinished = false;
-        mx.mixer.addEventListener("finished", () => { if (mx.cur !== "shoot") return; mx.actions.shoot.stop(); mx.actions.idle.play(); mx.cur = "idle"; });
+        mx.mixer.addEventListener("finished", () => { if (mx.cur !== "shoot") return; Engine3D._xfade(mx, "idle", 0.18); });
       }
-      mx.actions[mx.cur].stop(); mx.actions.shoot.reset().play(); mx.cur = "shoot";
+      this._xfade(mx, "shoot", 0.1);
       g.userData.observedShoot=true;
       g.userData.actionHistory.push({name:"shoot",at:Math.round(performance.now())});
       break;
