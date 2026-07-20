@@ -12,7 +12,7 @@ const MODEL_ASSETS = Object.freeze({
   assault:  {url:"assets/models/chars/assault.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Punk CC0", status:"approved", lazy:true},
   mg:       {url:"assets/models/chars/mg.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Farmer CC0", status:"approved", lazy:true},
   mortar:   {url:"assets/models/chars/mortar.glb",   h:19, rotY:Math.PI/2, source:"Quaternius UMM Suit CC0", status:"approved", lazy:true},
-  sniper:   {url:"assets/models/chars/sniper-tripo3.glb", h:19, rotY:Math.PI/2, source:"Tripo image-to-3D（韓沐霜立繪生成，20k面·noToon）", status:"provisional", lazy:true, selfGear:true},
+  sniper:   {url:"assets/models/chars/sniper-tripo3.glb", alt:"assets/models/chars/hero-sniper.bin", b64:"js/model-data-sniper.js", b64key:"sniper", h:19, rotY:Math.PI/2, source:"Tripo image-to-3D（韓沐霜立繪生成，20k面·noToon）", status:"provisional", lazy:true, selfGear:true},
   at:       {url:"assets/models/chars/at.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Casual_2 CC0", status:"approved", lazy:true},
   engineer: {url:"assets/models/chars/engineer.glb", h:19, rotY:Math.PI/2, source:"Quaternius UMM Worker CC0", status:"approved", lazy:true},
   specops:  {url:"assets/models/chars/specops.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Swat CC0", status:"approved", lazy:true},

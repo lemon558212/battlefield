@@ -374,7 +374,7 @@ const Engine3D = {
     for (const key in MODEL_ASSETS){
       const a=MODEL_ASSETS[key];
       if(!a.url){this._modelState[key]="missing";continue;}
-      defs[key]={url:a.url,alt:a.alt,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy,selfGear:!!a.selfGear};
+      defs[key]={url:a.url,alt:a.alt,b64:a.b64,b64key:a.b64key,h:a.h,len:a.len,rotY:a.rotY,source:a.source,status:a.status,lazy:!!a.lazy,selfGear:!!a.selfGear};
     }
     const byUrl = {};                                     // 同 URL 只下載/解析一次
     for (const key in defs){ if (!defs[key].lazy) (byUrl[defs[key].url] = byUrl[defs[key].url] || []).push(key); }
@@ -446,17 +446,34 @@ const Engine3D = {
         this._loadHint(url, null);
         const n = this._loadRetries[url] || 0;
         if (n < 2){                                                    // 自動重試 2 次（網路抖動）
-          this._loadRetries[url] = n + 1;
-          for (const key of keys) delete this._modelState[key];
+          this._loadRetries[url] = n + 1;                              // 注意：重試期間維持 loading 狀態，防 _ensureModel 併發開新鏈
           setTimeout(() => { const again = {}; again[url] = keys; this._loadGroups(again); }, 1200 * (n + 1));
           return;
         }
         const altUrl = defs[keys[0]] && defs[keys[0]].alt;             // 換備援副檔名再試（防毒/過濾器攔 .glb 對策）
         if (altUrl && altUrl !== url && !this._loadRetries[altUrl]){
           this._loadRetries[altUrl] = 1;
-          for (const key of keys) delete this._modelState[key];
           const again = {}; again[altUrl] = keys;
           setTimeout(() => this._loadGroups(again), 500);
+          return;
+        }
+        // 最終備援：base64 封裝在 .js 內（腳本載入不會被下載過濾器攔截）
+        const d1 = defs[keys[0]];
+        if (d1 && d1.b64 && !this._b64Tried){
+          this._b64Tried = true;
+          const tag = document.createElement("script");
+          tag.src = d1.b64;
+          tag.onload = () => {
+            try {
+              const b64 = window.MODEL_B64 && window.MODEL_B64[d1.b64key];
+              if (!b64) throw new Error("b64 資料缺失");
+              const bin = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
+              loader.parse(bin, "", g => { this._loadHint(url, null); onLoaded(g); },
+                e2 => { this._loadError(d1.b64, e2); for (const key of keys) this._modelState[key] = "failed"; });
+            } catch (e3){ this._loadError(d1.b64, e3); for (const key of keys) this._modelState[key] = "failed"; }
+          };
+          tag.onerror = () => { this._loadError(d1.b64, new Error("備援腳本載入失敗")); for (const key of keys) this._modelState[key] = "failed"; };
+          document.head.appendChild(tag);
           return;
         }
         this._loadError(url, error);                                   // 最終失敗：畫面明示原因
