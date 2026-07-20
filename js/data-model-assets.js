@@ -8,9 +8,9 @@
 /* 步兵九兵種＝九個不同角色模型（Quaternius Ultimate Modular Men, CC0，各含 24 動畫）。
  * lazy:true＝按需載入（該兵種首次出現才下載，避免一次載入 28MB）。 */
 const MODEL_ASSETS = Object.freeze({
-  rifleman: {url:"assets/models/chars/rifleman.glb", h:19, rotY:Math.PI/2, source:"Quaternius UMM Adventurer CC0", status:"approved", lazy:true},
+  rifleman: {url:"assets/models/chars/rifleman-tripo.glb", alt:"assets/models/chars/hero-rifleman.bin", b64:"js/model-data-rifleman.js", b64key:"rifleman", h:19, rotY:0, source:"Tripo image-to-3D（丁小滿立繪生成）", status:"provisional", lazy:true, selfGear:true},
   assault:  {url:"assets/models/chars/assault.glb",  h:19, rotY:Math.PI/2, source:"Quaternius UMM Punk CC0", status:"approved", lazy:true},
-  mg:       {url:"assets/models/chars/mg.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Farmer CC0", status:"approved", lazy:true},
+  mg:       {url:"assets/models/chars/mg-tripo.glb", alt:"assets/models/chars/hero-mg.bin", b64:"js/model-data-mg.js", b64key:"mg", h:19, rotY:0, source:"Tripo image-to-3D（雷諾立繪生成）", status:"provisional", lazy:true, selfGear:true},
   mortar:   {url:"assets/models/chars/mortar.glb",   h:19, rotY:Math.PI/2, source:"Quaternius UMM Suit CC0", status:"approved", lazy:true},
   sniper:   {url:"assets/models/chars/sniper-tripo3.glb", alt:"assets/models/chars/hero-sniper.bin", b64:"js/model-data-sniper.js", b64key:"sniper", h:19, rotY:0, source:"Tripo image-to-3D（韓沐霜立繪生成，20k面·noToon）", status:"provisional", lazy:true, selfGear:true},
   at:       {url:"assets/models/chars/at.glb",       h:19, rotY:Math.PI/2, source:"Quaternius UMM Casual_2 CC0", status:"approved", lazy:true},
