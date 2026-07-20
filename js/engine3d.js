@@ -461,28 +461,45 @@ const Engine3D = {
         const d1 = defs[keys[0]];
         if (d1 && d1.b64 && !this._b64Tried){
           this._b64Tried = true;
-          const tag = document.createElement("script");
-          tag.src = d1.b64;
-          tag.onload = () => {
-            try {
-              const b64 = window.MODEL_B64 && window.MODEL_B64[d1.b64key];
-              if (!b64) throw new Error("b64 資料缺失");
-              const bin = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
-              loader.parse(bin, "", g => { this._loadHint(url, null); onLoaded(g); },
-                e2 => { this._loadError(d1.b64, e2); for (const key of keys) this._modelState[key] = "failed"; });
-            } catch (e3){ this._loadError(d1.b64, e3); for (const key of keys) this._modelState[key] = "failed"; }
-          };
-          tag.onerror = () => { this._loadError(d1.b64, new Error("備援腳本載入失敗")); for (const key of keys) this._modelState[key] = "failed"; };
-          document.head.appendChild(tag);
+          this._loadViaB64(d1, keys, url, onLoaded, loader);
           return;
         }
         this._loadError(url, error);                                   // 最終失敗：畫面明示原因
         for (const key of keys) this._modelState[key] = "failed";      // 走幾何 fallback
       };
+      const d0 = defs[keys[0]];
+      // 此環境曾靠 b64 成功（防毒攔二進位下載）→ 直達 b64，不再浪費重試時間
+      let preferB64 = false;
+      try { preferB64 = localStorage.getItem("bf_prefer_b64") === "1"; } catch (e) {}
+      if (preferB64 && d0 && d0.b64 && url === d0.url){
+        this._loadViaB64(d0, keys, url, onLoaded, loader);
+        continue;
+      }
       const onProgress = ev => { if (ev && ev.total) this._loadHint(url, ev.loaded / ev.total); };
       loader.load(url, g => { this._loadHint(url, null); onLoaded(g); }, onProgress, onFailed);
     }
   },
+  /* base64-in-js 通道：注入腳本→解碼→GLTFLoader.parse；成功後記住偏好（localStorage） */
+  _loadViaB64(d1, keys, url, onLoaded, loader){
+    this._loadHint(url, 0.05);
+    const tag = document.createElement("script");
+    tag.src = d1.b64;
+    tag.onload = () => {
+      try {
+        const b64 = window.MODEL_B64 && window.MODEL_B64[d1.b64key];
+        if (!b64) throw new Error("b64 資料缺失");
+        const bin = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
+        loader.parse(bin, "", g => {
+          this._loadHint(url, null);
+          try { localStorage.setItem("bf_prefer_b64", "1"); } catch (e) {}
+          onLoaded(g);
+        }, e2 => { this._loadHint(url, null); this._loadError(d1.b64, e2); for (const key of keys) this._modelState[key] = "failed"; });
+      } catch (e3){ this._loadHint(url, null); this._loadError(d1.b64, e3); for (const key of keys) this._modelState[key] = "failed"; }
+    };
+    tag.onerror = () => { this._loadHint(url, null); this._loadError(d1.b64, new Error("備援腳本載入失敗")); for (const key of keys) this._modelState[key] = "failed"; };
+    document.head.appendChild(tag);
+  },
+
   /* 複製模型（骨架安全 clone）＋國家染色＋動畫 mixer（idle/walk） */
   _mixers: {},
   _cloneModel(key, u, preview){
