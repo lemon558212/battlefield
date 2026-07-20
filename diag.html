@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>曙光之戰 — 載入診斷</title>
+<style>
+body { background:#10151d; color:#e8e6d8; font-family:"Microsoft JhengHei",monospace; padding:20px; line-height:2; }
+h1 { color:#f1d46a; font-size:20px; }
+.ok { color:#7ae08a; } .bad { color:#ff8a7a; } .warn { color:#f1d46a; }
+#out div { border-bottom:1px solid #2b3442; padding:4px 0; font-size:14px; }
+</style>
+</head>
+<body>
+<h1>曙光之戰 — 模型載入診斷（截圖整頁回報）</h1>
+<div id="out"></div>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/GLTFLoader.js"></script>
+<script>
+const out = document.getElementById("out");
+const row = (label, cls, msg) => { const d=document.createElement("div"); d.innerHTML=`${label}：<span class="${cls}">${msg}</span>`; out.appendChild(d); };
+row("診斷版本", "warn", "20260720c");
+row("瀏覽器", "warn", navigator.userAgent);
+row("THREE", typeof THREE!=="undefined"?"ok":"bad", typeof THREE!=="undefined"?("r"+THREE.REVISION+"（vendor js 可載入）"):"three.min.js 載入失敗");
+
+async function tryFetch(label, url){
+  try{
+    const t0=performance.now();
+    const r=await fetch(url+"?d="+Date.now());
+    const b=await r.arrayBuffer();
+    const ms=Math.round(performance.now()-t0);
+    row(label, r.ok?"ok":"bad", `HTTP ${r.status}，${b.byteLength.toLocaleString()} bytes，${ms}ms`);
+    return r.ok?b:null;
+  }catch(e){ row(label, "bad", "❌ "+(e.message||e)); return null; }
+}
+function tryScript(label, src){
+  return new Promise(res=>{
+    const s=document.createElement("script"); s.src=src+"?d="+Date.now();
+    const t0=performance.now();
+    s.onload=()=>{ const ok=window.MODEL_B64&&window.MODEL_B64.sniper;
+      row(label, ok?"ok":"bad", ok?`載入成功，b64 長度 ${window.MODEL_B64.sniper.length.toLocaleString()}，${Math.round(performance.now()-t0)}ms`:"腳本載入但資料缺失"); res(!!ok); };
+    s.onerror=()=>{ row(label, "bad", "❌ 腳本載入被拒（onerror）"); res(false); };
+    document.head.appendChild(s);
+  });
+}
+function tryParse(label, buf){
+  return new Promise(res=>{
+    try{
+      new THREE.GLTFLoader().parse(buf, "", g=>{
+        let tris=0; g.scene.traverse(o=>{ if(o.isMesh) tris+=o.geometry.index?o.geometry.index.count/3:o.geometry.attributes.position.count/3; });
+        row(label, "ok", `解析成功：${Math.round(tris).toLocaleString()} 三角形，${g.animations.length} 動畫`); res(true);
+      }, e=>{ row(label, "bad", "❌ 解析失敗 "+(e.message||e)); res(false); });
+    }catch(e){ row(label, "bad", "❌ "+(e.message||e)); res(false); }
+  });
+}
+(async ()=>{
+  const glb = await tryFetch("① 直接下載 .glb", "assets/models/chars/sniper-tripo3.glb");
+  const bin = await tryFetch("② 備援下載 .bin", "assets/models/chars/hero-sniper.bin");
+  const b64ok = await tryScript("③ base64 腳本通道", "js/model-data-sniper.js");
+  let buf = glb || bin;
+  if (!buf && b64ok){
+    try{ buf = Uint8Array.from(atob(window.MODEL_B64.sniper), c=>c.charCodeAt(0)).buffer;
+      row("④ base64 解碼", "ok", buf.byteLength.toLocaleString()+" bytes"); }
+    catch(e){ row("④ base64 解碼", "bad", "❌ "+(e.message||e)); }
+  }
+  if (buf) await tryParse("⑤ GLTF 解析", buf);
+  else row("⑤ GLTF 解析", "bad", "無可用資料來源");
+  row("結論", buf?"ok":"bad", buf?"至少一條通道可用——遊戲內應能載入模型":"所有通道被封鎖——請截圖本頁回報");
+})();
+</script>
+</body>
+</html>

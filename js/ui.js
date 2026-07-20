@@ -20,7 +20,7 @@ const UI = {
         <button id="btnStory" class="big">劇　情</button>
         <button id="btnVersus" class="big">對　戰</button>
       </div>
-      <p class="fine">Music: Kevin MacLeod (incompetech.com) CC-BY 4.0</p>`;
+      <p class="fine">Music: Kevin MacLeod (incompetech.com) CC-BY 4.0｜${typeof BUILD!=="undefined"?BUILD:"?"}</p>`;
     this.el("menu").style.display="flex";
     this.el("btnStory").onclick = ()=>this.showStory();
     this.el("btnVersus").onclick = ()=>this.showVersus();
