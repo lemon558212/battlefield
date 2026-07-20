@@ -139,6 +139,7 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #missionBanner.out { transition:opacity 0.8s, transform 0.8s; opacity:0; transform:translateX(-50%) skewX(-8deg) translateY(-14px); }
 #missionBanner .mb-title { color:#fff; font-size:20px; font-weight:bold; letter-spacing:4px; transform:skewX(8deg); }
 #missionBanner .mb-goal { color:#f1d46a; font-size:13px; margin-top:4px; letter-spacing:2px; transform:skewX(8deg); }
+#missionBanner .mb-special { color:#ff9a7a; }
 @keyframes mbIn { from { opacity:0; transform:translateX(-50%) skewX(-8deg) scaleX(1.6); } }
 /* 模型載入提示 */
 #modelLoadHint { position:absolute; right:10px; top:10px; z-index:8; display:none;

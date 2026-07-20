@@ -293,7 +293,7 @@ const Game = {
     this.nations = { 0:nA, 1:nD };
     this.playerSide = myside;
     this.units = []; this.fx = []; this.turn = 1; this.over = null; this.hintIdx = 0;
-    this.budgetLeft = this.map.budget; this.deployCls = null; this.deployNamed = false; this._charAssigned = {}; this._eventsFired = {};
+    this.budgetLeft = this.map.budget; this.deployCls = null; this.deployNamed = false; this._charAssigned = {}; this._eventsFired = {}; this._wavesDone = {}; this._silenceBroken = false;
     this._mpReady = false; this._mpGuestUnits = null;
     Fog.reset();
     this.state = "deploy";
@@ -390,7 +390,48 @@ const Game = {
     for (const u of this.units){ if(u.side===side){ u.actedCount=0; } u._iceTimer=0; }
     Fog.recompute();
     UI.refreshHud();
+    this.checkSpecialRules(side);
     this.checkStoryEvents(side);
+  },
+
+  /* 章節特殊規則（GDD/09）：增援波次／靜默滲透 */
+  storySpecial(){ return this.storyChapter && STORY[this.storyChapter-1].special || null; },
+  storySpawnEnemies(n, classes){
+    const es = 1 - this.playerSide, zone = this.map.deploy[es];
+    let added = 0, tries = 0;
+    while (added < n && tries < 300){
+      tries++;
+      const x = zone.x + Math.random() * zone.w, y = zone.y + Math.random() * zone.h;
+      const cls = classes[added % classes.length], base = CLASS_BASE[cls];
+      const probe = { cls, domain: base.domain, mobility: base.mobility || base.domain };
+      if (this.map.solids.some(s2 => circleRectHit(x, y, 14, s2))) continue;
+      if (!this.canOccupyTerrain(probe, x, y)) continue;
+      this.units.push(makeUnit(this.nations[es], cls, es, x, y));
+      added++;
+    }
+    if (added){ Fog.recompute(); UI.refreshHud(); }
+    return added;
+  },
+  checkSpecialRules(side){
+    const sp = this.storySpecial();
+    if (!sp || side !== this.playerSide) return;
+    if (sp.type === "waves" && sp.turns.includes(this.turn)){
+      this._wavesDone = this._wavesDone || {};
+      if (!this._wavesDone[this.turn]){
+        this._wavesDone[this.turn] = true;
+        const got = this.storySpawnEnemies(4, ["tank", "assault", "mg", "rifleman"]);
+        UI.log(`⚠ 敵軍增援抵達！（第 ${this.turn} 回合波次：${got} 個單位）`);
+        if (typeof Sfx !== "undefined") Sfx.play("boom");
+      }
+    }
+  },
+  onPlayerFired(){
+    const sp = this.storySpecial();
+    if (sp && sp.type === "silence" && this.turn <= sp.turns && !this._silenceBroken){
+      this._silenceBroken = true;
+      const got = this.storySpawnEnemies(3, ["assault", "mg", "rifleman"]);
+      UI.log(`⚠ 靜默被打破！港區警報大作——敵軍增援 ${got} 個單位`);
+    }
   },
 
   /* 戰中事件（GDD/09）：章節 events 於指定回合開始時觸發對白 */
@@ -709,6 +750,7 @@ const Game = {
     const t = this.aimTarget;
     if (this.sel && this.sel.charName && typeof Sfx !== "undefined" && Math.random() < 0.5)
       Sfx.voice(this.sel.cls, "atk");                       // 具名角色開火戰吼（節流在 Sfx.voice）
+    this.onPlayerFired();                                   // 章節特殊規則：靜默滲透檢查
     const ev = Combat.fire(this.map, this.sel, t, part);
     this.pushFx(ev);
     this.selFired = true;

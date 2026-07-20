@@ -310,7 +310,8 @@ const UI = {
     const goal = atk ? "殲滅敵軍部隊，或佔領敵方主堡" : "堅守 30 回合，或殲滅來犯敵軍";
     const chN = Game.storyChapter, title = chN ? `第 ${chN} 章｜${STORY[chN-1].title}` : (Game.map ? Game.map.name : "遭遇戰");
     const b = document.createElement("div"); b.id = "missionBanner";
-    b.innerHTML = `<div class="mb-title">${title}</div><div class="mb-goal">◤ 任務目標：${goal} ◢</div>`;
+    const sp = (typeof Game.storySpecial === "function") && Game.storySpecial();
+    b.innerHTML = `<div class="mb-title">${title}</div><div class="mb-goal">◤ 任務目標：${goal} ◢</div>${sp ? `<div class="mb-goal mb-special">⚠ ${sp.desc}</div>` : ""}`;
     document.getElementById("stage").appendChild(b);
     setTimeout(()=>{ b.classList.add("out"); }, 3400);
     setTimeout(()=>{ b.remove(); }, 4300);

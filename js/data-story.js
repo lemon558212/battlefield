@@ -151,6 +151,7 @@ const STORY = [
     ],
     debrief:"船團靠港。聲納兵摘下耳機時手還在抖。韓沐霜在甲板上說：「海上的仗沒有掩體，只有先看見。」" },
   { n:10, title:"霧港疑雲",   map:"harbor",   player:"uk",      enemy:"russia",  side:0,
+    special:{ type:"silence", turns:5, desc:"靜默滲透：前 5 回合不得開火，違者引來敵軍增援" },
     brief:"夜霧籠罩軍港。這是一場不能開大燈的仗：前段靜默滲透，查獲走私貨櫃、揪出把行軍路線賣給灰幕的內鬼；後段強攻奪港。",
     dialog:[
       { who:"韓沐霜", pos:"right", text:"夜霧籠罩軍港。前段靜默滲透，後段強攻奪港——這是一場不能開大燈的仗。" },
@@ -175,6 +176,7 @@ const STORY = [
     ],
     debrief:"峰頂觀察哨換了主人。從這裡能看見灰幕腹地：燈火通明的離島兵工廠，晝夜不停。" },
   { n:12, title:"鋼鐵洪流",   map:"plain",    player:"ukraine", enemy:"russia",  side:1,
+    special:{ type:"waves", turns:[8,16], desc:"敵軍將於第 8、16 回合發起增援波次——鞏固防線" },
     brief:"灰幕傾巢反撲：裝甲集群將在三十回合內三波衝擊你的防線。鐵絲網、反戰車壕、警戒射擊網——把平原變成他們的墓園。撐過去。",
     dialog:[
       { who:"韓沐霜", pos:"right", text:"灰幕傾巢反撲。裝甲集群，三波衝擊，三十回合。這是他們的全部家底。" },

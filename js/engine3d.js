@@ -52,6 +52,22 @@ const Engine3D = {
       this._sun = sun;
       this.scene.add(sun); this.scene.add(sun.target);
 
+      // 環境光照（IBL）：程序化天空球 → PMREM。PBR 材質（Tripo 角色）沒有它會又平又悶。
+      try {
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        const envScene = new THREE.Scene();
+        const cv = document.createElement("canvas"); cv.width = 2; cv.height = 64;
+        const g = cv.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 64);
+        gr.addColorStop(0, "#9ec6e6"); gr.addColorStop(0.6, "#e8ddc2"); gr.addColorStop(1, "#6d6a58");
+        g.fillStyle = gr; g.fillRect(0, 0, 2, 64);
+        const grad = new THREE.CanvasTexture(cv);
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(10, 16, 12),
+          new THREE.MeshBasicMaterial({ map: grad, side: THREE.BackSide }));
+        envScene.add(dome);
+        this.scene.environment = pmrem.fromScene(envScene, 0.08).texture;
+        pmrem.dispose();
+      } catch (e) { /* IBL 失敗不影響遊戲 */ }
+
       this.ok = true;
       this.loadArtSheets();
       this.loadModels();
