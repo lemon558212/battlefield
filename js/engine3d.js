@@ -491,9 +491,11 @@ const Engine3D = {
           return;
         }
         // 最終備援：base64 封裝在 .js 內（腳本載入不會被下載過濾器攔截）
+        // 2026-07-21 修正：原本 _b64Tried 全域單次閘門＝第二種模型永遠沒得備援 → 改 per-url
         const d1 = defs[keys[0]];
-        if (d1 && d1.b64 && !this._b64Tried){
-          this._b64Tried = true;
+        this._b64TriedUrl = this._b64TriedUrl || {};
+        if (d1 && d1.b64 && !this._b64TriedUrl[url]){
+          this._b64TriedUrl[url] = true;
           this._loadViaB64(d1, keys, url, onLoaded, loader);
           return;
         }

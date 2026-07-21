@@ -7,6 +7,47 @@
 const UI = {
   el(id){ return document.getElementById(id); },
 
+  /* 立繪去背（2026-07-21 使用者裁定：對話立繪不得帶白底）——
+   * 從四邊界洪水填充清除近底色像素（保臉部亮色：只清與邊界連通的區域），結果快取。 */
+  _matteCache: {},
+  matte(src, apply){
+    if (!src) return;
+    const c0 = this._matteCache[src];
+    if (c0){ if (c0 !== "pending") apply(c0); else this._matteQ[src].push(apply); return; }
+    this._matteCache[src] = "pending";
+    this._matteQ = this._matteQ || {}; this._matteQ[src] = [apply];
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const w = im.width, h = im.height, cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext("2d"); cx.drawImage(im, 0, 0);
+        const d = cx.getImageData(0, 0, w, h), px = d.data;
+        const corners = [[0,0],[w-1,0],[0,h-1],[w-1,h-1]].map(([x,y])=>{const i=(y*w+x)*4;return [px[i],px[i+1],px[i+2]];});
+        const near = (i) => corners.some(c => Math.abs(px[i]-c[0])+Math.abs(px[i+1]-c[1])+Math.abs(px[i+2]-c[2]) < 110);
+        const seen = new Uint8Array(w*h), q = [];
+        for (let x=0;x<w;x++){ q.push(x, x+(h-1)*w); }
+        for (let y=0;y<h;y++){ q.push(y*w, y*w+w-1); }
+        while (q.length){
+          const p = q.pop();
+          if (seen[p]) continue; seen[p] = 1;
+          const i = p*4;
+          if (!near(i)) continue;
+          px[i+3] = 0;
+          const x = p % w, y = (p / w) | 0;
+          if (x>0) q.push(p-1); if (x<w-1) q.push(p+1);
+          if (y>0) q.push(p-w); if (y<h-1) q.push(p+w);
+        }
+        cx.putImageData(d, 0, 0);
+        const url = cv.toDataURL("image/png");
+        this._matteCache[src] = url;
+        for (const f of this._matteQ[src]) f(url);
+      } catch(e){ this._matteCache[src] = src; for (const f of this._matteQ[src]) f(src); }
+    };
+    im.onerror = () => { this._matteCache[src] = src; for (const f of this._matteQ[src]) f(src); };
+    im.src = src;
+  },
+
   /* ---------- 主選單 ---------- */
   showMenu(){
     this.hideAll();
@@ -130,12 +171,13 @@ const UI = {
       Sfx.voice(u.cls, "sel");
     }
     el.innerHTML = `
-      <img src="${img}" alt="" class="${vart ? "veh" : ""}">
+      <img data-matte="${img}" alt="" class="${vart ? "veh" : ""}">
       <div class="cc-info">
         <div class="cc-name">${named ? "★" + u.charName : u.label}</div>
         ${named && chr ? `<div class="cc-trait">${chr.trait.desc}</div>` : ""}
         <div class="cc-hp">HP ${Math.max(0, Math.round(u.hp))}/${u.maxhp}</div>
       </div>`;
+    el.querySelectorAll("img[data-matte]").forEach(el2 => this.matte(el2.dataset.matte, url => { el2.src = url; }));
     el.style.display = "flex";
   },
   hideCharCard(){ const el = document.getElementById("charCard"); if (el) el.style.display = "none"; },
@@ -168,14 +210,15 @@ const UI = {
       const callsign = chr && chr.callsign && chr.callsign !== d.who ? `<span class="dlgCallsign">「${chr.callsign}」</span>` : "";
       M.innerHTML = `
         <div class="dlgStage" id="dlgNext">
-          ${faces.left ? `<img class="dlgFaceL${side==="left"?" active":""}" src="${faces.left}" alt="">` : ""}
-          ${faces.right ? `<img class="dlgFaceR${side==="right"?" active":""}" src="${faces.right}" alt="">` : ""}
+          ${faces.left ? `<img class="dlgFaceL${side==="left"?" active":""}" data-matte="${faces.left}" alt="">` : ""}
+          ${faces.right ? `<img class="dlgFaceR${side==="right"?" active":""}" data-matte="${faces.right}" alt="">` : ""}
           <div class="dlgBox">
             <div class="dlgName">${d.who || ""}${callsign}</div>
             <div class="dlgText" id="dlgText"></div>
             <div class="dlgHint">▼（${i+1}/${script.length}）</div>
           </div>
         </div>`;
+      M.querySelectorAll("img[data-matte]").forEach(el2 => this.matte(el2.dataset.matte, url => { el2.src = url; }));
       const t = this.el("dlgText"), full = d.text; let k = 0;
       typing = setInterval(() => { k++; t.textContent = full.slice(0, k);
         if (k >= full.length){ clearInterval(typing); typing = null; } }, 28);
@@ -344,6 +387,10 @@ const UI = {
 
   showBattle(){
     this.hideAll();
+    // 戰鬥 HUD 同樣以覆層融入戰場右側（全視窗化後畫面外已無擺放空間）
+    const side=this.el("side"), stage=document.getElementById("stage");
+    if (stage && side.parentElement !== stage) stage.appendChild(side);
+    side.classList.add("dpOverlay","battleHud");
     this.el("side").style.display="block";
     this.showMissionBanner();
     if (typeof Sfx!=="undefined" && Game.map) Sfx.ambient(Game.map.id, Game.mapAllow());
@@ -484,7 +531,7 @@ const UI = {
     const side=this.el("side"); side.style.display="none";
     // 部署覆層歸位（2026-07-21 使用者裁定：部署面板融入遊戲畫面、開戰即消失）
     if (side.classList.contains("dpOverlay")){
-      side.classList.remove("dpOverlay");
+      side.classList.remove("dpOverlay","battleHud");
       const wrap=document.getElementById("wrap"); if (wrap) wrap.appendChild(side);
     }
     this.hideAim();

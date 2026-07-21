@@ -1,9 +1,12 @@
 /* 戰場 — UI 樣式 */
 * { box-sizing: border-box; margin: 0; }
-body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-serif; display:flex; justify-content:center; -webkit-text-size-adjust:100%; }
-#wrap { display:flex; flex-direction:column; align-items:center; gap:8px; padding:6px; width:100%; }
-#stage { position:relative; width:100%; max-width:960px; aspect-ratio:960/600; }
-#game { display:block; width:100%; height:100%; background:#000; border:2px solid #3a4232; touch-action:none; }
+/* 全視窗化（2026-07-21 使用者裁定：要出品的遊戲，畫面就該吃滿整個視窗） */
+html, body { height:100%; }
+body { background:#07090c; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-serif;
+  display:flex; justify-content:center; align-items:center; overflow:hidden; -webkit-text-size-adjust:100%; }
+#wrap { display:flex; flex-direction:column; align-items:center; gap:0; padding:0; width:100vw; height:100vh; justify-content:center; }
+#stage { position:relative; width:min(100vw, calc(100vh * 1.6)); max-width:none; aspect-ratio:960/600; }
+#game { display:block; width:100%; height:100%; background:#000; border:none; touch-action:none; }
 
 #side { width:100%; max-width:960px; background:#10151d; border:1px solid #2b3442; padding:10px; display:none; overflow-y:auto; }
 #side h3 { color:#e8d9ae; margin-bottom:6px; letter-spacing:2px; border-left:3px solid #d8c56a; padding-left:8px; }
@@ -37,6 +40,9 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #side.dpOverlay { position:absolute; top:0; right:0; bottom:0; width:340px; max-width:44%;
   z-index:6; background:rgba(13,17,24,0.93); border:none; border-left:2px solid rgba(241,193,90,0.55);
   overflow-y:auto; backdrop-filter:blur(2px); }
+/* 戰鬥 HUD 覆層：更窄更透，少遮戰場 */
+#side.dpOverlay.battleHud { width:250px; max-width:34%; background:rgba(13,17,24,0.82); }
+#side.dpOverlay.battleHud .dpHead { margin:-10px -10px 0; }
 #side.dpOverlay .dpHead { margin:-10px -10px 0; }
 .hudHead { margin-bottom:8px; padding-bottom:12px; }
 .hudHead .dpTitle { font-size:17px; }
