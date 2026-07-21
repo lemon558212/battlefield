@@ -310,9 +310,9 @@ func _start_battle() -> void:
 
 # ---------- 單位 ----------
 func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
-	var path: String = CLASS_MODEL.get(cls, CLASS_MODEL["rifleman"])
-	var tint: Color = CLASS_TINT.get(cls, Color(0, 0, 0, 0))
-	var node := Unit.spawn(path, cls, side_i, tint, side_i == player_side)
+	# 戰場單位＝立繪看板（使用者裁定）。具名用角色立繪，通用用兵種立繪。
+	var portrait: String = GameData.portrait_path(cls)
+	var node := Unit.spawn_portrait(portrait, cls, side_i, side_i == player_side)
 	add_child(node)
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI

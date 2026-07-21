@@ -92,10 +92,16 @@ func show_story(unlocked: int) -> void:
 	var head := _mk_banner("CAMPAIGN", "曙光作戰", "2034，無旗幟的戰爭")
 	head.position = Vector2(60, 40)
 	root.add_child(head)
+	var vp := get_viewport().get_visible_rect().size
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(60, 160)
+	scroll.custom_minimum_size = Vector2(600, vp.y - 260)
+	scroll.size = Vector2(600, vp.y - 260)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
 	var grid := VBoxContainer.new()
 	grid.add_theme_constant_override("separation", 8)
-	grid.position = Vector2(60, 160)
-	root.add_child(grid)
+	scroll.add_child(grid)
 	var story: Array = GameData.story
 	for ch in story:
 		var n: int = ch.get("n", 0)
@@ -111,7 +117,7 @@ func show_story(unlocked: int) -> void:
 			b.pressed.connect(func(): chapter_chosen.emit(nn))
 		grid.add_child(b)
 	var back := _btn("返回主選單", 16)
-	back.position = Vector2(60, get_viewport().get_visible_rect().size.y - 80)
+	back.position = Vector2(60, vp.y - 70)
 	back.pressed.connect(func(): back_menu.emit())
 	root.add_child(back)
 
@@ -299,13 +305,20 @@ func show_deploy(ch, budget_left: int, roster: Array, on_pick: Callable, on_go: 
 	head.position = side.position
 	head.scale = Vector2(0.6, 0.6)
 	root.add_child(head)
-	var list := VBoxContainer.new()
-	list.add_theme_constant_override("separation", 8)
-	list.position = side.position + Vector2(16, 110)
-	root.add_child(list)
 	var budget_lbl := _label("部署點數 %d" % budget_left, 15, GOLD)
 	budget_lbl.name = "BudgetLbl"
-	list.add_child(budget_lbl)
+	budget_lbl.position = side.position + Vector2(16, 92)
+	root.add_child(budget_lbl)
+	# 可捲動清單（治「兵種多超出邊界」）
+	var scroll := ScrollContainer.new()
+	scroll.position = side.position + Vector2(12, 118)
+	scroll.custom_minimum_size = Vector2(320, vp.y - 220)
+	scroll.size = Vector2(320, vp.y - 220)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 8)
+	scroll.add_child(list)
 	for item in roster:
 		# 立繪卡（左立繪縮圖＋右文字），召喚不了的不顯示（由呼叫端過濾）
 		var card := Control.new()
