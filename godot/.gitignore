@@ -1,3 +1,6 @@
 .godot/
 *.tmp
 selftest_*.png
+selftest_*.png.import
+aniprobe.gd*
+boneprobe.gd*
