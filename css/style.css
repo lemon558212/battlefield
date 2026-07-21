@@ -128,8 +128,21 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #menu .fine { text-shadow:0 1px 3px rgba(0,0,0,0.9); }
 /* 劇情模式 */
 #menu .storyList { max-height:46vh; overflow-y:auto; }
-#menu .storyCh { text-align:left; }
-#menu .storyCh.locked { opacity:0.45; cursor:not-allowed; }
+/* 章節選擇卡（2026-07-21 UI 統一：同部署面板金色語言） */
+#menu .storyCh { text-align:left; display:flex; align-items:center; gap:14px;
+  background:#1c2230; border:1px solid #2b3442; border-left:3px solid #3a465a; border-radius:6px;
+  padding:11px 14px; clip-path:none; }
+#menu .storyCh:hover { border-left-color:#f1c15a; box-shadow:0 0 12px rgba(241,193,90,0.25); background:#232b3c; }
+#menu .storyCh .chNo { color:#f1c15a; font-weight:900; font-size:19px; letter-spacing:1px; min-width:34px; }
+#menu .storyCh .chTitle { flex:1; font-size:14px; letter-spacing:1px; }
+#menu .storyCh .chGo { color:#6bc7ff; font-size:12px; }
+#menu .storyCh.locked { opacity:0.4; cursor:not-allowed; }
+#menu .storyCh.locked .chNo { color:#8a96a6; }
+/* 選單/戰後共用橫幅 */
+#menu .menuHead { width:min(92%,560px); margin:0 0 10px; border-radius:6px; background:rgba(20,26,38,0.92); }
+#menu .endHead.endWin::before { background:#f1c15a; }
+#menu .endHead.endLose::before { background:#b8412f; }
+#menu .endHead.endLose .dpTag { color:#e07a68; }
 #menu .briefing { line-height:1.8; font-size:14px; text-align:left; }
 /* 小隊名冊 */
 #menu .roster { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px; }

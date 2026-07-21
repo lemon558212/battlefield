@@ -62,12 +62,14 @@ const UI = {
     const rows = STORY.map(ch=>{
       const lock = ch.n > unlocked;
       return `<button class="storyCh${lock?" locked":""}" data-ch="${ch.n}" ${lock?"disabled":""}>
-        第 ${ch.n} 章｜${lock?"🔒 ？？？":ch.title}</button>`;
+        <span class="chNo">${String(ch.n).padStart(2,"0")}</span>
+        <span class="chTitle">${lock?"🔒 尚未解鎖":ch.title}</span>
+        ${lock?"":`<span class="chGo">▶</span>`}</button>`;
     }).join("");
     const M=this.el("menu"); M.style.display="flex";
     M.innerHTML=`
-      <h1 style="font-size:26px">📖 曙光作戰</h1>
-      <p class="sub">2034，無旗幟的戰爭。反派「灰幕兵團」為虛構勢力。</p>
+      <div class="dpHead menuHead"><span class="dpTag">CAMPAIGN</span><div class="dpTitle">曙光作戰</div>
+        <div class="dpSub">2034，無旗幟的戰爭。反派「灰幕兵團」為虛構勢力。</div></div>
       <div class="panel storyList">${rows}</div>
       <button id="stBack">返回主選單</button>`;
     M.querySelectorAll(".storyCh:not(.locked)").forEach(b=>{
@@ -445,9 +447,12 @@ const UI = {
         <div class="rankInfo">${Game.turn} 回合｜陣亡 ${dead}</div></div>`;
     }
     this.el("menu").innerHTML = `
-      <h1>${win?"🏆 勝利":"💀 敗北"}</h1>
+      <div class="dpHead menuHead endHead ${win?"endWin":"endLose"}">
+        <span class="dpTag">${win?"MISSION COMPLETE":"MISSION FAILED"}</span>
+        <div class="dpTitle">${win?"勝 利":"敗 北"}</div>
+        <div class="dpSub">${Game.over.why}（${NATIONS[Game.nations[Game.over.winner]].name} 獲勝）</div>
+      </div>
       ${rankHtml}
-      <p class="sub">${Game.over.why}（${NATIONS[Game.nations[Game.over.winner]].name} 獲勝）</p>
       ${extra}
       <button id="btnAgain" class="big">回主選單</button>`;
     this.el("menu").style.display="flex";

@@ -799,8 +799,12 @@ const Game = {
    * 開火當下立即起手 shoot 動畫，彈道/音效/傷害演出整批延遲 0.3s（負 t 起算），
    * 讓子彈在動畫舉到位時才離膛。載具/艦炮無舉槍動作，維持即時。 */
   pushFx(ev){
-    const RAISE = 0.3, raised = new Set();
-    const needRaise = ev.some(e => e.type === "tracer" && /rifle|carbine|lmg|sniper|rocket|mortar/.test(e.w || ""));
+    const raised = new Set();
+    const firstTracer = ev.find(e => e.type === "tracer" && /rifle|carbine|lmg|sniper|rocket|mortar/.test(e.w || ""));
+    // 延遲量依開火者 shoot 動畫實際長度計（38% 時點離膛）；查不到動畫＝0（載具即時）
+    const RAISE = firstTracer && typeof Engine3D !== "undefined" && Engine3D.ok
+      ? (Engine3D.shootDelayAt(firstTracer.x1, firstTracer.y1) || 0.28) : 0; // 查不到動畫（模型熱替換瞬間）退 0.28s，步兵永不瞬發
+    const needRaise = RAISE > 0;
     for(const e of ev){
       e.t = needRaise ? -RAISE : 0;
       this.fx.push(e);

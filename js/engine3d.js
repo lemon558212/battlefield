@@ -2110,6 +2110,20 @@ const Engine3D = {
       e.objs[1].intensity = 4 * Math.max(0, 1 - k);
     }
   },
+  /* 舉槍延遲查詢（dept-12 合理化）：依開火者 shoot 片段實際長度取 38% 作為「子彈離膛」時點，
+   * 各兵種動作快慢不同時序才對得上；找不到動畫（載具/幾何體）回 0＝即時。 */
+  shootDelayAt(x, y){
+    for (const id in this._mixers){
+      const g = this._units[id];
+      if (!g || Math.hypot(g.position.x - x, g.position.z - y) > 25) continue;
+      const mx = this._mixers[id];
+      const clip = (mx.actions.shoot && mx.actions.shoot.getClip && mx.actions.shoot.getClip()) ||
+        (this._models[mx.modelKey] && this._models[mx.modelKey].anims.find(a => /shoot|fire|attack|gun/i.test(a.name)));
+      if (clip) return Math.min(0.5, Math.max(0.2, clip.duration * 0.38));
+      break;
+    }
+    return 0;
+  },
   /* 開火者若有 shoot 動畫片段 → 播一次再回原動作 */
   _tryShootAnim(x, y){
     let nearest=null,best=25;
