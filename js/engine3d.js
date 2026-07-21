@@ -503,10 +503,9 @@ const Engine3D = {
         for (const key of keys) this._modelState[key] = "failed";      // 走幾何 fallback
       };
       const d0 = defs[keys[0]];
-      // 此環境曾靠 b64 成功（防毒攔二進位下載）→ 直達 b64，不再浪費重試時間
-      let preferB64 = false;
-      try { preferB64 = localStorage.getItem("bf_prefer_b64") === "1"; } catch (e) {}
-      if (preferB64 && d0 && d0.b64 && url === d0.url){
+      // 2026-07-21 使用者裁定「單一通道」：有 b64 一律直走 b64（.glb 只當原料不再運行時載入）。
+      // 理由：防毒環境 glb 必被攔＋雙通道曾造成「開發機正常/使用者機退化」三輪誤診。
+      if (d0 && d0.b64 && url === d0.url){
         this._loadViaB64(d0, keys, url, onLoaded, loader);
         continue;
       }
@@ -901,13 +900,10 @@ const Engine3D = {
       }
       this._sceneryB64Q.push(ready);
     };
-    let preferB64 = false;
-    try { preferB64 = localStorage.getItem("bf_prefer_b64") === "1"; } catch (e) {}
+    // 單一通道裁定（同 _loadGroups）：場景模型也一律直走 b64
     for (const key of this.SCENERY_KEYS){
       this._sceneryState[key] = "loading";
-      if (preferB64){ viaB64(key); continue; }
-      const url = "assets/models/scenery/" + key + ".glb" + (typeof BUILD !== "undefined" ? "?" + BUILD : "");
-      loader.load(url, g => finish(key, g.scene), undefined, () => viaB64(key));
+      viaB64(key);
     }
   },
   /* 依腳印面積挑建築模型並等比縮放置入；模型未到/失敗回 false 走程序化 */
