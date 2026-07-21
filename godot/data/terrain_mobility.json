@@ -1,0 +1,90 @@
+{
+ "scout": {
+  "ground": 1,
+  "shallow": 1.35,
+  "water": null,
+  "deepwater": null,
+  "hill": 1.1,
+  "trench": 1.15,
+  "crater": 1.1,
+  "wire": 1.8,
+  "bush": 0.85
+ },
+ "foot": {
+  "ground": 1,
+  "shallow": 1.55,
+  "water": null,
+  "deepwater": null,
+  "hill": 1.15,
+  "trench": 1.25,
+  "crater": 1.15,
+  "wire": 2,
+  "bush": 0.9
+ },
+ "heavy": {
+  "ground": 1,
+  "shallow": 1.8,
+  "water": null,
+  "deepwater": null,
+  "hill": 1.25,
+  "trench": 1.4,
+  "crater": 1.25,
+  "wire": 2.4,
+  "bush": 1
+ },
+ "engineer": {
+  "ground": 1,
+  "shallow": 1.2,
+  "water": 2.4,
+  "deepwater": null,
+  "hill": 1.1,
+  "trench": 1.1,
+  "crater": 1,
+  "wire": 1.1,
+  "bush": 0.9
+ },
+ "special": {
+  "ground": 1,
+  "shallow": 1.2,
+  "water": 1.8,
+  "deepwater": null,
+  "hill": 1,
+  "trench": 1,
+  "crater": 1,
+  "wire": 1.35,
+  "bush": 0.65
+ },
+ "tracked": {
+  "ground": 1,
+  "shallow": 1.5,
+  "water": null,
+  "deepwater": null,
+  "hill": 1.35,
+  "trench": null,
+  "crater": 1.35,
+  "wire": 1.1,
+  "bush": 1.25
+ },
+ "naval": {
+  "ground": null,
+  "shallow": 1.35,
+  "water": 1,
+  "deepwater": 1,
+  "hill": null,
+  "trench": null,
+  "crater": null,
+  "wire": null,
+  "bush": null
+ },
+ "air": {
+  "ground": 1,
+  "shallow": 1,
+  "water": 1,
+  "deepwater": 1,
+  "hill": 1,
+  "trench": 1,
+  "crater": 1,
+  "wire": 1,
+  "bush": 1
+ }
+}

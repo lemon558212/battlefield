@@ -1,0 +1,123 @@
+{
+ "rifle": {
+  "atk": 22,
+  "shots": 3,
+  "range": 210,
+  "acc": 0.8,
+  "splash": 0
+ },
+ "carbine": {
+  "atk": 16,
+  "shots": 5,
+  "range": 160,
+  "acc": 0.75,
+  "splash": 0
+ },
+ "lmg": {
+  "atk": 14,
+  "shots": 8,
+  "range": 190,
+  "acc": 0.7,
+  "splash": 0
+ },
+ "mortar": {
+  "atk": 55,
+  "shots": 1,
+  "range": 300,
+  "acc": 0.7,
+  "splash": 36,
+  "arc": true
+ },
+ "sniper": {
+  "atk": 85,
+  "shots": 1,
+  "range": 380,
+  "acc": 0.95,
+  "splash": 0
+ },
+ "rocket": {
+  "atk": 180,
+  "shots": 1,
+  "range": 200,
+  "acc": 0.75,
+  "splash": 24,
+  "antiTank": true
+ },
+ "cannon": {
+  "atk": 220,
+  "shots": 1,
+  "range": 260,
+  "acc": 0.85,
+  "splash": 30,
+  "antiTank": true
+ },
+ "naval_gun": {
+  "atk": 90,
+  "shots": 1,
+  "range": 340,
+  "acc": 0.8,
+  "splash": 40,
+  "antiAir": 0.5
+ },
+ "antiship_missile": {
+  "atk": 260,
+  "shots": 1,
+  "range": 300,
+  "acc": 0.8,
+  "splash": 0,
+  "antiAir": 0,
+  "antiShip": 1.5
+ },
+ "naval_mg": {
+  "atk": 16,
+  "shots": 6,
+  "range": 180,
+  "acc": 0.72,
+  "splash": 0,
+  "antiAir": 0.5
+ },
+ "torpedo": {
+  "atk": 320,
+  "shots": 1,
+  "range": 220,
+  "acc": 0.85,
+  "splash": 0,
+  "antiAir": 0,
+  "seaOnly": true
+ },
+ "aam": {
+  "atk": 120,
+  "shots": 2,
+  "range": 300,
+  "acc": 0.85,
+  "splash": 0,
+  "antiAir": 1,
+  "airToGround": 0.2
+ },
+ "agm": {
+  "atk": 150,
+  "shots": 1,
+  "range": 240,
+  "acc": 0.8,
+  "splash": 28,
+  "antiAir": 0,
+  "antiGround": 1.3
+ },
+ "rocket_pod": {
+  "atk": 70,
+  "shots": 3,
+  "range": 200,
+  "acc": 0.72,
+  "splash": 24,
+  "antiAir": 0.5,
+  "antiGround": 1.1
+ },
+ "sam_missile": {
+  "atk": 200,
+  "shots": 1,
+  "range": 420,
+  "acc": 0.85,
+  "splash": 0,
+  "antiAirOnly": true
+ }
+}

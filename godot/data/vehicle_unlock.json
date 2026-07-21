@@ -1,0 +1,10 @@
+{
+ "tank": 5,
+ "fighter": 5,
+ "attacker": 5,
+ "gunship": 5,
+ "destroyer": 8,
+ "lst": 8,
+ "missileboat": 9,
+ "submarine": 9
+}
