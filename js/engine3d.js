@@ -807,15 +807,41 @@ const Engine3D = {
   },
 
   /* 真 3D 主路徑專用地表：只畫土色、道路與地表痕跡；建築/樹/工事不再烙成俯視圖。 */
+  /* 地表手繪（美術11部 2026-07-21 重繪，對照 VC 濃彩）：舊版＝單色平塗+3% 透明斑點，
+   * 遠看是一張粉彩紙（使用者三度反映洗白的最大單一原因）。新版四層：
+   * 底色 → 大片草澤明暗變化 → 濃斑 → 草筆觸，出圖前整體 saturate+contrast 提色。 */
   _groundCanvas(m){
     const W=m.w||960,H=m.h||600,cv=document.createElement("canvas");cv.width=W;cv.height=H;
     const c=cv.getContext("2d"),rnd=this._rng("ground-"+m.id+"-"+W+"x"+H);
     c.fillStyle=m.ground||"#7a8f5a";c.fillRect(0,0,W,H);
+    // 大片草澤：radial 漸層做深淺草原塊（VC 地面是一塊塊色域，不是均勻色）
+    for(let i=0;i<Math.round(W*H/38000)+6;i++){
+      const x=rnd()*W,y=rnd()*H,r=90+rnd()*220;
+      const dark=rnd()<0.5;
+      const g=c.createRadialGradient(x,y,r*0.15,x,y,r);
+      g.addColorStop(0,dark?`rgba(52,74,34,${0.16+rnd()*0.14})`:`rgba(150,158,84,${0.12+rnd()*0.12})`);
+      g.addColorStop(1,"rgba(0,0,0,0)");
+      c.fillStyle=g;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+    }
+    // 濃斑：深綠/暖土兩色系，透明度大幅上調
     for(let i=0;i<Math.round(W*H/4200);i++){
       const x=rnd()*W,y=rnd()*H,rx=10+rnd()*42,ry=rx*(0.35+rnd()*0.45);
-      c.fillStyle=rnd()<0.55?`rgba(45,58,30,${0.025+rnd()*0.055})`:`rgba(165,145,92,${0.025+rnd()*0.05})`;
+      c.fillStyle=rnd()<0.55?`rgba(43,62,26,${0.07+rnd()*0.12})`:`rgba(158,132,74,${0.06+rnd()*0.10})`;
       c.beginPath();c.ellipse(x,y,rx,ry,rnd()*Math.PI,0,7);c.fill();
     }
+    // 草筆觸：短弧線增加手繪密度
+    c.lineWidth=1.4;
+    for(let i=0;i<Math.round(W*H/2600);i++){
+      const x=rnd()*W,y=rnd()*H,l=3+rnd()*7,a=rnd()*Math.PI;
+      c.strokeStyle=rnd()<0.6?`rgba(60,86,36,${0.10+rnd()*0.14})`:`rgba(120,140,66,${0.10+rnd()*0.12})`;
+      c.beginPath();c.moveTo(x,y);c.quadraticCurveTo(x+Math.cos(a)*l*.6,y-l*.8,x+Math.cos(a)*l,y-Math.sin(a)*l*.3);c.stroke();
+    }
+    // 整體提色（同一張 canvas 自拷貝過濾；舊瀏覽器無 filter 則跳過）
+    try{
+      const tmp=document.createElement("canvas");tmp.width=W;tmp.height=H;
+      tmp.getContext("2d").drawImage(cv,0,0);
+      c.filter="saturate(1.5) contrast(1.08)";c.drawImage(tmp,0,0);c.filter="none";
+    }catch(e){}
     return cv;
   },
 
@@ -856,7 +882,7 @@ const Engine3D = {
 
     // 遠景大地（地圖外圍基色，接天際）
     const far = new THREE.Mesh(new THREE.PlaneGeometry(9000 * S, 9000 * S),
-      new THREE.MeshLambertMaterial({ color: new THREE.Color(m.ground || "#7a8f5a").multiplyScalar(0.9) }));
+      new THREE.MeshLambertMaterial({ color: new THREE.Color(m.ground || "#7a8f5a").offsetHSL(0, 0.12, -0.06) })); // 提飽和壓亮度，跟重繪地表銜接
     far.rotation.x = -Math.PI / 2; far.position.set(mw / 2, -0.25, mh / 2); far.receiveShadow = true;
     grp.add(far);
 
@@ -2180,7 +2206,10 @@ const Engine3D = {
   },
   render(G){
     if (!this.ok) return;
-    if (this._mapRef !== G.map){ this.buildMap(G); this._mapRef = G.map; this._applyEnvIntensity(this.scene); } // 須在 buildMap 完成後套（地形是後加的）
+    if (this._mapRef !== G.map){
+      this.buildMap(G); this._mapRef = G.map; this._applyEnvIntensity(this.scene); // 須在 buildMap 完成後套（地形是後加的）
+      try { this.renderer.compile(this.scene, this.camera); } catch(e){} // 預編譯著色器：消除進戰後首見材質的 30ms+ 卡頓尖峰
+    }
     const now = performance.now(), dt = Math.min(0.05, (now - (this._at || now)) / 1000); this._at = now;
     this._perfGovern(now);
     this.syncUnits(G, now, dt);
@@ -2206,7 +2235,9 @@ const Engine3D = {
     const cp = Math.cos(cam.pitch);
     this.camera.lookAt(cam.cx + Math.cos(cam.yaw) * cp, cam.ch - Math.sin(cam.pitch), cam.cy + Math.sin(cam.yaw) * cp);
     this.renderer.render(this.scene, this.camera);
-    if (this.outlineOn !== false) this._renderOutline();   // 鉛筆速寫描邊（過慢時可設 false 關閉）
+    // 鉛筆速寫描邊＝第二次全場景渲染：只在第三人稱近景做（俯瞰距離下描邊細於1px看不見，
+    // 卻要付全場景+全單位重繪，是俯瞰視角最大單筆開銷——2026-07-21 效能複診）。
+    if (this.outlineOn !== false && cam.mode === "follow") this._renderOutline();
   },
 
   /* ---------- 2D HUD 疊層（畫在透明的 #game 上，投影同 Camera3D） ---------- */

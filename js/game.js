@@ -158,12 +158,26 @@ const Game = {
     const nation = this.nations[side];
     const allow = this.mapAllow();
     const zone = this.map.deploy[side];
-    const perDomain = {
+    let perDomain = {
       land:["tank","mg","at","sniper","assault","rifleman","rifleman","engineer","sam"],
       sea:["destroyer","missileboat","submarine","lst"],
       air:["fighter","attacker","gunship"]
     };
-    const doms = allow.filter(d=>perDomain[d]);
+    // 劇情火力對等（規則03部 2026-07-21 使用者裁定）：敵軍武力鏡射玩家解鎖進度——
+    // 載具未解鎖章節敵軍也不得投放（第1章出坦克＝不合邏輯前科）；
+    // 敵步兵數上限＝玩家已解鎖具名隊員數+1，避免前期人數輾壓。
+    const chN = this.storyChapter;
+    if (chN && typeof VEHICLE_UNLOCK !== "undefined"){
+      const vOk = cls => !VEHICLE_UNLOCK[cls] || VEHICLE_UNLOCK[cls] <= chN;
+      const namedN = (typeof CHARACTERS !== "undefined")
+        ? Object.values(CHARACTERS).filter(c=>(c.unlockCh||1)<=chN).length : 9;
+      perDomain = {
+        land: perDomain.land.filter(vOk).slice(0, namedN + 1),
+        sea:  perDomain.sea.filter(vOk),
+        air:  perDomain.air.filter(vOk)
+      };
+    }
+    const doms = allow.filter(d=>perDomain[d] && perDomain[d].length);
     const quota = this.map.budget / doms.length;
     for (const dom of doms){
       let b = quota;
@@ -1143,7 +1157,7 @@ const Game = {
     try{
       const tmp=document.createElement("canvas"); tmp.width=W; tmp.height=H;
       const tc=tmp.getContext("2d"); tc.drawImage(cv,0,0);
-      c.filter="saturate(1.32) brightness(1.04)"; c.drawImage(tmp,0,0); c.filter="none";
+      c.filter="saturate(1.55) contrast(1.09) brightness(0.99)"; c.drawImage(tmp,0,0); c.filter="none"; // 2026-07-21 對照 VC 濃彩再加深（粉彩洗白回饋）
     }catch(e){ /* 舊瀏覽器無 canvas filter：跳過 */ }
   },
 

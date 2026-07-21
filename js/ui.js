@@ -77,10 +77,9 @@ const UI = {
   },
   showBriefing(n){
     const ch = STORY[n-1];
-    const roster = Object.values(CHARACTERS).map(c =>
-      (c.unlockCh||1) <= n
-        ? `<img class="rosterFace" src="${c.fullPortrait || c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`
-        : `<span class="rosterFace rosterLocked" title="第 ${c.unlockCh} 章加入">？</span>`).join("");
+    // 名冊鐵則（使用者 2026-07-21 二度裁定）：未入隊的人不存在——簡報/召喚一律不出現，含「？」占位。
+    const roster = Object.values(CHARACTERS).filter(c => (c.unlockCh||1) <= n).map(c =>
+      `<img class="rosterFace" src="${c.fullPortrait || c.portrait}" title="${c.name}（${c.trait.desc}）" alt="${c.name}">`).join("");
     const M=this.el("menu"); M.style.display="flex";
     M.innerHTML=`
       <h1 style="font-size:24px">第 ${ch.n} 章｜${ch.title}</h1>
@@ -269,7 +268,9 @@ const UI = {
     }
     for (const dom of ["land","sea","air"]){
       if (!allow.includes(dom)) continue;
-      const keys = Object.keys(CLASS_BASE).filter(k=>CLASS_BASE[k].domain===dom);
+      // 劇情模式沒有雜魚兵（使用者 2026-07-21 裁定）：小隊＝具名隊員；通用清單只剩已解鎖載具。
+      const keys = Object.keys(CLASS_BASE).filter(k=>CLASS_BASE[k].domain===dom)
+        .filter(k=>!story || (typeof VEHICLE_UNLOCK!=="undefined" && VEHICLE_UNLOCK[k]));
       const body = keys.map(k=>{
         const c = unitCost(nat.id,k), u=nat.units[k];
         const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
@@ -288,7 +289,7 @@ const UI = {
           <span class="unitCopy">${title}<br><span class="weapon">${sub}</span></span>
           <em>${c}點·${cp}CP</em></button>`;
       }).join("");
-      if (body) rows += `<div class="grpHead">${story ? groups[dom]+"（通用兵員）" : groups[dom]}</div>` + body;
+      if (body) rows += `<div class="grpHead">${story ? groups[dom]+"（載具支援）" : groups[dom]}</div>` + body;
     }
     this.el("side").innerHTML = `
       <h3>部署（${nat.name}）</h3>
