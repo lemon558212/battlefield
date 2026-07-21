@@ -428,6 +428,22 @@ const Engine3D = {
     el.textContent = `⟳ 高精度模型載入中 ${pct}%`;
     el.style.display = "block";
   },
+  /* 根骨位移消毒（動畫12部）：離線工具曾把 shoot 根骨位移「凍結成非零常數」（模型空間 -2.477
+   * × 縮放 ≈ 47 世界單位 → 開槍瞬移出畫面）。這裡在載入端把所有 clip 的 Root 位移軌
+   * 一律改寫成 idle 首幀值（無 idle 則歸零），glb 與 base64 兩條載入通道都經過此漏斗。 */
+  _sanitizeRootMotion(anims){
+    if (!anims || !anims.length) return;
+    const isRootPos = t => /(^|[.\/])Root\.position$/i.test(t.name);
+    const idle = anims.find(c => /idle/i.test(c.name));
+    let ref = [0, 0, 0];
+    if (idle){ const t = idle.tracks.find(isRootPos); if (t && t.values.length >= 3) ref = [t.values[0], t.values[1], t.values[2]]; }
+    for (const clip of anims){
+      for (const t of clip.tracks){
+        if (!isRootPos(t)) continue;
+        for (let i = 0; i < t.values.length; i += 3){ t.values[i] = ref[0]; t.values[i + 1] = ref[1]; t.values[i + 2] = ref[2]; }
+      }
+    }
+  },
   _loadGroups(byUrl){
     if (typeof THREE.GLTFLoader === "undefined") return;
     const loader = new THREE.GLTFLoader();
@@ -437,6 +453,7 @@ const Engine3D = {
       for (const key of keys) this._modelState[key] = "loading";
       const onLoaded = g => {
         const s = g.scene;
+        this._sanitizeRootMotion(g.animations || []);
         s.traverse(o => { if (o.isMesh){ o.castShadow = true; } });
         const d0 = defs[keys[0]];                                       // 同 URL 群組共用縮放定位
         const box = new THREE.Box3().setFromObject(s), sz = box.getSize(new THREE.Vector3());
@@ -818,17 +835,22 @@ const Engine3D = {
     sc.updateProjectionMatrix();
     sun.target.position.set(mw / 2, 0, mh / 2);
     // 時段化光照（dept-12：太陽色溫/強度/霧色隨 sky 連動，鳴潮式大氣感）
+    // 2026-07-21 重調（使用者回饋「場景洗白沒變化」）：拉開日照/環境光比，陰影
+    // 才有形體感；時段間色溫差距加大，讓「換章節＝換氣氛」肉眼可辨。
     const LIGHTING = {
-      day:  { sun:0xfff1d6, i:0.95, fog:0xd9e3ea, hemi:0.55 },
-      dawn: { sun:0xffc9a0, i:0.82, fog:0xdccbbe, hemi:0.48 },
-      dusk: { sun:0xff9a60, i:0.75, fog:0xcdb2a0, hemi:0.45 },
-      night:{ sun:0x9ab0d8, i:0.50, fog:0x5a687e, hemi:0.38 }
+      day:  { sun:0xfff3da, i:1.18, fog:0xcfdde8, hemi:0.40, env:1.0 },
+      dawn: { sun:0xffb37c, i:1.08, fog:0xd8bfa8, hemi:0.34, env:0.5 },
+      dusk: { sun:0xff8446, i:1.00, fog:0xc09a82, hemi:0.32, env:0.4 },
+      night:{ sun:0x7ea0e0, i:0.38, fog:0x2c3850, hemi:0.16, env:0.10 }
     };
     const Lset = LIGHTING[m.sky] || LIGHTING.day;
     sun.color.setHex(Lset.sun); sun.intensity = Lset.i;
     this.scene.fog.color.setHex(Lset.fog);
     if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(Lset.fog);
     this.scene.traverse(o => { if (o.isHemisphereLight) o.intensity = Lset.hemi; });
+    // IBL 是「白天天空」烘的：不隨時段衰減會把夜戰打成永晝（2026-07-21 場景無感根因）。
+    this._envIntensity = Lset.env;
+    this._applyEnvIntensity(this.scene);
     this.scene.fog.near = 1150 * S; this.scene.fog.far = 3400 * S;
     this.camera.far = 6000 * S;
 
@@ -918,15 +940,22 @@ const Engine3D = {
       const edgeMat=new THREE.MeshLambertMaterial({color:0x9a8057});
       const point=t=>roadDef?{x:roadDef.x1+(roadDef.x2-roadDef.x1)*t,z:roadDef.y1+(roadDef.y2-roadDef.y1)*t}:
         ({x:(1-t)*(1-t)*a.x+2*(1-t)*t*mx+t*t*b.x,z:(1-t)*(1-t)*a.y+2*(1-t)*t*my+t*t*b.y});
-      for(let i=0;i<48;i++){
-        const p=point(i/48),q=point((i+1)/48),cx=(p.x+q.x)/2,cz=(p.z+q.z)/2;
+      // 效能（技術10部）：48 段路 ×2 網格＝96 draw call 是全場最大宗 → 併成 2 個 InstancedMesh。
+      const SEG=48,rw0=roadDef?roadDef.w:20;
+      const edgeInst=new THREE.InstancedMesh(new THREE.BoxGeometry(1,0.7,rw0),edgeMat,SEG);
+      const roadInst=new THREE.InstancedMesh(new THREE.BoxGeometry(1,0.55,rw0*.75),roadMat,SEG);
+      edgeInst.name="road-foundation";edgeInst.userData.terrainFunction="vehicle-cost-0.72;foot-cost-0.92";edgeInst.receiveShadow=true;
+      roadInst.name="road-surface";roadInst.userData.terrainFunction="vehicle-cost-0.72;foot-cost-0.92";roadInst.receiveShadow=true;
+      const _m4=new THREE.Matrix4(),_q=new THREE.Quaternion(),_s=new THREE.Vector3(),_p=new THREE.Vector3(),_up=new THREE.Vector3(0,1,0);
+      for(let i=0;i<SEG;i++){
+        const p=point(i/SEG),q=point((i+1)/SEG),cx=(p.x+q.x)/2,cz=(p.z+q.z)/2;
         const len=Math.hypot(q.x-p.x,q.z-p.z)+1.2,ang=Math.atan2(q.z-p.z,q.x-p.x),hy=this.heightAt(cx,cz);
-        const rw=roadDef?roadDef.w:20;
-        const edge=new THREE.Mesh(new THREE.BoxGeometry(len,0.7,rw),edgeMat);
-        edge.name="road-foundation";edge.userData.terrainFunction="vehicle-cost-0.72;foot-cost-0.92";edge.position.set(cx,hy+0.18,cz);edge.rotation.y=-ang;edge.receiveShadow=true;grp.add(edge);
-        const road=new THREE.Mesh(new THREE.BoxGeometry(len,0.55,rw*.75),roadMat);
-        road.name="road-surface";road.userData.terrainFunction="vehicle-cost-0.72;foot-cost-0.92";road.position.set(cx,hy+0.58,cz);road.rotation.y=-ang;road.receiveShadow=true;grp.add(road);
+        _q.setFromAxisAngle(_up,-ang);_s.set(len,1,1);
+        _p.set(cx,hy+0.18,cz);_m4.compose(_p,_q,_s);edgeInst.setMatrixAt(i,_m4);
+        _p.set(cx,hy+0.58,cz);_m4.compose(_p,_q,_s);roadInst.setMatrixAt(i,_m4);
       }
+      edgeInst.instanceMatrix.needsUpdate=true;roadInst.instanceMatrix.needsUpdate=true;
+      grp.add(edgeInst);grp.add(roadInst);
     }
 
     // 獨立 3D 水面與水底：深淺、透明與高光各異，涉水/艦艇可見浸水關係。
@@ -1184,19 +1213,40 @@ const Engine3D = {
         tufts.push({ x, y, r: rnd() * Math.PI, s: 1.0 + rnd() * 1.6 }); i++;
       }
       if (tufts.length){
+        // 美術修正（12部 2026-07-21）：舊版一叢＝一根細長圓錐，遠看像「綠釘子」→
+        // 改為 5 葉外撇的草叢（單一合併幾何 + 實例化），矮胖化貼近手繪草感；
+        // 草不投影（430×S 叢全進陰影 pass 是效能大宗，視覺上也看不出差異）。
+        const mkTuft = () => {
+          const pos = [], nor = [];
+          for (let b = 0; b < 5; b++){
+            const blade = new THREE.ConeGeometry(.34, 2.9, 3).toNonIndexed();
+            const a = b / 5 * Math.PI * 2 + 0.7;
+            const m4 = new THREE.Matrix4()
+              .makeRotationFromEuler(new THREE.Euler(Math.cos(a) * .42, a, Math.sin(a) * .42))
+              .setPosition(Math.cos(a) * .55, 1.05, Math.sin(a) * .55);
+            blade.applyMatrix4(m4);
+            pos.push(blade.attributes.position.array); nor.push(blade.attributes.normal.array);
+          }
+          const cat = arrs => { const n = arrs.reduce((s, a) => s + a.length, 0), o = new Float32Array(n); let k = 0; for (const a of arrs){ o.set(a, k); k += a.length; } return o; };
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.BufferAttribute(cat(pos), 3));
+          geo.setAttribute("normal", new THREE.BufferAttribute(cat(nor), 3));
+          return geo;
+        };
+        const tuftGeo = mkTuft();
         const cols = [0x5a8438, 0x6f9440];
         for (let ci = 0; ci < 2; ci++){
           const mine = tufts.filter((_, i) => i % 2 === ci);
           if (!mine.length) continue;
           const gMat = new THREE.MeshLambertMaterial({ color: cols[ci] });
-          const inst = new THREE.InstancedMesh(new THREE.ConeGeometry(.5, 5.6, 4), gMat, mine.length);
+          const inst = new THREE.InstancedMesh(tuftGeo, gMat, mine.length);
           const d = new THREE.Object3D(); inst.name = "terrain-grass-3d";
           mine.forEach((t, i) => {
-            d.position.set(t.x, 2.6 * t.s + this.heightAt(t.x, t.y), t.y);
-            d.rotation.set(Math.sin(t.r) * .13, t.r, Math.cos(t.r) * .13); d.scale.set(t.s * .7, t.s, t.s * .7);
+            d.position.set(t.x, this.heightAt(t.x, t.y), t.y);
+            d.rotation.set(0, t.r, 0); d.scale.set(t.s, t.s * .8, t.s);
             d.updateMatrix(); inst.setMatrixAt(i, d.matrix);
           });
-          inst.castShadow = true; grp.add(inst);
+          grp.add(inst);
         }
       }
       const rocks = [];
@@ -1494,6 +1544,15 @@ const Engine3D = {
     return this._finishUnit(g, visual, u, G, preview);
   },
 
+  /* 依時段調 IBL 強度：PBR 材質的 envMapIntensity 預設 1（永晝），buildMap 與單位生成都要套 */
+  _applyEnvIntensity(root){
+    const k = this._envIntensity == null ? 1 : this._envIntensity;
+    root.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const mt of mats) if (mt.isMeshStandardMaterial && mt.envMapIntensity !== k){ mt.envMapIntensity = k; mt.needsUpdate = true; }
+    });
+  },
   _finishUnit(g, visual, u, G, preview){
     if (preview){ this._linearize(g); return g; }
     // 戰場一律保留真 3D visual；圖片只供部署卡與圖鑑使用。
@@ -1523,6 +1582,7 @@ const Engine3D = {
     g.userData.observedRotorMotion=false;
     this._linearize(g);
     this._toonify(g);
+    this._applyEnvIntensity(g);
     return g;
   },
 
@@ -2093,10 +2153,36 @@ const Engine3D = {
   },
 
   /* ---------- 每幀渲染（相機同步自 Camera3D） ---------- */
+  /* 自適應畫質（技術10部 2026-07-21，回應「效能沒改善」）：以實際幀間隔 EMA 分級降載，
+   * 弱機自動犧牲描邊/陰影解析/渲染解析度換流暢；強機自動回滿。等級變化寫入 _qaPerfTier 供 diag 頁讀。 */
+  _perfGovern(now){
+    const gap = now - (this._pgAt || now); this._pgAt = now;
+    if (gap <= 0 || gap > 250) return;                       // 首幀/切分頁跳過
+    this._pgEma = this._pgEma == null ? gap : this._pgEma * 0.92 + gap * 0.08;
+    const tier = this._pgTier || 0;
+    if (this._pgEma > 34 && tier < 3){ this._pgSlow = (this._pgSlow||0)+1; this._pgFast = 0; }
+    else if (this._pgEma < 20 && tier > 0){ this._pgFast = (this._pgFast||0)+1; this._pgSlow = 0; }
+    else { this._pgSlow = 0; this._pgFast = 0; }
+    let next = tier;
+    if (this._pgSlow > 60){ next = tier + 1; this._pgSlow = 0; this._pgEma = 25; }
+    if (this._pgFast > 360){ next = tier - 1; this._pgFast = 0; this._pgEma = 25; }
+    if (next === tier) return;
+    this._pgTier = next; this._qaPerfTier = next;
+    this.outlineOn = next < 1;                                // 級1：關描邊（第二次全場景渲染）
+    const sz = next < 2 ? 1024 : 512;                        // 級2：陰影貼圖減半
+    if (this._sun && this._sun.shadow.mapSize.x !== sz){
+      this._sun.shadow.mapSize.set(sz, sz);
+      if (this._sun.shadow.map){ this._sun.shadow.map.dispose(); this._sun.shadow.map = null; }
+    }
+    // 級3：降渲染解析度（初始即 ratio 1 固定 960×600，setSize 需重呼叫才吃新 ratio）
+    this.renderer.setPixelRatio(next < 3 ? 1 : 0.75);
+    this.renderer.setSize(960, 600, false);
+  },
   render(G){
     if (!this.ok) return;
-    if (this._mapRef !== G.map){ this.buildMap(G); this._mapRef = G.map; }
+    if (this._mapRef !== G.map){ this.buildMap(G); this._mapRef = G.map; this._applyEnvIntensity(this.scene); } // 須在 buildMap 完成後套（地形是後加的）
     const now = performance.now(), dt = Math.min(0.05, (now - (this._at || now)) / 1000); this._at = now;
+    this._perfGovern(now);
     this.syncUnits(G, now, dt);
     this.syncFx(G);
     // 動畫推進

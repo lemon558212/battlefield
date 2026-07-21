@@ -142,7 +142,7 @@ const Fog = {
         for(let i=1;i<pts.length;i++)sc.lineTo(pts[i].sx/K,pts[i].sy/K);
         sc.closePath();
       }
-      sc.fillStyle=s===1?"rgba(52,64,84,0.20)":"rgba(38,48,66,0.48)";   // 藍灰紗，非黑塊
+      sc.fillStyle=s===1?"rgba(52,64,84,0.15)":"rgba(24,30,44,0.55)";   // 藍灰紗，非黑塊；未探索加深拉開層次（2026-07-21 洗白回饋）
       sc.fill();
     }
     ctx.save(); ctx.imageSmoothingEnabled=true;

@@ -250,17 +250,14 @@ const UI = {
       rows += Object.keys(CHARACTERS).map(k=>{
         const chr = CHARACTERS[k];
         if (!allow.includes(CLASS_BASE[k].domain)) return "";
+        // UI 慣例（使用者 2026-07-21 拍板，比照 VC/FE 名冊）：召喚不了的不出現——
+        // 未入隊（unlockCh 未到）與本章禁用一律不渲染；「已出戰」保留灰卡（否則玩家以為角色消失）。
         const spBan = Game.storySpecial && Game.storySpecial();
-        if (spBan && spBan.type === "ban" && spBan.cls === k) return `<button class="unitBtn locked" disabled>
-          <span class="unitArt art-${k}" aria-hidden="true"></span>
-          <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">⛔ 本章停職</span></span></button>`;
-        const locked = (chr.unlockCh||1) > story;
+        if (spBan && spBan.type === "ban" && spBan.cls === k) return "";
+        if ((chr.unlockCh||1) > story) return "";
         const used = Game._charAssigned && Game._charAssigned[k];
         const c = unitCost(nat.id,k);
         const on = Game.deployCls===k && Game.deployNamed ? " on" : "";
-        if (locked) return `<button class="unitBtn locked" disabled>
-          <span class="unitArt art-${k}" aria-hidden="true"></span>
-          <span class="unitCopy"><b>？？？</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">🔒 第 ${chr.unlockCh} 章加入</span></span></button>`;
         if (used) return `<button class="unitBtn used" disabled>
           <span class="unitArt art-${k}" aria-hidden="true"></span>
           <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">✔ 已出戰</span></span></button>`;
@@ -273,19 +270,15 @@ const UI = {
     for (const dom of ["land","sea","air"]){
       if (!allow.includes(dom)) continue;
       const keys = Object.keys(CLASS_BASE).filter(k=>CLASS_BASE[k].domain===dom);
-      rows += `<div class="grpHead">${story ? groups[dom]+"（通用兵員）" : groups[dom]}</div>`;
-      rows += keys.map(k=>{
+      const body = keys.map(k=>{
         const c = unitCost(nat.id,k), u=nat.units[k];
         const cp = (k==="tank"||CLASS_BASE[k].big||dom==="air")?2:1;
         const zh = CLASS_BASE[k].zh;
+        // 同上：本章禁用/尚未解鎖的載具直接不出現（召喚不了的不上清單）。
         const spBan2 = story && Game.storySpecial && Game.storySpecial();
-        if (spBan2 && spBan2.type === "ban" && spBan2.cls === k) return `<button class="unitBtn locked" disabled>
-          <span class="unitArt art-${k}" aria-hidden="true"></span>
-          <span class="unitCopy"><b>${zh}</b><br><span class="weapon">⛔ 本章不可用</span></span></button>`;
+        if (spBan2 && spBan2.type === "ban" && spBan2.cls === k) return "";
         const vu = story && (typeof VEHICLE_UNLOCK !== "undefined") && VEHICLE_UNLOCK[k];
-        if (vu && vu > story) return `<button class="unitBtn locked" disabled>
-          <span class="unitArt art-${k}" aria-hidden="true"></span>
-          <span class="unitCopy"><b>${zh}</b><br><span class="weapon">🔒 第 ${vu} 章解鎖</span></span></button>`;
+        if (vu && vu > story) return "";
         const on = Game.deployCls===k && !Game.deployNamed ? " on" : "";
         const chr = (!story && typeof CHARACTERS !== "undefined") ? CHARACTERS[k] : null;
         const title = chr ? `<b>${chr.name}</b>｜${zh}` : `<b>${zh}</b>${u.label !== zh ? "｜" + u.label : ""}`;
@@ -295,6 +288,7 @@ const UI = {
           <span class="unitCopy">${title}<br><span class="weapon">${sub}</span></span>
           <em>${c}點·${cp}CP</em></button>`;
       }).join("");
+      if (body) rows += `<div class="grpHead">${story ? groups[dom]+"（通用兵員）" : groups[dom]}</div>` + body;
     }
     this.el("side").innerHTML = `
       <h3>部署（${nat.name}）</h3>
