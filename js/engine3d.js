@@ -917,7 +917,9 @@ const Engine3D = {
     const ent = this._scenery[avail[(rnd() * avail.length) | 0]];
     const k0 = Math.min(s.w / ent.size.x, s.h / ent.size.z);
     const k90 = Math.min(s.w / ent.size.z, s.h / ent.size.x);
-    const rot = k90 > k0, k = Math.max(0.001, (rot ? k90 : k0)) * 0.97;
+    // ×1.06 略溢出碰撞框（2026-07-21 使用者回饋「角色跟建築有距離感」：
+    // 碰撞用腳印矩形，模型若內縮，人站到界邊視覺上像隔空——改讓牆面貼齊甚至微凸）
+    const rot = k90 > k0, k = Math.max(0.001, (rot ? k90 : k0)) * 1.06;
     const inst = ent.root.clone(true);
     inst.scale.setScalar(k);
     if (rot) inst.rotation.y = Math.PI / 2;
@@ -2098,12 +2100,25 @@ const Engine3D = {
       }
       if (mx && mx.actions.walk && mx.cur !== "shoot" && mx.cur !== "hit" && mx.cur!=="death" && mx.cur!=="wave"){
         const locomotion=mx.actions.run&&(g.userData.motion||0)>.72?"run":"walk";
-        const want=activeMove?locomotion:u.crouched&&mx.actions.crouch?"crouch":
-          (G.sel===u&&G.aimTarget&&mx.actions.aim?"aim":"idle");
-        if (want !== mx.cur && mx.actions[want]){
-          this._xfade(mx, want, 0.22);mx.actions[want].paused=want==="idle"&&mx.staticIdle;
-          g.userData.actionHistory.push({name:want,at:Math.round(now)});
-          if(g.userData.actionHistory.length>24)g.userData.actionHistory.shift();
+        const aiming=G.sel===u&&G.aimTarget&&!activeMove;
+        // 合理化（2026-07-21）：瞄準中必舉槍——有 aim 片段用 aim；沒有就用 shoot 片段 45% 處定格當持槍姿勢
+        if (aiming && !mx.actions.aim && mx.actions.shoot){
+          if (mx.cur !== "aimhold"){
+            if (mx.actions[mx.cur] && mx.actions[mx.cur].stop) mx.actions[mx.cur].stop();
+            const a = mx.actions.shoot;
+            a.reset().play(); a.paused = true; a.time = (a.getClip().duration || 1) * 0.45;
+            mx.cur = "aimhold";
+            g.userData.actionHistory.push({name:"aimhold",at:Math.round(now)});
+          }
+        } else {
+          if (mx.cur === "aimhold"){ mx.actions.shoot.paused = false; mx.actions.shoot.stop(); mx.cur = "_"; }
+          const want=activeMove?locomotion:u.crouched&&mx.actions.crouch?"crouch":
+            (aiming&&mx.actions.aim?"aim":"idle");
+          if (want !== mx.cur && mx.actions[want]){
+            this._xfade(mx, want, 0.22);mx.actions[want].paused=want==="idle"&&mx.staticIdle;
+            g.userData.actionHistory.push({name:want,at:Math.round(now)});
+            if(g.userData.actionHistory.length>24)g.userData.actionHistory.shift();
+          }
         }
       }
       seen[u.id] = 1;
@@ -2243,7 +2258,11 @@ const Engine3D = {
         mx.actions.shoot.setLoop(THREE.LoopOnce); mx.actions.shoot.clampWhenFinished = false;
         mx.mixer.addEventListener("finished", () => { if (mx.cur !== "shoot") return; Engine3D._xfade(mx, "idle", 0.18); });
       }
-      this._xfade(mx, "shoot", 0.1);
+      if (mx.cur === "aimhold"){                             // 持槍定格中開火：解凍從頭播（不能對同一 action 交叉淡化）
+        const a = mx.actions.shoot; a.paused = false; a.reset().play(); mx.cur = "shoot";
+      } else {
+        this._xfade(mx, "shoot", 0.1);
+      }
       g.userData.observedShoot=true;
       g.userData.actionHistory.push({name:"shoot",at:Math.round(performance.now())});
       break;

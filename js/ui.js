@@ -7,8 +7,11 @@
 const UI = {
   el(id){ return document.getElementById(id); },
 
-  /* 立繪去背（2026-07-21 使用者裁定：對話立繪不得帶白底）——
-   * 從四邊界洪水填充清除近底色像素（保臉部亮色：只清與邊界連通的區域），結果快取。 */
+  /* 立繪透明版路徑（2026-07-21 第二版裁定：改離線烘焙 assets/portraits-cut/*.png，
+   * 運行時零處理零環境差異；onerror 回退原圖。烘焙腳本＝tools/bake-portraits.py 同 176/20 兩階段參數 */
+  cutSrc(src){ return String(src).replace("portraits-full", "portraits-cut").replace(/\.jpg$/i, ".png"); },
+
+  /* （已退役 2026-07-21）運行時去背——改為離線烘焙，避免「開發機成功/使用者機失敗」的環境賭注 */
   _matteCache: {},
   matte(src, apply){
     if (!src) return;
@@ -194,7 +197,7 @@ const UI = {
       Sfx.voice(u.cls, "sel");
     }
     el.innerHTML = `
-      <img data-matte="${img}" alt="" class="${vart ? "veh" : ""}">
+      <img src="${this.cutSrc(img)}" onerror="this.src='${img}'" alt="" class="${vart ? "veh" : ""}">
       <div class="cc-info">
         <div class="cc-name">${named ? "★" + u.charName : u.label}</div>
         ${named && chr ? `<div class="cc-trait">${chr.trait.desc}</div>` : ""}
@@ -233,15 +236,14 @@ const UI = {
       const callsign = chr && chr.callsign && chr.callsign !== d.who ? `<span class="dlgCallsign">「${chr.callsign}」</span>` : "";
       M.innerHTML = `
         <div class="dlgStage" id="dlgNext">
-          ${faces.left ? `<img class="dlgFaceL${side==="left"?" active":""}" data-matte="${faces.left}" alt="">` : ""}
-          ${faces.right ? `<img class="dlgFaceR${side==="right"?" active":""}" data-matte="${faces.right}" alt="">` : ""}
+          ${faces.left ? `<img class="dlgFaceL${side==="left"?" active":""}" src="${this.cutSrc(faces.left)}" onerror="this.src='${faces.left}'" alt="">` : ""}
+          ${faces.right ? `<img class="dlgFaceR${side==="right"?" active":""}" src="${this.cutSrc(faces.right)}" onerror="this.src='${faces.right}'" alt="">` : ""}
           <div class="dlgBox">
             <div class="dlgName">${d.who || ""}${callsign}</div>
             <div class="dlgText" id="dlgText"></div>
             <div class="dlgHint">▼（${i+1}/${script.length}）</div>
           </div>
         </div>`;
-      M.querySelectorAll("img[data-matte]").forEach(el2 => this.matte(el2.dataset.matte, url => { el2.src = url; }));
       const t = this.el("dlgText"), full = d.text; let k = 0;
       typing = setInterval(() => { k++; t.textContent = full.slice(0, k);
         if (k >= full.length){ clearInterval(typing); typing = null; } }, 28);

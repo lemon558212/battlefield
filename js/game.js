@@ -561,6 +561,13 @@ const Game = {
     pointerType = pointerType || "mouse";
     // 只讀取最後一幀真正顯示的相機；輸入時不得瞬移相機，否則畫面與命中座標會錯位。
     const w = (typeof Camera3D!=="undefined") ? Camera3D.unproject(x,y) : [x,y];
+    // 敵方回合也可自由平移鏡頭（2026-07-21 使用者回饋：看不到就自己拉畫面）
+    if (this.state==="enemy"){
+      if (button!==0) return;
+      this._mapDrag = { sx:x, sy:y, cx:clientX, cy:clientY, wx:null, wy:null,
+        pick:null, pointerType, moved:false, t:Date.now() };
+      return;
+    }
     if (this.state==="deploy" || this.state==="cmd"){
       const pick = this.pickUnitAtScreen(x,y,this.playerSide,pointerType);
       if (button===2){
@@ -848,6 +855,7 @@ const Game = {
     if (this.sel && this.sel.charName && typeof Sfx !== "undefined" && Math.random() < 0.5)
       Sfx.voice(this.sel.cls, "atk");                       // 具名角色開火戰吼（節流在 Sfx.voice）
     this.onPlayerFired();                                   // 章節特殊規則：靜默滲透檢查
+    this.sel.facing = Math.atan2(t.y - this.sel.y, t.x - this.sel.x); // 合理化：開火必轉身面向目標（槍口對人）
     const ev = Combat.fire(this.map, this.sel, t, part);
     this.pushFx(ev);
     this.selFired = true;
@@ -1112,6 +1120,7 @@ const Game = {
       if (repair && dist(u,repair)<60){ repair.hp=Math.min(repair.maxhp,repair.hp+300);
         this.fx.push({type:"hitfx",x:repair.x,y:repair.y,dmg:"+300",t:0,heal:true});
       } else if (canShoot){
+        u.facing = Math.atan2(target.y - u.y, target.x - u.x);   // 敵軍開火同樣先轉身面向目標
         this.pushFx(Combat.fire(this.map,u,target,p.part||"body"));
         p.didFire=true;
         UI.log(`敵 ${u.label}（${u.weaponName}）開火`);
