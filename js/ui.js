@@ -260,10 +260,11 @@ const UI = {
         if (used) return `<button class="unitBtn used" disabled>
           <span class="unitArt art-${k}" aria-hidden="true"></span>
           <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">✔ 已出戰</span></span></button>`;
+        const port = chr.fullPortrait || chr.portrait;
         return `<button class="unitBtn${on}" data-cls="${k}" data-named="1">
-          <span class="unitArt art-${k}" aria-hidden="true"></span>
-          <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">${chr.trait.desc}</span></span>
-          <em>${c}點·1CP</em></button>`;
+          <span class="unitArt art-${k}"${port?` style="background-image:url('${port}')"`:""} aria-hidden="true"></span>
+          <span class="unitCopy"><b>${chr.name}</b><span class="clsTag">${CLASS_BASE[k].zh}</span><br><span class="weapon trait">${chr.trait.desc}</span></span>
+          <em>${c}<i>點·1CP</i></em></button>`;
       }).join("");
     }
     for (const dom of ["land","sea","air"]){
@@ -291,13 +292,21 @@ const UI = {
       }).join("");
       if (body) rows += `<div class="grpHead">${story ? groups[dom]+"（載具支援）" : groups[dom]}</div>` + body;
     }
+    // 部署面板改版（UI13部 2026-07-21，依使用者核可之 Figma 稿：斜切金條+章數浮水印+資訊卡+金色CTA）
+    const chInfo = story ? `<span class="dpTag">MISSION ${String(story).padStart(2,"0")}</span>
+        <span class="dpWm">${String(story).padStart(2,"0")}</span>
+        <div class="dpTitle">第 ${story} 章｜${STORY[story-1].title}</div>
+        <div class="dpSub">部署階段 — 選擇出戰隊員</div>`
+      : `<span class="dpTag">DEPLOY</span><div class="dpTitle">部署（${nat.name}）</div><div class="dpSub">${nat.trait.desc}</div>`;
     this.el("side").innerHTML = `
-      <h3>部署（${nat.name}）</h3>
-      <p>剩餘點數 <b id="bud">${Game.budgetLeft}</b> / ${Game.map.budget}</p>
-      <p class="fine">特性：${nat.trait.desc}</p>
+      <div class="dpHead">${chInfo}</div>
+      <div class="dpStats">
+        <div class="dpStat"><span>部署點數</span><b id="bud" class="gold">${Game.budgetLeft} / ${Game.map.budget}</b></div>
+        <div class="dpStat"><span>可部署</span><b class="cyan">${story?"具名隊員":"全兵種"}</b></div>
+      </div>
       <div class="ulist">${rows}</div>
-      <p class="fine">左鍵放置於藍框（艦艇需放水域）、右鍵移除。坦克/大艦上限各 2。</p>
-      <button id="btnGo" class="big">開始戰鬥 ▶</button>
+      <p class="fine">點卡片選人 → 點戰場藍框放置｜右鍵移除。坦克/大艦上限各 2。</p>
+      <button id="btnGo" class="big cta">開 始 戰 鬥　▶</button>
       <button id="btnBack">返回主選單</button>
       <div id="log"></div>`;
     for (const b of this.el("side").querySelectorAll(".unitBtn"))
