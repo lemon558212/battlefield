@@ -309,12 +309,9 @@ func _start_battle() -> void:
 
 # ---------- 單位 ----------
 func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
-	# 我方＝立繪本人（具名英雄）；敵軍＝無名 3D 士兵紅染（英雄立繪不得給敵人用）。
-	var node: Unit
-	if side_i == player_side:
-		node = Unit.spawn_portrait(GameData.portrait_path(cls), cls, side_i, true)
-	else:
-		node = Unit.spawn_model(CLASS_MODEL.get(cls, "res://assets/models/chars/soldier.glb"), cls, side_i)
+	# 戰場＝3D 動畫身體（VC 做法，立繪只留 UI）；player 藍環自然色、enemy 紅環紅疊色。
+	var node := Unit.spawn(CLASS_MODEL.get(cls, "res://assets/models/chars/soldier.glb"),
+			cls, side_i, side_i == player_side)
 	add_child(node)
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
