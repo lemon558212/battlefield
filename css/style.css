@@ -33,6 +33,11 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .dpStat span { display:block; color:#8a96a6; font-size:11px; }
 .dpStat b { font-size:17px; letter-spacing:1px; }
 .dpStat .gold { color:#f1c15a; } .dpStat .cyan { color:#6bc7ff; }
+/* 部署覆層：疊在戰場右側（Figma 稿版面），半透明深底不遮左側地圖 */
+#side.dpOverlay { position:absolute; top:0; right:0; bottom:0; width:340px; max-width:44%;
+  z-index:6; background:rgba(13,17,24,0.93); border:none; border-left:2px solid rgba(241,193,90,0.55);
+  overflow-y:auto; backdrop-filter:blur(2px); }
+#side.dpOverlay .dpHead { margin:-10px -10px 0; }
 .hudHead { margin-bottom:8px; padding-bottom:12px; }
 .hudHead .dpTitle { font-size:17px; }
 .hudHead .cp { margin:4px 0 0; font-size:16px; color:#f1c15a; letter-spacing:3px; }

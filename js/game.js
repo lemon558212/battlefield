@@ -795,7 +795,25 @@ const Game = {
     this.over={winner:u.side, why:"佔領敵方主堡"};
   },
 
-  pushFx(ev){ for(const e of ev){ e.t=0; this.fx.push(e); if(typeof Sfx!=="undefined") Sfx.event(e); } },
+  /* 動作合理化（dept-12 2026-07-21 使用者通則裁定）：步兵開火先「舉槍」再出彈——
+   * 開火當下立即起手 shoot 動畫，彈道/音效/傷害演出整批延遲 0.3s（負 t 起算），
+   * 讓子彈在動畫舉到位時才離膛。載具/艦炮無舉槍動作，維持即時。 */
+  pushFx(ev){
+    const RAISE = 0.3, raised = new Set();
+    const needRaise = ev.some(e => e.type === "tracer" && /rifle|carbine|lmg|sniper|rocket|mortar/.test(e.w || ""));
+    for(const e of ev){
+      e.t = needRaise ? -RAISE : 0;
+      this.fx.push(e);
+      if (needRaise && e.type === "tracer" && !raised.has(e.x1 + "," + e.y1)){
+        raised.add(e.x1 + "," + e.y1); e._preRaised = true;
+        if (typeof Engine3D !== "undefined" && Engine3D.ok) Engine3D._tryShootAnim(e.x1, e.y1);
+      }
+      if (typeof Sfx!=="undefined"){
+        if (needRaise) setTimeout(() => Sfx.event(e), RAISE * 1000);
+        else Sfx.event(e);
+      }
+    }
+  },
 
   /* ---------- 主迴圈 ---------- */
   loop(ts){

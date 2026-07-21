@@ -48,11 +48,15 @@ const Camera3D = {
 
   /* 依遊戲狀態算目標相機並平滑靠近。輸入事件只讀最後渲染狀態，不得呼叫 instant。 */
   applyFor(G, instant, dt){
-    // 敵方行動跟拍（dept-04 2026-07-21 使用者回饋：敵兵走出迷霧仍看不清在幹嘛）：
-    // 行動中的敵兵若已被我方看見，鏡頭切第三人稱跟拍（VC 慣例）；隱形敵兵照舊俯瞰（迷霧公平性）。
-    const foe = G.state === "enemy" && G.curPlan && G.curPlan.unit;
+    // 敵方行動跟拍（dept-04 2026-07-21）＋防亂跳（同日使用者回饋「跳來跳去很亂」）：
+    // 每個行動計畫只做一次跟拍決策——敵兵一旦被看見即鎖定跟拍到該行動結束，
+    // 不因可見性閃爍在跟拍↔俯瞰之間來回切；隱形敵兵全程俯瞰（迷霧公平性）。
+    const plan = G.state === "enemy" ? G.curPlan : null;
+    if (plan !== this._foePlan){ this._foePlan = plan; this._foeLock = false; }
+    const foe = plan && plan.unit;
+    if (foe && foe.alive && !this._foeLock && G.enemyVisible(foe)) this._foeLock = true;
     if (G.state === "act" && G.sel) this.update(G.sel, this.t);
-    else if (foe && foe.alive && G.enemyVisible(foe)) this.update(foe, this.t);
+    else if (foe && foe.alive && this._foeLock) this.update(foe, this.t);
     else this.setOverview(G.map, G.playerSide, this.t);
     if (instant || !this._init){ this._snap(); this._init = true; }
     else this._ease(dt);

@@ -2017,6 +2017,7 @@ const Engine3D = {
   syncFx(G){
     const seen = new Set();
     for (const f of G.fx){
+      if (f.t < 0) continue;                                    // 舉槍延遲中：彈道尚未離膛
       if (f.type !== "tracer" && f.type !== "boom" &&
           f.type !== "hitfx" && f.type !== "death") continue;   // 文字類仍走 2D
       if (f.type === "hitfx" && f.heal) continue;               // 治療只顯示 2D 綠字
@@ -2040,7 +2041,7 @@ const Engine3D = {
       objs.push(line);
       const muzzle = new THREE.PointLight(0xffcf70, 2.2, 90);   // 槍口閃光
       muzzle.position.set(f.x1, h1 + 2, f.y1); objs.push(muzzle);
-      this._tryShootAnim(f.x1, f.y1);
+      if (!(f.t !== undefined && f._preRaised)) this._tryShootAnim(f.x1, f.y1); // 舉槍延遲批已於 pushFx 起手，避免重播抖動
     } else if (f.type === "hitfx"){                             // 命中：彈著塵土揚起
       const hb = this.heightAt(f.x, f.y) + 2;
       for (let i = 0; i < 3; i++){
@@ -2306,7 +2307,7 @@ const Engine3D = {
       if (G.aimTarget === u){ const mid = cam.project(u.x, u.y, alt + centerH);
         if (mid){ ctx.strokeStyle = "#ff5a4a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mid.sx, mid.sy, Math.max(10, 16 * mid.scale), 0, 7); ctx.stroke(); } }
     }
-    for (const f of G.fx){ if (f.type === "tracer" || f.type === "boom") continue; Render3D._fx(ctx, cam, f); } // 曳光/爆炸已 3D 化
+    for (const f of G.fx){ if (f.t < 0 || f.type === "tracer" || f.type === "boom") continue; Render3D._fx(ctx, cam, f); } // 曳光/爆炸已 3D 化；舉槍延遲中不顯示
     if (cam.mode === "follow") Render3D._crosshair(ctx, cam.W, cam.H, cam.horizonY());
     this._paperGrade(ctx, cam.W, cam.H);
   },

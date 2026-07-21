@@ -234,7 +234,11 @@ const UI = {
   /* ---------- 部署 ---------- */
   showDeploy(){
     this.hideAll();
-    this.el("side").style.display="block";
+    // 部署面板疊在戰場右側（依 Figma 核可稿）：左看地圖右選人，開始戰鬥即消失（hideAll 歸位）
+    const side=this.el("side"), stage=document.getElementById("stage");
+    if (stage && side.parentElement !== stage) stage.appendChild(side);
+    side.classList.add("dpOverlay");
+    side.style.display="block";
     this.refreshDeploy();
   },
   refreshDeploy(){
@@ -452,5 +456,14 @@ const UI = {
     if (this.el("btnRetry"))  this.el("btnRetry").onclick =()=>{ reset(); this.showBriefing(chN); };
     this.el("btnAgain").onclick=()=>{ reset(); Game.storyChapter=null; this.showMenu(); };
   },
-  hideAll(){ this.el("menu").style.display="none"; this.el("side").style.display="none"; this.hideAim(); }
+  hideAll(){
+    this.el("menu").style.display="none";
+    const side=this.el("side"); side.style.display="none";
+    // 部署覆層歸位（2026-07-21 使用者裁定：部署面板融入遊戲畫面、開戰即消失）
+    if (side.classList.contains("dpOverlay")){
+      side.classList.remove("dpOverlay");
+      const wrap=document.getElementById("wrap"); if (wrap) wrap.appendChild(side);
+    }
+    this.hideAim();
+  }
 };
