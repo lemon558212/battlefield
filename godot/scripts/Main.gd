@@ -7,11 +7,63 @@ var units: Array[Unit] = []
 var selected: Unit = null
 var _tracers: Array = []   # {mesh, ttl}
 
+var _selftest := false
+var _shots_seen := 0
+
 func _ready() -> void:
 	_build_env()
 	_build_scenery()
 	_spawn_units()
 	print("[Main] P0 ready — units=%d" % units.size())
+	if "selftest" in OS.get_cmdline_user_args():
+		_selftest = true
+		_run_selftest()
+
+func _run_selftest() -> void:
+	# 自動腳本：選狙擊手→走向敵人→開槍→分階段截圖→退出（供 AI 無頭驗收）
+	await get_tree().create_timer(0.6).timeout
+	var me: Unit = null
+	var foe: Unit = null
+	for u in units:
+		if u.side == 0 and u.cls == "sniper": me = u
+		if u.side == 1: foe = u
+	if me == null or foe == null:
+		print("[selftest] FAIL no unit"); get_tree().quit(2); return
+	selected = me
+	cam.set_follow(me)
+	for c in units: c.shot_fired.connect(func(_a, _b): _shots_seen += 1)
+	# 站姿截圖
+	await get_tree().create_timer(0.5).timeout
+	_snap("res://selftest_idle.png")
+	# 移動
+	me.move_to(foe.global_position + Vector3(4, 0, 4))
+	await get_tree().create_timer(0.4).timeout
+	print("[selftest] moving state=", me._state)
+	_snap("res://selftest_walk.png")
+	await get_tree().create_timer(1.6).timeout
+	# 開槍
+	me.shoot_at(foe)
+	await get_tree().create_timer(0.32).timeout
+	print("[selftest] firing state=", me._state)
+	_snap("res://selftest_shoot.png")
+	# 近拍持槍/射擊姿態（評估動作品質）
+	cam.set_follow(null)
+	cam.dist = 5.5
+	cam.pitch_deg = 12.0
+	cam.focus = me.global_position + Vector3(0, 1.0, 0)
+	me.shoot_at(foe)
+	await get_tree().create_timer(0.15).timeout
+	_snap("res://selftest_pose_aim.png")
+	await get_tree().create_timer(0.3).timeout
+	_snap("res://selftest_pose_shoot.png")
+	await get_tree().create_timer(0.8).timeout
+	print("[selftest] shots_seen=", _shots_seen, " aims=", me.anim_names)
+	get_tree().quit(0)
+
+func _snap(path: String) -> void:
+	var img := get_viewport().get_texture().get_image()
+	img.save_png(path)
+	print("[selftest] saved ", path, " ", img.get_width(), "x", img.get_height())
 
 func _build_env() -> void:
 	# 地面
