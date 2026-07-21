@@ -335,7 +335,7 @@ const UI = {
     this.showMissionBanner();
     if (typeof Sfx!=="undefined" && Game.map) Sfx.ambient(Game.map.id, Game.mapAllow());
     this.el("side").innerHTML = `
-      <h3 id="hudTurn"></h3><div id="hudCp" class="cp"></div>
+      <div class="dpHead hudHead"><span class="dpTag" id="hudPhase">TURN</span><div class="dpTitle" id="hudTurn"></div><div id="hudCp" class="cp"></div></div>
       <div id="selInfo" class="panel"></div>
       <button id="btnTerrain" style="display:none">蹲伏掩蔽 (C)</button>
       <button id="btnUnload" style="display:none">放下跳板並卸載</button>
@@ -356,7 +356,8 @@ const UI = {
   refreshHud(){
     if (!this.el("hudTurn")) return;
     const _ph = Net.connected ? (Net.myside===Game.turnOwner?"你的回合 ▶":"對方回合…") : (Game.state==="enemy"?"敵方階段":"我方階段");
-    this.el("hudTurn").textContent = `第 ${Game.turn}/30 回合 — ${_ph}`;
+    this.el("hudTurn").textContent = `第 ${Game.turn}/30 回合｜${_ph}`;
+    const phEl=this.el("hudPhase"); if(phEl) phEl.textContent = Game.state==="enemy"?"ENEMY PHASE":"PLAYER PHASE";
     this.el("hudCp").innerHTML = "CP "+"●".repeat(Game.cp)+"○".repeat(Math.max(0,Game.cpMax-Game.cp));
     this.refreshActBar();
   },

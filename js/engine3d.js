@@ -2204,6 +2204,45 @@ const Engine3D = {
     this.renderer.setPixelRatio(next < 3 ? 1 : 0.75);
     this.renderer.setSize(960, 600, false);
   },
+  /* 建築遮擋淡化（dept-04/12 2026-07-21 使用者回饋「被建築擋住看不到行動」）：
+   * 跟拍模式下，射線打在鏡頭與被跟拍單位之間的建築/碉堡自動降為半透明，離開遮擋線平滑恢復。
+   * 材質於首次納管時 clone，避免共用材質整批變透明。 */
+  _fadeOccluders(G, cam){
+    if (this._occlMapRef !== G.map){
+      this._occlMapRef = G.map; this._occluders = [];
+      if (this.mapGroup) this.mapGroup.traverse(o => {
+        if (o.isMesh && /^(building-solid-3d|building-roof-3d|bunker-3d)$/.test(o.name)){
+          o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+          o.userData._fadeT = 1;
+          this._occluders.push(o);
+        }
+      });
+      this._occlRay = this._occlRay || new THREE.Raycaster();
+    }
+    if (!this._occluders || !this._occluders.length) return;
+    const foe = G.state === "enemy" && G.curPlan && G.curPlan.unit;
+    const u = cam.mode === "follow" ? (G.state === "act" ? G.sel : (foe && foe.alive && G.enemyVisible(foe) ? foe : null)) : null;
+    let hitSet = null;
+    if (u){
+      const from = this.camera.position;
+      const to = new THREE.Vector3(u.x, this.heightAt(u.x, u.y) + 10, u.y);
+      const dir = to.clone().sub(from); const dist = dir.length(); dir.normalize();
+      this._occlRay.set(from, dir); this._occlRay.far = dist - 2;
+      hitSet = new Set(this._occlRay.intersectObjects(this._occluders, false).map(h => h.object));
+    }
+    for (const o of this._occluders){
+      const tgt = hitSet && hitSet.has(o) ? 0.18 : 1;
+      const cur = o.userData._fadeT;
+      if (Math.abs(cur - tgt) < 0.02){ if (cur === tgt) continue; o.userData._fadeT = tgt; }
+      else o.userData._fadeT = cur + (tgt - cur) * 0.25;
+      const v = o.userData._fadeT;
+      for (const mt of (Array.isArray(o.material) ? o.material : [o.material])){
+        mt.opacity = v;
+        mt.transparent = v < 0.995;
+        mt.depthWrite = v >= 0.55;   // 深透明時不寫深度，避免描邊/陰影殘影
+      }
+    }
+  },
   render(G){
     if (!this.ok) return;
     if (this._mapRef !== G.map){
@@ -2234,6 +2273,7 @@ const Engine3D = {
     this.camera.position.set(cam.cx, cam.ch, cam.cy);
     const cp = Math.cos(cam.pitch);
     this.camera.lookAt(cam.cx + Math.cos(cam.yaw) * cp, cam.ch - Math.sin(cam.pitch), cam.cy + Math.sin(cam.yaw) * cp);
+    this._fadeOccluders(G, cam);
     this.renderer.render(this.scene, this.camera);
     // 鉛筆速寫描邊＝第二次全場景渲染：只在第三人稱近景做（俯瞰距離下描邊細於1px看不見，
     // 卻要付全場景+全單位重繪，是俯瞰視角最大單筆開銷——2026-07-21 效能複診）。
