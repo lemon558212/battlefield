@@ -38,6 +38,29 @@ const UI = {
           if (x>0) q.push(p-1); if (x<w-1) q.push(p+1);
           if (y>0) q.push(p-w); if (y<h-1) q.push(p+w);
         }
+        // 第二階段（2026-07-21）：從透明區向內續吃「灰白潑墨」（低飽和高明度），
+        // 深色輪廓線天然是防火牆——白衣/亮膚被線稿包住不會被誤刪。
+        // 閾值收緊（銀白髮誤刪教訓）：只吃「很亮且幾乎無彩度」的潑墨，髮絲/膚色留下
+        const greyish = i => { const r=px[i],g0=px[i+1],b=px[i+2];
+          const mx2=Math.max(r,g0,b), mn=Math.min(r,g0,b); return mx2>176 && (mx2-mn)<20; };
+        const q2 = [];
+        for (let p=0;p<w*h;p++){
+          if (px[p*4+3]!==0) continue;
+          const x=p%w, y=(p/w)|0;
+          if (x>0) q2.push(p-1); if (x<w-1) q2.push(p+1);
+          if (y>0) q2.push(p-w); if (y<h-1) q2.push(p+w);
+        }
+        const seen2 = new Uint8Array(w*h);
+        while (q2.length){
+          const p = q2.pop();
+          if (seen2[p]) continue; seen2[p]=1;
+          const i = p*4;
+          if (px[i+3]===0 || !greyish(i)) continue;
+          px[i+3] = 0;
+          const x=p%w, y=(p/w)|0;
+          if (x>0) q2.push(p-1); if (x<w-1) q2.push(p+1);
+          if (y>0) q2.push(p-w); if (y<h-1) q2.push(p+w);
+        }
         cx.putImageData(d, 0, 0);
         const url = cv.toDataURL("image/png");
         this._matteCache[src] = url;

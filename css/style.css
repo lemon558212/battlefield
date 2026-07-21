@@ -1,6 +1,9 @@
 /* 戰場 — UI 樣式 */
 * { box-sizing: border-box; margin: 0; }
-/* 全視窗化（2026-07-21 使用者裁定：要出品的遊戲，畫面就該吃滿整個視窗） */
+/* 全視窗化（2026-07-21 使用者裁定：要出品的遊戲，畫面就該吃滿整個視窗）
+ * --uik＝畫面放大倍率（stage寬/960，main.js 於 resize 時更新）：
+ * 所有 DOM 覆層（選單/面板/角色卡/瞄準）以 transform:scale 等比放大，內容跟畫面一起長大。 */
+:root { --uik: 1; }
 html, body { height:100%; }
 body { background:#07090c; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-serif;
   display:flex; justify-content:center; align-items:center; overflow:hidden; -webkit-text-size-adjust:100%; }
@@ -37,7 +40,8 @@ body { background:#07090c; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 .dpStat b { font-size:17px; letter-spacing:1px; }
 .dpStat .gold { color:#f1c15a; } .dpStat .cyan { color:#6bc7ff; }
 /* 部署覆層：疊在戰場右側（Figma 稿版面），半透明深底不遮左側地圖 */
-#side.dpOverlay { position:absolute; top:0; right:0; bottom:0; width:340px; max-width:44%;
+#side.dpOverlay { position:absolute; top:0; right:0; width:340px; max-width:none;
+  height:calc(100%/var(--uik)); transform:scale(var(--uik)); transform-origin:top right;
   z-index:6; background:rgba(13,17,24,0.93); border:none; border-left:2px solid rgba(241,193,90,0.55);
   overflow-y:auto; backdrop-filter:blur(2px); }
 /* 戰鬥 HUD 覆層：更窄更透，少遮戰場 */
@@ -100,7 +104,9 @@ body { background:#07090c; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 @font-face { font-family:"TitleSerif"; src:url("../assets/fonts/title-subset.woff2") format("woff2");
   font-display:swap; }
 /* 標題畫面（《曙光之戰》2026-07-19 改版：主視覺＋鳴潮式斜切深色 UI） */
-#menu { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+#menu { position:absolute; left:0; top:0; width:calc(100%/var(--uik)); height:calc(100%/var(--uik));
+  transform:scale(var(--uik)); transform-origin:top left;
+  display:none; flex-direction:column; align-items:center; justify-content:center;
   gap:12px; z-index:5; overflow-y:auto; padding:20px 0 28px;
   background:
     linear-gradient(105deg, rgba(10,13,18,0.88) 0%, rgba(10,13,18,0.55) 34%, rgba(10,13,18,0.06) 62%, rgba(10,13,18,0.42) 100%),
@@ -219,6 +225,7 @@ body { background:#07090c; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 @keyframes dlgblink { 50% { opacity:0.35; } }
 /* 戰場角色卡：選中單位大立繪（左下，不遮準心） */
 #charCard { position:absolute; left:10px; bottom:12px; z-index:4; display:none;
+  transform:scale(var(--uik)); transform-origin:bottom left;
   align-items:center; gap:10px; background:rgba(18,22,14,0.85); border:1px solid #6b7a4f;
   border-radius:6px; padding:6px 12px 6px 6px; pointer-events:none;
   box-shadow:0 3px 12px rgba(0,0,0,0.5); }
@@ -229,7 +236,7 @@ body { background:#07090c; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #charCard .cc-trait { color:#b7c69a; font-size:12px; margin-top:2px; }
 #charCard .cc-hp { color:#e8e6d8; font-size:12px; margin-top:2px; }
 
-#aim { position:absolute; left:50%; top:18%; transform:translateX(-50%); display:none; z-index:6;
+#aim { position:absolute; left:50%; top:18%; transform:translateX(-50%) scale(var(--uik)); transform-origin:top center; display:none; z-index:6;
   background:#242b1f; border:2px solid #8a7f34; padding:12px; font-size:13px; line-height:1.6; min-width:230px; }
 #aim .parts { display:flex; gap:8px; margin:8px 0; }
 #aim button { flex:1; padding:8px; background:#39442e; color:#e8e6d8; border:1px solid #55643f; cursor:pointer; font-family:inherit; }
