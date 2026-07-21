@@ -39,6 +39,37 @@ func _clear() -> void:
 	for c in root.get_children():
 		c.queue_free()
 
+# 載圖：優先用匯入資源，失敗則執行期直接讀原始檔（繞過匯入快取，桌面版從源碼跑最穩）
+var _tex_cache := {}
+func _load_tex(path: String) -> Texture2D:
+	if _tex_cache.has(path):
+		return _tex_cache[path]
+	var tex: Texture2D = null
+	if ResourceLoader.exists(path):
+		var r = load(path)
+		if r is Texture2D:
+			tex = r
+	if tex == null:
+		# 匯入失敗(大圖 headless 壓不動)時，讀原始 bytes 自己解碼
+		var bytes := PackedByteArray()
+		if FileAccess.file_exists(path):
+			bytes = FileAccess.get_file_as_bytes(path)
+		if bytes.is_empty():
+			var abs := ProjectSettings.globalize_path(path)
+			if FileAccess.file_exists(abs):
+				bytes = FileAccess.get_file_as_bytes(abs)
+		if not bytes.is_empty():
+			var img := Image.new()
+			var err := FAILED
+			if path.ends_with(".png"):
+				err = img.load_png_from_buffer(bytes)
+			else:
+				err = img.load_jpg_from_buffer(bytes)
+			if err == OK:
+				tex = ImageTexture.create_from_image(img)
+	_tex_cache[path] = tex
+	return tex
+
 func _panel(col := Color(0, 0, 0, 0.82)) -> ColorRect:
 	var cr := ColorRect.new()
 	cr.color = col
@@ -61,9 +92,24 @@ func _btn(txt: String, size := 20) -> Button:
 # ---------- 主選單 ----------
 func show_menu(has_save: bool) -> void:
 	_clear()
-	var bg := _panel(Color(0.04, 0.05, 0.07, 1.0))
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.add_child(bg)
+	var vpm := get_viewport().get_visible_rect().size
+	# 封面主視覺（黎明狙擊手）鋪滿背景，蓋一層漸層暗幕讓標題/按鈕可讀
+	var cover_tex := _load_tex("res://assets/art/title-key-visual.jpg")
+	if cover_tex:
+		var cover := TextureRect.new()
+		cover.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		cover.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		cover.texture = cover_tex
+		cover.size = vpm
+		cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+		root.add_child(cover)
+		var scrim := _panel(Color(0.03, 0.04, 0.06, 0.45))
+		scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+		root.add_child(scrim)
+	else:
+		var bg := _panel(Color(0.04, 0.05, 0.07, 1.0))
+		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		root.add_child(bg)
 	var vb := VBoxContainer.new()
 	vb.set_anchors_preset(Control.PRESET_CENTER)
 	vb.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -212,7 +258,17 @@ func _dlg_step() -> void:
 func _render_dlg(d: Dictionary, active_side: String) -> void:
 	_clear()
 	var vp := get_viewport().get_visible_rect().size
-	var bg := _panel(Color(0.03, 0.04, 0.05, 0.55))
+	# 對話背景（治「沒背景很奇怪」）：鋪主視覺背景圖 + 暗幕，立繪站在有氛圍的場景前
+	var scene_tex := _load_tex("res://assets/art/title-bg.jpg")
+	if scene_tex:
+		var scene := TextureRect.new()
+		scene.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		scene.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		scene.texture = scene_tex
+		scene.size = vp
+		scene.set_anchors_preset(Control.PRESET_FULL_RECT)
+		root.add_child(scene)
+	var bg := _panel(Color(0.03, 0.04, 0.05, 0.45))
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(bg)
 	# 左右立繪（大）
