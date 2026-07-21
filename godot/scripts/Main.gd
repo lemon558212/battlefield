@@ -80,8 +80,13 @@ func _selftest() -> void:
 	ui._dlg_script = []
 	_open_deploy(ch)
 	await get_tree().create_timer(0.4).timeout
+	var z := _my_zone()
 	_on_deploy_pick("sniper", true)
+	_try_place(z.get("x", 100) + 60, z.get("y", 250) + 60)
 	_on_deploy_pick("rifleman", true)
+	_try_place(z.get("x", 100) + 120, z.get("y", 250) + 60)
+	_on_deploy_pick("engineer", true)
+	_try_place(z.get("x", 100) + 180, z.get("y", 250) + 100)
 	await get_tree().create_timer(0.5).timeout
 	await _snap("res://st_deploy.png")
 	_start_battle()
@@ -120,6 +125,7 @@ func _build_static() -> void:
 func _open_menu() -> void:
 	st = St.MENU
 	_teardown_world()
+	Audio.bgm("menu")
 	ui.show_menu(false)
 
 func _open_story() -> void:
@@ -170,20 +176,88 @@ func _open_deploy(ch: Dictionary) -> void:
 		roster.append({"cls": cls, "name": chr.get("name", ""),
 				"zh": GameData.class_base.get(cls, {}).get("zh", cls),
 				"trait": chr.get("trait", {}).get("desc", ""), "named": true})
+	# 通用兵員（非具名，含載具依章解鎖）——召喚限制：載具 unlockCh
+	var allow: Array = map_data.get("allow", ["land"])
+	for cls in GameData.class_base.keys():
+		var cb: Dictionary = GameData.class_base[cls]
+		if not (cb.get("domain", "land") in allow):
+			continue
+		var vu = GameData.vehicle_unlock.get(cls, 0)
+		if vu != null and int(vu) > chapter:
+			continue    # 載具未解鎖：不顯示（召喚限制）
+		# 具名兵種若已在名冊，通用清單就不重複列（避免同兵種兩張）
+		if GameData.characters.has(cls) and GameData.characters[cls].get("unlockCh", 1) <= chapter:
+			continue
+		roster.append({"cls": cls, "name": cb.get("zh", cls), "zh": cb.get("zh", cls),
+				"trait": GameData.weapon_of(nation[player_side], cls).get("type", ""),
+				"cost": cb.get("cost", 100), "portrait": GameData.portrait_path(cls), "named": false})
+	# 具名補上 portrait/cost 欄
+	for item in roster:
+		if item.get("named", false):
+			item["portrait"] = GameData.portrait_path(item["cls"])
+			item["cost"] = GameData.class_base.get(item["cls"], {}).get("cost", 100)
+	Audio.bgm("battle")
 	ui.show_deploy(ch, budget_left, roster, _on_deploy_pick, _start_battle)
 	_deployed = []
+	_pending_cls = ""
+	_pending_named = false
+	_placed_named = {}
 
 var _deployed: Array = []
-func _on_deploy_pick(cls: String, _named: bool) -> void:
-	# 自動排入我方部署區（P1 簡化：一鍵放置）
-	if _deployed.size() >= 6:
+var _pending_cls := ""
+var _pending_named := false
+var _placed_named := {}
+
+func _on_deploy_pick(cls: String, named: bool) -> void:
+	# 選待放置兵種（點戰場藍框才實際放置）
+	_pending_cls = cls
+	_pending_named = named
+	ui.update_budget(budget_left, "已選：%s，點藍框放置" % GameData.class_base.get(cls, {}).get("zh", cls))
+
+func _try_place(wx: float, wy: float) -> void:
+	if _pending_cls == "":
 		return
-	var zone: Dictionary = _my_zone()
-	var i := _deployed.size()
-	var wx: float = zone.get("x", 100) + 40 + (i % 3) * 60
-	var wy: float = zone.get("y", 300) + 30 + int(i / 3) * 60
-	var u = _spawn_unit(cls, player_side, wx, wy, true)
+	var cls := _pending_cls
+	var cb: Dictionary = GameData.class_base.get(cls, {})
+	var cost: int = cb.get("cost", 100)
+	# 召喚限制：預算
+	if cost > budget_left:
+		ui.update_budget(budget_left, "點數不足")
+		return
+	# 召喚限制：具名每場一次
+	if _pending_named and _placed_named.has(cls):
+		ui.update_budget(budget_left, "該隊員已出戰")
+		return
+	# 召喚限制：坦克/大型艦上限 2
+	if cls == "tank" and _count_cls(player_side, "tank") >= 2:
+		ui.update_budget(budget_left, "坦克上限 2")
+		return
+	if cb.get("big", false) and _count_big(player_side) >= 2:
+		ui.update_budget(budget_left, "大型艦上限 2")
+		return
+	var u = _spawn_unit(cls, player_side, wx, wy, _pending_named)
 	_deployed.append(u)
+	if _pending_named:
+		_placed_named[cls] = true
+		Audio.voice(cls, "sel")
+	budget_left -= cost
+	ui.update_budget(budget_left, "已部署 %s" % cb.get("zh", cls))
+	if _pending_named:
+		_pending_cls = ""    # 具名放完清除（每場一次）
+
+func _count_cls(s: int, cls: String) -> int:
+	var n := 0
+	for u in units:
+		if u["alive"] and u["side"] == s and u["cls"] == cls:
+			n += 1
+	return n
+
+func _count_big(s: int) -> int:
+	var n := 0
+	for u in units:
+		if u["alive"] and u["side"] == s and GameData.class_base.get(u["cls"], {}).get("big", false):
+			n += 1
+	return n
 
 func _my_zone() -> Dictionary:
 	var dz = map_data.get("deploy", [])
@@ -223,12 +297,22 @@ func _start_battle() -> void:
 	ui.show_hud()
 	ui.update_hud(turn, "player", cp)
 	_refresh_visibility()
+	# 相機框住我方部隊重心
+	var c := Vector3.ZERO
+	var n := 0
+	for u in units:
+		if u["side"] == player_side and u["alive"]:
+			c += u["node"].global_position
+			n += 1
+	if n > 0:
+		cam.focus = c / n
+		cam.dist = 16.0
 
 # ---------- 單位 ----------
 func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	var path: String = CLASS_MODEL.get(cls, CLASS_MODEL["rifleman"])
 	var tint: Color = CLASS_TINT.get(cls, Color(0, 0, 0, 0))
-	var node := Unit.spawn(path, cls, side_i, tint)
+	var node := Unit.spawn(path, cls, side_i, tint, side_i == player_side)
 	add_child(node)
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
@@ -275,10 +359,32 @@ func _refresh_visibility() -> void:
 
 # ---------- 輸入 ----------
 func _unhandled_input(event: InputEvent) -> void:
-	if st != St.CMD:
-		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_click(event.position)
+		if st == St.CMD:
+			_click(event.position)
+		elif st == St.DEPLOY:
+			_deploy_click(event.position)
+
+func _deploy_click(sp: Vector2) -> void:
+	if _pending_cls == "":
+		return
+	var from := cam.project_ray_origin(sp)
+	var dir := cam.project_ray_normal(sp)
+	if abs(dir.y) < 0.0001:
+		return
+	var t := -from.y / dir.y
+	if t <= 0:
+		return
+	var hit := from + dir * t
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var wx: float = hit.x / WORLD_SCALE + mw * 0.5
+	var wy: float = hit.z / WORLD_SCALE + mh * 0.5
+	# 限制在我方部署藍框內
+	var z := _my_zone()
+	wx = clamp(wx, z.get("x", 0), z.get("x", 0) + z.get("w", 300))
+	wy = clamp(wy, z.get("y", 0), z.get("y", 0) + z.get("h", 200))
+	_try_place(wx, wy)
 
 func _click(sp: Vector2) -> void:
 	var best = null
@@ -444,6 +550,7 @@ func _win(winner: int, why: String) -> void:
 	if w and chapter > 0:
 		_set_unlocked(min(chapter + 1, GameData.story.size()))
 	var rank := "A" if w else ""
+	Audio.sting("victory" if w else "defeat")
 	ui.hide_charcard()
 	ui.show_end(w, why, rank, ch.get("debrief", ""), _open_menu)
 
@@ -485,5 +592,20 @@ func _build_ground() -> void:
 				b.position = _to3d(s.get("x", 0) + s.get("w", 40) * 0.5, s.get("y", 0) + s.get("h", 40) * 0.5)
 				b.scale = Vector3.ONE * 2.5
 			i += 1
+	# 我方部署藍框（半透明地面標記）
+	var z := _my_zone()
+	var zone_mesh := MeshInstance3D.new()
+	var zpm := PlaneMesh.new()
+	zpm.size = Vector2(z.get("w", 300) * WORLD_SCALE, z.get("h", 200) * WORLD_SCALE)
+	zone_mesh.mesh = zpm
+	var zmat := StandardMaterial3D.new()
+	zmat.albedo_color = Color(0.42, 0.78, 1.0, 0.22)
+	zmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	zmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	zone_mesh.material_override = zmat
+	zone_mesh.position = _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5) + Vector3(0, 0.05, 0)
+	world.add_child(zone_mesh)
+	# 相機框住我方部署區
 	cam.set_follow(null)
-	cam.focus = Vector3.ZERO
+	cam.focus = _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5)
+	cam.dist = 18.0

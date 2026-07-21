@@ -33,7 +33,7 @@ var _state := ""
 var _shoot_timer := 0.0
 var _busy_until := 0.0        # shoot/hit 播放鎖
 
-static func spawn(model_path: String, p_cls: String, p_side: int, tint: Color) -> Unit:
+static func spawn(model_path: String, p_cls: String, p_side: int, tint: Color, is_player := true) -> Unit:
 	var u := Unit.new()
 	u.cls = p_cls
 	u.side = p_side
@@ -57,7 +57,7 @@ static func spawn(model_path: String, p_cls: String, p_side: int, tint: Color) -
 	ring.mesh = tor
 	ring.position.y = 0.06
 	var rm := StandardMaterial3D.new()
-	rm.albedo_color = Color(0.36, 0.61, 1.0) if p_side == 0 else Color(1.0, 0.42, 0.35)
+	rm.albedo_color = Color(0.36, 0.61, 1.0) if is_player else Color(1.0, 0.42, 0.35)
 	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ring.material_override = rm
 	u.add_child(ring)

@@ -303,21 +303,61 @@ func show_deploy(ch, budget_left: int, roster: Array, on_pick: Callable, on_go: 
 	list.add_theme_constant_override("separation", 8)
 	list.position = side.position + Vector2(16, 110)
 	root.add_child(list)
-	list.add_child(_label("部署點數 %d" % budget_left, 15, GOLD))
+	var budget_lbl := _label("部署點數 %d" % budget_left, 15, GOLD)
+	budget_lbl.name = "BudgetLbl"
+	list.add_child(budget_lbl)
 	for item in roster:
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(308, 56)
-		b.add_theme_font_size_override("font_size", 15)
-		b.text = "  ★%s ｜%s\n  %s" % [item["name"], item["zh"], item["trait"]]
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		# 立繪卡（左立繪縮圖＋右文字），召喚不了的不顯示（由呼叫端過濾）
+		var card := Control.new()
+		card.custom_minimum_size = Vector2(308, 64)
+		var cbg := _panel(Color(0.11, 0.135, 0.17, 1.0))
+		cbg.size = Vector2(308, 64)
+		card.add_child(cbg)
+		var tr := TextureRect.new()
+		var pp: String = item.get("portrait", "")
+		if pp != "":
+			tr.texture = load(pp)
+		tr.size = Vector2(56, 64)
+		tr.position = Vector2(0, 0)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		tr.clip_contents = true
+		card.add_child(tr)
+		var nm_l := _label(("★%s ｜%s" % [item["name"], item["zh"]]) if item.get("named", true) else item["zh"], 15, TXT)
+		nm_l.position = Vector2(64, 8)
+		card.add_child(nm_l)
+		var sub_l := _label(item.get("trait", ""), 12, SUB)
+		sub_l.position = Vector2(64, 32)
+		card.add_child(sub_l)
+		var cost_l := _label("%d點" % item.get("cost", 0), 13, GOLD)
+		cost_l.position = Vector2(250, 22)
+		card.add_child(cost_l)
+		var btn := Button.new()
+		btn.flat = true
+		btn.size = Vector2(308, 64)
+		btn.custom_minimum_size = Vector2(308, 64)
 		var ic: String = item["cls"]
 		var nm = item.get("named", true)
-		b.pressed.connect(func(): on_pick.call(ic, nm))
-		list.add_child(b)
+		btn.pressed.connect(func(): on_pick.call(ic, nm))
+		card.add_child(btn)
+		list.add_child(card)
+	var hint := _label("點卡片選人 → 點戰場藍框放置", 12, SUB)
+	hint.position = side.position + Vector2(16, vp.y - 108)
+	hint.name = "DeployHint"
+	root.add_child(hint)
 	var go := _btn("開 始 戰 鬥 ▶", 18)
 	go.position = side.position + Vector2(16, vp.y - 80)
 	go.pressed.connect(func(): on_go.call())
 	root.add_child(go)
+
+func update_budget(left: int, msg := "") -> void:
+	var l := root.find_child("BudgetLbl", true, false)
+	if l:
+		(l as Label).text = "部署點數 %d" % left
+	if msg != "":
+		var h := root.find_child("DeployHint", true, false)
+		if h:
+			(h as Label).text = msg
 
 # ---------- 戰鬥 HUD ----------
 func show_hud() -> void:
@@ -359,14 +399,19 @@ func show_charcard(cls: String, disp_name: String, trait_desc: String, hp: int, 
 	var bg := _panel(Color(0.07, 0.086, 0.055, 0.86))
 	bg.size = Vector2(230, 150)
 	c.add_child(bg)
-	var tr := TextureRect.new()
+	var pbg := ColorRect.new()      # 立繪襯底（深色立繪在此才看得見）
+	pbg.color = Color(0.2, 0.24, 0.3, 1.0)
+	pbg.position = Vector2(6, 6)
+	pbg.size = Vector2(92, 138)
+	c.add_child(pbg)
+	var tr := TextureRect.new()     # 與名冊同法（已驗證可渲染）：fit width、頂端對齊
 	var p := GameData.portrait_path(cls)
 	if p != "":
 		tr.texture = load(p)
-	tr.custom_minimum_size = Vector2(90, 138)
-	tr.size = Vector2(90, 138)
-	tr.position = Vector2(6, 6)
-	tr.expand_mode = TextureRect.EXPAND_FIT_HEIGHT_PROPORTIONAL
+	tr.position = Vector2(6, 4)
+	tr.custom_minimum_size = Vector2(92, 138)
+	tr.size = Vector2(92, 138)
+	tr.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	c.add_child(tr)
 	c.add_child(_named_lbl(disp_name, 16, TXT, Vector2(104, 12)))
