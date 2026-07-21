@@ -845,8 +845,110 @@ const Engine3D = {
     return cv;
   },
 
+  /* ---------- 場景模型（§C③ 素材戰 2026-07-21）：Quaternius/Kenney CC0，poly.pizza 直下 ----------
+   * 載入採 glb → base64-in-js 雙通道（使用者環境防毒攔二進位，b64 是唯一保證通道）；
+   * 兩者皆敗走原程序化幾何體 fallback。模型到貨後 debounce 重建地圖一次。 */
+  SCENERY_KEYS: ["house-b","townhouse-b","bigbuilding","smallbuilding","twostory","pinetrees","tree-single"],
+  _scenery: {}, _sceneryState: {},
+  _ensureScenery(){
+    if (this._sceneryKicked || typeof THREE.GLTFLoader === "undefined") return;
+    this._sceneryKicked = true;
+    const loader = new THREE.GLTFLoader();
+    const normalize = s => {
+      const box = new THREE.Box3().setFromObject(s), size = box.getSize(new THREE.Vector3());
+      s.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
+      const root = new THREE.Group(); root.add(s);
+      return { root, size };
+    };
+    const finish = (key, scene) => {
+      scene.traverse(o => { if (o.isMesh) o.castShadow = true; });
+      if (key === "pinetrees"){
+        // 多棵樹包：往下鑽到第一個「多子節點」層，每個子節點是一棵獨立樹 → 拆成變體
+        let lvl = scene, depth = 0;
+        while (lvl.children.length === 1 && depth < 3){ lvl = lvl.children[0]; depth++; }
+        this._treeVariants = this._treeVariants || [];
+        if (lvl.children.length > 1) for (const ch of [...lvl.children]) this._treeVariants.push(normalize(ch));
+        else this._treeVariants.push(normalize(scene));
+      } else if (key === "tree-single"){
+        this._treeVariants = this._treeVariants || [];
+        this._treeVariants.push(normalize(scene));
+      } else {
+        this._scenery[key] = normalize(scene);
+      }
+      this._sceneryState[key] = "ready";
+      clearTimeout(this._sceneryRebuildT);
+      this._sceneryRebuildT = setTimeout(() => { this._mapRef = null; }, 300); // 到貨批次重建一次
+    };
+    const viaB64 = key => {
+      const ready = () => {
+        const b64 = window.MODEL_B64 && window.MODEL_B64["scenery/" + key];
+        if (!b64){ this._sceneryState[key] = "failed"; return; }
+        try {
+          const bin = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
+          loader.parse(bin, "", g => finish(key, g.scene), () => { this._sceneryState[key] = "failed"; });
+        } catch (e){ this._sceneryState[key] = "failed"; }
+      };
+      if (this._sceneryB64Loaded){ ready(); return; }
+      if (!this._sceneryB64Tag){
+        this._sceneryB64Tag = document.createElement("script");
+        this._sceneryB64Tag.src = "js/model-data-scenery.js" + (typeof BUILD !== "undefined" ? "?" + BUILD : "");
+        this._sceneryB64Q = [];
+        this._sceneryB64Tag.onload = () => { this._sceneryB64Loaded = true; for (const f of this._sceneryB64Q) f(); };
+        this._sceneryB64Tag.onerror = () => { for (const k of this.SCENERY_KEYS) if (this._sceneryState[k] === "loading") this._sceneryState[k] = "failed"; };
+        document.head.appendChild(this._sceneryB64Tag);
+      }
+      this._sceneryB64Q.push(ready);
+    };
+    let preferB64 = false;
+    try { preferB64 = localStorage.getItem("bf_prefer_b64") === "1"; } catch (e) {}
+    for (const key of this.SCENERY_KEYS){
+      this._sceneryState[key] = "loading";
+      if (preferB64){ viaB64(key); continue; }
+      const url = "assets/models/scenery/" + key + ".glb" + (typeof BUILD !== "undefined" ? "?" + BUILD : "");
+      loader.load(url, g => finish(key, g.scene), undefined, () => viaB64(key));
+    }
+  },
+  /* 依腳印面積挑建築模型並等比縮放置入；模型未到/失敗回 false 走程序化 */
+  _mkSceneryBuilding(s, cx, cz, hg, rnd, grp){
+    const area = s.w * s.h;
+    const pool = area >= 4200 ? ["bigbuilding", "townhouse-b"]
+      : area >= 1900 ? ["house-b", "twostory", "townhouse-b"]
+      : ["smallbuilding", "house-b", "twostory"];
+    const avail = pool.filter(k => this._scenery[k]);
+    if (!avail.length) return false;
+    const ent = this._scenery[avail[(rnd() * avail.length) | 0]];
+    const k0 = Math.min(s.w / ent.size.x, s.h / ent.size.z);
+    const k90 = Math.min(s.w / ent.size.z, s.h / ent.size.x);
+    const rot = k90 > k0, k = Math.max(0.001, (rot ? k90 : k0)) * 0.97;
+    const inst = ent.root.clone(true);
+    inst.scale.setScalar(k);
+    if (rot) inst.rotation.y = Math.PI / 2;
+    else if (rnd() < 0.5) inst.rotation.y = Math.PI;      // 隨機轉 180°，街景不重複
+    inst.position.set(cx, hg, cz);
+    inst.traverse(o => { if (o.isMesh){ o.name = "building-solid-3d"; o.castShadow = o.receiveShadow = true; } });
+    this._linearize(inst);
+    grp.add(inst);
+    this._contactShadow(grp, cx, cz, s.w + 18, s.h + 18, hg);
+    return true;
+  },
+  _mkSceneryTree(t, hg, tr0, grp){
+    if (!this._treeVariants || !this._treeVariants.length) return false;
+    const ent = this._treeVariants[(tr0() * this._treeVariants.length) | 0];
+    const hT = 30 + t.r * 0.55 + tr0() * 10;
+    const k = hT / Math.max(0.001, ent.size.y);
+    const inst = ent.root.clone(true);
+    inst.scale.setScalar(k);
+    inst.rotation.y = tr0() * Math.PI * 2;
+    inst.position.set(t.x, hg, t.y);
+    inst.traverse(o => { if (o.isMesh){ o.name = "tree-3d"; o.castShadow = true; } });
+    this._linearize(inst);
+    grp.add(inst);
+    return true;
+  },
+
   /* ---------- 靜態地圖場景 ---------- */
   buildMap(G){
+    this._ensureScenery();
     const m = G.map, mw = m.w || 960, mh = m.h || 600;
     this._mapRef = m;                                    // heightAt 於本函式內即需引用
     const S = Math.max(mw / 960, mh / 600);              // 地圖倍率：光影/霧距離等比
@@ -1026,6 +1128,7 @@ const Engine3D = {
     const brickMat = new THREE.MeshLambertMaterial({ color: 0x6e4636 });
     for (const s of (m.solids || [])){
       const cx = s.x + s.w / 2, cz = s.y + s.h / 2, hg = this.heightAt(cx, cz);
+      if (this._mkSceneryBuilding(s, cx, cz, hg, rnd, grp)) continue;    // CC0 模型版建築（§C③）
       const bh = 36 + rnd() * 18;                                        // 樓高錯落
       const wall = new THREE.MeshLambertMaterial({ map: wallTexes[(rnd() * 3) | 0] });
       const b = new THREE.Mesh(new THREE.BoxGeometry(s.w, bh, s.h),
@@ -1072,6 +1175,7 @@ const Engine3D = {
     for (const t of (m.trees || [])){
       const tr0 = this._rng("t" + t.x + "," + t.y);
       const dead = t.r < 18, hg = this.heightAt(t.x, t.y);
+      if (!dead && this._mkSceneryTree(t, hg, tr0, grp)) continue;       // CC0 模型版樹（枯樹保留程序化剪影）
       const hT = dead ? 24 + tr0() * 8 : 30 + t.r * 0.5 + tr0() * 10;
       const tr = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(1.6, t.r * 0.13), Math.max(2.4, t.r * 0.2), hT, 6), trunkMat);
       tr.position.set(t.x, hT / 2 + hg, t.y);
@@ -2289,7 +2393,22 @@ const Engine3D = {
     const cp = Math.cos(cam.pitch);
     this.camera.lookAt(cam.cx + Math.cos(cam.yaw) * cp, cam.ch - Math.sin(cam.pitch), cam.cy + Math.sin(cam.yaw) * cp);
     this._fadeOccluders(G, cam);
-    this.renderer.render(this.scene, this.camera);
+    // bloom 後製（§C③）：composer 可用且畫質級 0 才開；否則走原生渲染
+    if (!this._composer && THREE.EffectComposer && THREE.UnrealBloomPass){
+      try {
+        this._composer = new THREE.EffectComposer(this.renderer);
+        this._composer.addPass(new THREE.RenderPass(this.scene, this.camera));
+        this._bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(960, 600), 0.32, 0.55, 0.82); // 弱強度高閾值：只讓天空/火光/高光暈開
+        this._composer.addPass(this._bloomPass);
+        // r147 composer 全程線性，終端需自補 linear→sRGB（否則雙重編碼洗白）
+        if (THREE.GammaCorrectionShader) this._composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
+      } catch(e){ this._composer = "failed"; }
+    }
+    if (this._composer && this._composer !== "failed" && (this._pgTier||0) === 0){
+      this._composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
     // 鉛筆速寫描邊＝第二次全場景渲染：只在第三人稱近景做（俯瞰距離下描邊細於1px看不見，
     // 卻要付全場景+全單位重繪，是俯瞰視角最大單筆開銷——2026-07-21 效能複診）。
     if (this.outlineOn !== false && cam.mode === "follow") this._renderOutline();

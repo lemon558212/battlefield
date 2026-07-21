@@ -32,3 +32,9 @@ at=Casual_2, engineer=Worker, specops=Swat, sam=Spacesuit（各含 24 動畫，�
 
 ## Tripo 試點（2026-07-19）
 - chars/sniper-tripo.glb：韓沐霜，由自有立繪（assets/portraits-full/sniper.jpg）經 Tripo image-to-3D+rig+retarget 生成，動畫 idle/walk/run/shoot/hit/death 以 tools/merge-tripo-anims.py 合併。輸出權利依 Tripo 服務條款歸使用者。status=provisional，待效能瘦身（22MB）。
+
+## scenery/（2026-07-21 §C③ 場景素材戰）
+- house-b / townhouse-b / bigbuilding：Quaternius（CC0, poly.pizza）
+- smallbuilding / twostory：Kenney（CC0, poly.pizza）
+- pinetrees / tree-single：Quaternius（CC0, poly.pizza）
+- base64 備援：js/model-data-scenery.js（防毒攔 glb 對策）
