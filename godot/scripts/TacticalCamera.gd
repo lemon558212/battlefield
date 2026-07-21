@@ -15,7 +15,13 @@ func _ready() -> void:
 func set_follow(n: Node3D) -> void:
 	follow_node = n
 
+func _over_ui() -> bool:
+	# 指標壓在 UI 控件上時，滾輪/拖曳交給 UI，別動 3D 場景（治部署欄連動 3D）
+	return get_viewport().gui_get_hovered_control() != null
+
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and _over_ui():
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -34,8 +40,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		focus -= (right * mm.relative.x + fwd * -mm.relative.y) * dist * 0.0016
 
 func _process(delta: float) -> void:
-	if follow_node != null:
-		focus = focus.lerp(follow_node.global_position, 1.0 - exp(-8.0 * delta))
+	if follow_node != null and is_instance_valid(follow_node):
+		# 注視點抬到胸高，立繪不會被螢幕下緣切成巨頭
+		var aim := follow_node.global_position + Vector3(0, 1.1, 0)
+		focus = focus.lerp(aim, 1.0 - exp(-8.0 * delta))
 	_apply()
 
 func _apply() -> void:

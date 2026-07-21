@@ -176,18 +176,17 @@ func _open_deploy(ch: Dictionary) -> void:
 		roster.append({"cls": cls, "name": chr.get("name", ""),
 				"zh": GameData.class_base.get(cls, {}).get("zh", cls),
 				"trait": chr.get("trait", {}).get("desc", ""), "named": true})
-	# 通用兵員（非具名，含載具依章解鎖）——召喚限制：載具 unlockCh
+	# 劇情模式鐵則（舊版 js/ui.js）：通用清單「沒有雜魚步兵」，只出已解鎖載具。
+	# 步兵一律由具名英雄出任（上面名冊已列）；載具依 vehicle_unlock 依章解鎖。
 	var allow: Array = map_data.get("allow", ["land"])
 	for cls in GameData.class_base.keys():
 		var cb: Dictionary = GameData.class_base[cls]
 		if not (cb.get("domain", "land") in allow):
 			continue
-		var vu = GameData.vehicle_unlock.get(cls, 0)
-		if vu != null and int(vu) > chapter:
+		if not GameData.vehicle_unlock.has(cls):
+			continue    # 非載具（步兵）：劇情模式不列通用兵
+		if int(GameData.vehicle_unlock[cls]) > chapter:
 			continue    # 載具未解鎖：不顯示（召喚限制）
-		# 具名兵種若已在名冊，通用清單就不重複列（避免同兵種兩張）
-		if GameData.characters.has(cls) and GameData.characters[cls].get("unlockCh", 1) <= chapter:
-			continue
 		roster.append({"cls": cls, "name": cb.get("zh", cls), "zh": cb.get("zh", cls),
 				"trait": GameData.weapon_of(nation[player_side], cls).get("type", ""),
 				"cost": cb.get("cost", 100), "portrait": GameData.portrait_path(cls), "named": false})
@@ -310,9 +309,12 @@ func _start_battle() -> void:
 
 # ---------- 單位 ----------
 func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
-	# 戰場單位＝立繪看板（使用者裁定）。具名用角色立繪，通用用兵種立繪。
-	var portrait: String = GameData.portrait_path(cls)
-	var node := Unit.spawn_portrait(portrait, cls, side_i, side_i == player_side)
+	# 我方＝立繪本人（具名英雄）；敵軍＝無名 3D 士兵紅染（英雄立繪不得給敵人用）。
+	var node: Unit
+	if side_i == player_side:
+		node = Unit.spawn_portrait(GameData.portrait_path(cls), cls, side_i, true)
+	else:
+		node = Unit.spawn_model(CLASS_MODEL.get(cls, "res://assets/models/chars/soldier.glb"), cls, side_i)
 	add_child(node)
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
@@ -355,7 +357,8 @@ func _refresh_visibility() -> void:
 			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() <= SIGHT:
 				vis = true
 				break
-		u["node"].visible = u["alive"] and vis
+		if u["alive"]:                    # 陣亡者交給 die() 淡出，別強制隱藏
+			u["node"].visible = vis
 
 # ---------- 輸入 ----------
 func _unhandled_input(event: InputEvent) -> void:
@@ -437,7 +440,9 @@ func _fire(shooter, target) -> void:
 		target["hp"] -= GameData.damage(_wrap(shooter), _wrap(target))
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
-			target["node"].queue_free()
+			target["node"].die()          # 淡出傾倒後自我移除
+		elif target["alive"]:
+			target["node"].take_hit()     # 受擊：立繪換 hurt 表情＋紅閃
 	_refresh_visibility()
 	_check_end()
 

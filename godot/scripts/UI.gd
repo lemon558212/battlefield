@@ -220,13 +220,16 @@ func _render_dlg(d: Dictionary, active_side: String) -> void:
 		if _dlg_faces[s] == "":
 			continue
 		var tr := TextureRect.new()
-		tr.texture = load(_dlg_faces[s])
-		var h := vp.y * 0.72
-		tr.custom_minimum_size = Vector2(h * 0.62, h)
-		tr.size = Vector2(h * 0.62, h)
-		tr.expand_mode = TextureRect.EXPAND_FIT_HEIGHT_PROPORTIONAL
+		# 先定 expand/stretch 再定尺寸：否則指定紋理時最小尺寸被鎖成原圖，之後改模式不回縮 → 爆界
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE          # 尊重框大小，不讓圖比例撐爆
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.position = Vector2(vp.x * 0.04 if s == "left" else vp.x * 0.96 - h * 0.62, vp.y - h - 130)
+		tr.clip_contents = true                                  # 超出框一律裁掉，絕不出界
+		tr.texture = load(_dlg_faces[s])
+		var h := vp.y * 0.66
+		var w := h * 0.56
+		tr.custom_minimum_size = Vector2(w, h)
+		tr.size = Vector2(w, h)
+		tr.position = Vector2(vp.x * 0.03 if s == "left" else vp.x * 0.97 - w, vp.y - h - 120)
 		# 非說話方壓暗
 		tr.modulate = Color(1, 1, 1, 1) if s == active_side else Color(0.45, 0.45, 0.5, 0.9)
 		root.add_child(tr)
@@ -327,14 +330,14 @@ func show_deploy(ch, budget_left: int, roster: Array, on_pick: Callable, on_go: 
 		cbg.size = Vector2(308, 64)
 		card.add_child(cbg)
 		var tr := TextureRect.new()
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE     # 先定模式再定尺寸，縮圖才不會撐成原圖爆出卡片
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		tr.clip_contents = true
 		var pp: String = item.get("portrait", "")
 		if pp != "":
 			tr.texture = load(pp)
 		tr.size = Vector2(56, 64)
 		tr.position = Vector2(0, 0)
-		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		tr.clip_contents = true
 		card.add_child(tr)
 		var nm_l := _label(("★%s ｜%s" % [item["name"], item["zh"]]) if item.get("named", true) else item["zh"], 15, TXT)
 		nm_l.position = Vector2(64, 8)
@@ -412,20 +415,21 @@ func show_charcard(cls: String, disp_name: String, trait_desc: String, hp: int, 
 	var bg := _panel(Color(0.07, 0.086, 0.055, 0.86))
 	bg.size = Vector2(230, 150)
 	c.add_child(bg)
-	var pbg := ColorRect.new()      # 立繪襯底（深色立繪在此才看得見）
-	pbg.color = Color(0.2, 0.24, 0.3, 1.0)
+	var pbg := ColorRect.new()      # 立繪襯底（淺灰藍，深色立繪在此才看得見）
+	pbg.color = Color(0.34, 0.4, 0.5, 1.0)
 	pbg.position = Vector2(6, 6)
 	pbg.size = Vector2(92, 138)
 	c.add_child(pbg)
-	var tr := TextureRect.new()     # 與名冊同法（已驗證可渲染）：fit width、頂端對齊
+	var tr := TextureRect.new()     # 固定框＋裁切，縮圖穩定顯示在名字左側
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE          # 先定模式再定尺寸（見對話立繪同註）
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	tr.clip_contents = true
 	var p := GameData.portrait_path(cls)
 	if p != "":
 		tr.texture = load(p)
-	tr.position = Vector2(6, 4)
+	tr.position = Vector2(6, 6)
 	tr.custom_minimum_size = Vector2(92, 138)
 	tr.size = Vector2(92, 138)
-	tr.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
-	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	c.add_child(tr)
 	c.add_child(_named_lbl(disp_name, 16, TXT, Vector2(104, 12)))
 	c.add_child(_named_lbl(trait_desc, 12, SUB, Vector2(104, 44)))
