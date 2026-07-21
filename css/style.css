@@ -136,6 +136,8 @@ body { background:#1b1f18; color:#e8e6d8; font-family:"Microsoft JhengHei",sans-
 #menu .storyCh .chNo { color:#f1c15a; font-weight:900; font-size:19px; letter-spacing:1px; min-width:34px; }
 #menu .storyCh .chTitle { flex:1; font-size:14px; letter-spacing:1px; }
 #menu .storyCh .chGo { color:#6bc7ff; font-size:12px; }
+#menu .storyCh .chRank { font-weight:900; font-size:15px; margin-right:8px; }
+.rank-S { color:#ffd83d; } .rank-A { color:#6bc7ff; } .rank-B { color:#8fd08f; } .rank-C { color:#9eaebc; }
 #menu .storyCh.locked { opacity:0.4; cursor:not-allowed; }
 #menu .storyCh.locked .chNo { color:#8a96a6; }
 /* 選單/戰後共用橫幅 */

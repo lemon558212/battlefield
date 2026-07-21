@@ -119,8 +119,60 @@ const Game = {
     if (this.map.tutorial) UI.hint(this.map.hints[0]);
   },
 
+  /* ---------- 戰鬥中存檔（§C⑧ 2026-07-21）：單位皆純資料，整包 JSON 進 localStorage ---------- */
+  saveBattle(){
+    if (this.state !== "cmd" || Net.connected || this.over){ UI.log("僅能在我方指令階段存檔"); return false; }
+    const snap = {
+      v: 1, at: Date.now(),
+      mapId: this.map.id, nations: [this.nations[0], this.nations[1]], playerSide: this.playerSide,
+      storyChapter: this.storyChapter || null, turn: this.turn, cp: this.cp, cpMax: this.cpMax,
+      charAssigned: this._charAssigned || {}, eventsFired: this._eventsFired || {},
+      wavesDone: this._wavesDone || {}, silence: !!this._silenceBroken, stealth: !!this._stealthBusted,
+      units: this.units, explored: [...Fog.explored]
+    };
+    try { localStorage.setItem("bf_battle_save", JSON.stringify(snap)); UI.log("💾 戰況已存檔（主選單可續戰）"); return true; }
+    catch(e){ UI.log("存檔失敗：" + e.message); return false; }
+  },
+  hasBattleSave(){ try { return !!localStorage.getItem("bf_battle_save"); } catch(e){ return false; } },
+  clearBattleSave(){ try { localStorage.removeItem("bf_battle_save"); } catch(e){} },
+  loadBattle(){
+    let snap = null;
+    try { snap = JSON.parse(localStorage.getItem("bf_battle_save")); } catch(e){}
+    if (!snap || !MAPS[snap.mapId]) return false;
+    if (typeof Sfx!=="undefined") Sfx.bgm("battle");
+    this.map = MAPS[snap.mapId]; this.enrichMap(this.map); this._bg = null;
+    this.nations[0] = snap.nations[0]; this.nations[1] = snap.nations[1];
+    this.playerSide = snap.playerSide; this.storyChapter = snap.storyChapter;
+    this.units = snap.units; this.fx = []; this.turn = snap.turn; this.over = null; this.sel = null;
+    this.cp = snap.cp; this.cpMax = snap.cpMax;
+    this._charAssigned = snap.charAssigned; this._eventsFired = snap.eventsFired;
+    this._wavesDone = snap.wavesDone; this._silenceBroken = snap.silence; this._stealthBusted = snap.stealth;
+    let maxId = 0; for (const u of this.units) maxId = Math.max(maxId, u.id || 0);
+    UNIT_SEQ = maxId + 1;                              // 防 id 撞號
+    if (typeof Camera3D !== "undefined") Camera3D.resetView();
+    Fog.reset();
+    for (const k of (snap.explored || [])) Fog.explored.add(k);
+    Fog.recompute();
+    this.state = "cmd";
+    UI.showBattle(); UI.log(`📂 已讀取戰況：第 ${this.turn} 回合`);
+    return true;
+  },
+
   /* 地圖允許的作戰域（預設純陸戰） */
   mapAllow(){ return this.map.allow || ["land"]; },
+
+  /* 我方部署區是否有陸地可站（§C⑧ 回歸發現：ch8 攻方部署區全水面，步兵卡不該出現） */
+  deployZoneHasLand(){
+    if (this._dzLandMap === this.map) return this._dzLand;
+    this._dzLandMap = this.map;
+    const z = this.map.deploy && this.map.deploy[this.playerSide];
+    if (!z){ this._dzLand = true; return true; }
+    const probe = { cls:"rifleman", domain:"land", mobility:"foot" };
+    for (let x = z.x + 10; x < z.x + z.w; x += 24)
+      for (let y = z.y + 10; y < z.y + z.h; y += 24)
+        if (this.canOccupyTerrain(probe, x, y)){ this._dzLand = true; return true; }
+    this._dzLand = false; return false;
+  },
 
   /* 程式化增豐地圖：在中央戰區散佈額外掩體/障礙（避開部署區與主堡），只做一次 */
   enrichMap(m){
@@ -188,6 +240,19 @@ const Game = {
         if (!spot) continue;
         b -= c;
         this.units.push(makeUnit(nation, cls, side, spot.x, spot.y));
+      }
+    }
+    // 王牌敵將（§C⑥ 2026-07-21，VC 慣例）：指定章節把一名敵軍升格為具名敵將——
+    // HP×1.6／攻×1.25，擊殺者領雙倍經驗；標籤前綴☠，戰報可辨。
+    const ace = chN && STORY[chN-1].ace;
+    if (ace){
+      const pool = this.units.filter(u => u.side === side && u.alive);
+      const pick = pool.find(u => u.cls === ace.cls) || pool[0];
+      if (pick){
+        pick.isAce = true;
+        pick.maxhp = Math.round(pick.maxhp * 1.6); pick.hp = pick.maxhp;
+        pick.weapon.atk = Math.round(pick.weapon.atk * 1.25);
+        pick.label = "☠" + ace.name + "｜" + pick.label;
       }
     }
   },
@@ -436,6 +501,14 @@ const Game = {
         const got = this.storySpawnEnemies(5, ["assault", "mg", "rifleman", "specops"]);
         UI.log(`⚠ 行動曝光！擊殺超過 ${sp.limit}——敵軍大批增援（${got} 個單位）`);
       }
+    }
+    // 限時追擊（§C④ 2026-07-21）：期限內未分勝負＝目標逃脫，判敗
+    if (sp.type === "timelimit" && this.turn > sp.turns && !this.over){
+      this.over = { winner: 1 - this.playerSide, why: `超過 ${sp.turns} 回合期限，敵縱隊逃出走廊` };
+      this.state = "over"; UI.showEnd(); return;
+    }
+    if (sp.type === "timelimit" && this.turn === sp.turns - 4){
+      UI.log(`⏳ 剩 4 回合！敵縱隊即將逃出走廊——加快追擊`);
     }
     if (sp.type === "waves" && sp.turns.includes(this.turn)){
       this._wavesDone = this._wavesDone || {};

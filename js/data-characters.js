@@ -86,6 +86,30 @@ const VEHICLE_ART = {
   gunship:     "assets/portraits-full/gunship.jpg"
 };
 
+/* ---------- 養成（§C⑤ 2026-07-21）：具名隊員經驗/等級，localStorage 跨戰役持久 ---------- */
+const CharGrowth = {
+  key: "bf_char_xp",
+  data(){ try { return JSON.parse(localStorage.getItem(this.key) || "{}"); } catch(e){ return {}; } },
+  _save(d){ try { localStorage.setItem(this.key, JSON.stringify(d)); } catch(e){} },
+  xp(cls){ return this.data()[cls] || 0; },
+  level(cls){ return Math.min(5, 1 + Math.floor(this.xp(cls) / 120)); },      // 120 經驗一級，上限 Lv5
+  award(cls, amt){ const d = this.data(); d[cls] = (d[cls] || 0) + amt; this._save(d); },
+  reset(){ localStorage.removeItem(this.key); }
+};
+
+/* 羈絆（§C⑤）：劇情配對；戰場上兩人相距 130 內互相加成（命中+4%／受傷-6%）。 */
+const BONDS = [["sniper","rifleman"],["engineer","rifleman"],["mg","assault"],["mortar","at"],["specops","assault"],["sam","mortar"]];
+function bondAllyNear(u){
+  if (!u.charName || !Game.storyChapter) return false;
+  for (const [a, b] of BONDS){
+    if (u.cls !== a && u.cls !== b) continue;
+    const mate = u.cls === a ? b : a;
+    const m = Game.units.find(x => x.alive && x.side === u.side && x.cls === mate && x.charName);
+    if (m && Math.hypot(m.x - u.x, m.y - u.y) <= 130) return true;
+  }
+  return false;
+}
+
 /* 劇情模式：套用具名角色到單位（名冊制 GDD/09：玩家明確選擇具名條目才指派，每場一次）。 */
 function assignCharacter(u, wantNamed){
   if (!Game.storyChapter || u.side !== Game.playerSide || !wantNamed) return null;
@@ -100,6 +124,16 @@ function assignCharacter(u, wantNamed){
   u.weapon.acc = Math.min(0.99, u.weapon.acc + (m.acc || 0));
   u.hp += (m.hp || 0); u.maxhp += (m.hp || 0);
   u.ap += (m.ap || 0); u.maxap += (m.ap || 0);
-  u.charName = ch.name; u.label = "★" + ch.name + "｜" + u.label;
+  // 等級加成（§C⑤）：每級 +6% 攻擊、+8% HP、+2% 命中（Lv1 無加成，上限 Lv5）
+  const lv = (typeof CharGrowth !== "undefined") ? CharGrowth.level(u.cls) : 1;
+  if (lv > 1){
+    const k = lv - 1;
+    u.weapon.atk = Math.round(u.weapon.atk * (1 + 0.06 * k));
+    u.weapon.acc = Math.min(0.99, u.weapon.acc + 0.02 * k);
+    const hpUp = Math.round(u.maxhp * 0.08 * k);
+    u.hp += hpUp; u.maxhp += hpUp;
+  }
+  u.charLv = lv;
+  u.charName = ch.name; u.label = "★" + ch.name + (lv > 1 ? ` Lv.${lv}` : "") + "｜" + u.label;
   return ch;
 }

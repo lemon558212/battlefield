@@ -457,6 +457,10 @@ const Render3D = {
       const s = cam.project(f.x, f.y, 14); if (!s) return;
       ctx.fillStyle = f.heal ? "#5eff8a" : "#ffe08a"; ctx.font = "bold 13px sans-serif"; ctx.textAlign = "center";
       ctx.globalAlpha = 1 - f.t / 0.9; ctx.fillText(f.heal ? f.dmg : "-" + f.dmg, s.sx, s.sy - f.t * 22); ctx.globalAlpha = 1;
+    } else if (f.type === "text"){                            // 升級等浮字（§C⑤）
+      const s = cam.project(f.x, f.y, 22); if (!s) return;
+      ctx.fillStyle = "#ffd83d"; ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center";
+      ctx.globalAlpha = 1 - f.t / 0.9; ctx.fillText(f.msg || "", s.sx, s.sy - f.t * 26); ctx.globalAlpha = 1;
     }
   },
 

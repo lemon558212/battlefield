@@ -61,6 +61,7 @@ const Combat = {
     if (d > w.range) return 0;
     let c = w.acc;
     if (NATIONS[shooter.nationId].trait.id==="marksmanship") c += 0.03; // 英國
+    if (typeof bondAllyNear==="function" && bondAllyNear(shooter)) c += 0.04; // 羈絆（§C⑤）：搭檔在附近
     c *= d/w.range <= 0.5 ? 1.0 : 1.0 - 0.45*((d/w.range)-0.5)/0.5;
     c *= part==="head" ? 0.55 : part==="radiator" ? 0.75 : 1.0;
     if (this.domainMult(w,t)<=0) return 0;            // 武器打不到此域（如步槍打飛機）
@@ -107,6 +108,7 @@ const Combat = {
     let dmg = effAtk * this.partMult(part) * Math.max(0.1, 1 - def/Math.max(1,effAtk)*0.5);
     if (interception) dmg *= 0.5;
     if (NATIONS[t.nationId].trait.id==="homeland_defense" && t.side===1) dmg *= 0.9;    // 台灣
+    if (typeof bondAllyNear==="function" && bondAllyNear(t)) dmg *= 0.94;               // 羈絆（§C⑤）：搭檔在附近較敢戰
     return Math.max(1, Math.round(dmg));
   },
 
@@ -145,6 +147,15 @@ const Combat = {
     if (!iranStealth) shooter.revealed = true;
     shooter.hasFired = true;
     for (const u of Game.units){ if (u.alive && u.hp<=0){ u.alive=false;
+      // 養成（§C⑤）：具名隊員擊殺得經驗（載具 60／步兵 35），跨戰役累積
+      if (Game.storyChapter && shooter.charName && u.side !== shooter.side && typeof CharGrowth !== "undefined"){
+        let gain = ((u.domain||"land")!=="land"||u.cls==="tank") ? 60 : 35;
+        if (u.isAce) gain *= 2;                                             // 敵將雙倍經驗（§C⑥）
+        const before = CharGrowth.level(shooter.cls);
+        CharGrowth.award(shooter.cls, gain);
+        if (CharGrowth.level(shooter.cls) > before) ev.push({type:"text", x:shooter.x, y:shooter.y, msg:`★${shooter.charName} 升級！`});
+      }
+      if (u.isAce) ev.push({type:"text", x:u.x, y:u.y, msg:`☠ 敵將 ${u.label.split("｜")[0].slice(1)} 陣亡！`});
       ev.push({type:"death", x:u.x,y:u.y, unit:u, vehicle:(u.domain||"land")!=="land"||u.cls==="tank"}); } }
     return ev;
   },

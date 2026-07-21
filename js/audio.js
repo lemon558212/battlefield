@@ -76,15 +76,20 @@ const Sfx = {
 
   /* ---------- 音色庫 ---------- */
   _lib: {
-    rifle(S){ S._burst({ dur: 0.09, vol: 0.4, type: "highpass", freq: 900 });
-              S._burst({ dur: 0.14, vol: 0.22, freq: 500, freqEnd: 120 }); },          // 清脆單發＋短尾
-    smg(S){   S._burst({ dur: 0.06, vol: 0.3, type: "highpass", freq: 1200 });
-              S._burst({ dur: 0.08, vol: 0.15, freq: 600, freqEnd: 200 }); },          // 輕快連點
-    mg(S){    S._burst({ dur: 0.05, vol: 0.34, type: "highpass", freq: 700 });
-              S._burst({ dur: 0.09, vol: 0.2, freq: 420, freqEnd: 150 }); },           // 重機槍嗒嗒
-    sniper(S){S._burst({ dur: 0.14, vol: 0.5, type: "highpass", freq: 600 });
-              S._burst({ dur: 0.5, vol: 0.25, freq: 700, freqEnd: 90 });               // 巨響＋山谷回音尾
-              S._burst({ dur: 0.35, vol: 0.1, freq: 400, freqEnd: 80, at: 0.12 }); },
+    // 槍聲三層結構（§C⑦ 2026-07-21 寫實化）：爆音瞬態(2~30ms 寬頻)＋槍身共鳴(帶通中頻)＋遠場回音尾(低通長尾)
+    rifle(S){ S._burst({ dur: 0.028, vol: 0.55, type: "highpass", freq: 1500, atk: 0.001 });
+              S._burst({ dur: 0.12, vol: 0.3, type: "bandpass", freq: 720, freqEnd: 260, q: 1.3 });
+              S._burst({ dur: 0.42, vol: 0.13, freq: 480, freqEnd: 85, at: 0.05 }); }, // 單發：脆響＋膛音＋原野回音
+    smg(S){   S._burst({ dur: 0.02, vol: 0.4, type: "highpass", freq: 1900, atk: 0.001 });
+              S._burst({ dur: 0.07, vol: 0.18, type: "bandpass", freq: 900, freqEnd: 380, q: 1.2 });
+              S._burst({ dur: 0.16, vol: 0.07, freq: 500, freqEnd: 140, at: 0.03 }); },// 連點輕快
+    mg(S){    S._burst({ dur: 0.024, vol: 0.48, type: "highpass", freq: 1100, atk: 0.001 });
+              S._burst({ dur: 0.09, vol: 0.24, type: "bandpass", freq: 520, freqEnd: 210, q: 1.1 });
+              S._burst({ dur: 0.22, vol: 0.09, freq: 380, freqEnd: 110, at: 0.04 }); },// 重機槍砰砰有胸腔感
+    sniper(S){S._burst({ dur: 0.035, vol: 0.62, type: "highpass", freq: 1200, atk: 0.001 });
+              S._burst({ dur: 0.2, vol: 0.32, type: "bandpass", freq: 600, freqEnd: 160, q: 1.2 });
+              S._burst({ dur: 0.7, vol: 0.22, freq: 650, freqEnd: 70, at: 0.06 });     // 巨響＋山谷回音尾
+              S._burst({ dur: 0.5, vol: 0.09, freq: 400, freqEnd: 60, at: 0.28 }); },
     cannon(S){S._tone({ freq: 70, freqEnd: 28, dur: 0.55, vol: 0.55 });
               S._burst({ dur: 0.5, vol: 0.5, freq: 350, freqEnd: 60 });
               S._burst({ dur: 0.08, vol: 0.35, type: "highpass", freq: 500 }); },      // 坦克/艦砲：胸腔震

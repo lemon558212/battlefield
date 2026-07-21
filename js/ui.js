@@ -17,11 +17,13 @@ const UI = {
       <h1>曙光之戰</h1>
       <div class="menuSpacer"></div>
       <div class="menuBtns">
+        ${Game.hasBattleSave()?`<button id="btnResume" class="big">▶ 繼 續 戰 鬥</button>`:""}
         <button id="btnStory" class="big">劇　情</button>
         <button id="btnVersus" class="big">對　戰</button>
       </div>
       <p class="fine">Music: Kevin MacLeod (incompetech.com) CC-BY 4.0｜${typeof BUILD!=="undefined"?BUILD:"?"}</p>`;
     this.el("menu").style.display="flex";
+    if (this.el("btnResume")) this.el("btnResume").onclick = ()=>{ if(!Game.loadBattle()) { Game.clearBattleSave(); this.showMenu(); } };
     this.el("btnStory").onclick = ()=>this.showStory();
     this.el("btnVersus").onclick = ()=>this.showVersus();
   },
@@ -59,12 +61,15 @@ const UI = {
     this.hideAll();
     if (typeof Sfx!=="undefined") Sfx.bgm("menu");
     const unlocked = StoryProgress.get();
+    let ranks = {};
+    try { ranks = JSON.parse(localStorage.getItem("bf_ranks") || "{}"); } catch(e){}
     const rows = STORY.map(ch=>{
       const lock = ch.n > unlocked;
+      const rk = !lock && ranks[ch.n] ? `<span class="chRank rank-${ranks[ch.n]}">${ranks[ch.n]}</span>` : "";
       return `<button class="storyCh${lock?" locked":""}" data-ch="${ch.n}" ${lock?"disabled":""}>
         <span class="chNo">${String(ch.n).padStart(2,"0")}</span>
         <span class="chTitle">${lock?"🔒 尚未解鎖":ch.title}</span>
-        ${lock?"":`<span class="chGo">▶</span>`}</button>`;
+        ${rk}${lock?"":`<span class="chGo">▶</span>`}</button>`;
     }).join("");
     const M=this.el("menu"); M.style.display="flex";
     M.innerHTML=`
@@ -255,6 +260,7 @@ const UI = {
       rows += Object.keys(CHARACTERS).map(k=>{
         const chr = CHARACTERS[k];
         if (!allow.includes(CLASS_BASE[k].domain)) return "";
+        if (CLASS_BASE[k].domain === "land" && !Game.deployZoneHasLand()) return ""; // 部署區全水面：步兵不出現（ch8 登陸戰）
         // UI 慣例（使用者 2026-07-21 拍板，比照 VC/FE 名冊）：召喚不了的不出現——
         // 未入隊（unlockCh 未到）與本章禁用一律不渲染；「已出戰」保留灰卡（否則玩家以為角色消失）。
         const spBan = Game.storySpecial && Game.storySpecial();
@@ -267,9 +273,10 @@ const UI = {
           <span class="unitArt art-${k}" aria-hidden="true"></span>
           <span class="unitCopy"><b>${chr.name}</b>｜${CLASS_BASE[k].zh}<br><span class="weapon">✔ 已出戰</span></span></button>`;
         const port = chr.fullPortrait || chr.portrait;
+        const lv = (typeof CharGrowth!=="undefined") ? CharGrowth.level(k) : 1;
         return `<button class="unitBtn${on}" data-cls="${k}" data-named="1">
           <span class="unitArt art-${k}"${port?` style="background-image:url('${port}')"`:""} aria-hidden="true"></span>
-          <span class="unitCopy"><b>${chr.name}</b><span class="clsTag">${CLASS_BASE[k].zh}</span><br><span class="weapon trait">${chr.trait.desc}</span></span>
+          <span class="unitCopy"><b>${chr.name}</b><span class="clsTag">${CLASS_BASE[k].zh}${lv>1?`｜Lv.${lv}`:""}</span><br><span class="weapon trait">${chr.trait.desc}</span></span>
           <em>${c}<i>點·1CP</i></em></button>`;
       }).join("");
     }
@@ -348,9 +355,11 @@ const UI = {
       <button id="btnFireEnd" style="display:none">結束行動 (E)</button>
       <button id="btnCapture" style="display:none">佔領主堡</button>
       <button id="btnEndTurn">結束回合</button>
+      <button id="btnSave">💾 存檔（指令階段）</button>
       <div id="hint" class="hint" style="display:none"></div>
       <div id="log"></div>`;
     this.el("btnEndTurn").onclick=()=>{ if(Game.state==="cmd") Game.endTurn(); };
+    this.el("btnSave").onclick=()=>Game.saveBattle();
     this.el("btnTerrain").onclick=()=>Game.toggleTerrainAction();
     this.el("btnUnload").onclick=()=>Game.unloadLST();
     this.el("btnFireEnd").onclick=()=>{ if(Game.state==="act") Game.endAction(); };
@@ -425,6 +434,7 @@ const UI = {
   },
   showEnd(){
     const win = Game.over.winner===Game.playerSide;
+    Game.clearBattleSave();                      // 戰鬥結束＝存檔失效（§C⑧）
     if (typeof Sfx!=="undefined"){ Sfx.bgm(null); Sfx.ambientStop(); Sfx.play(win?"victory":"defeat"); }
     const chN = Game.storyChapter, ch = chN ? STORY[chN-1] : null;
     let extra = "";
@@ -445,6 +455,14 @@ const UI = {
         : (Game.turn<=6&&dead===0?"S":Game.turn<=8||dead===0?"A":Game.turn<=12?"B":"C");
       rankHtml = `<div class="rankWrap"><div class="rankStamp rank-${rank}">${rank}</div>
         <div class="rankInfo">${Game.turn} 回合｜陣亡 ${dead}</div></div>`;
+      // 評價存檔（§C⑧）：留存各章最佳評價，章節選擇顯示
+      if (chN){
+        try {
+          const rs = JSON.parse(localStorage.getItem("bf_ranks") || "{}");
+          const ord = { S:4, A:3, B:2, C:1 };
+          if ((ord[rank]||0) > (ord[rs[chN]]||0)){ rs[chN] = rank; localStorage.setItem("bf_ranks", JSON.stringify(rs)); }
+        } catch(e){}
+      }
     }
     this.el("menu").innerHTML = `
       <div class="dpHead menuHead endHead ${win?"endWin":"endLose"}">

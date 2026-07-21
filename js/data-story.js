@@ -52,6 +52,7 @@ const STORY = [
     ],
     debrief:"旗升回去了。狙擊手韓沐霜上尉在你身後說：「每一發子彈都要有名字。今天的都有了。」" },
   { n:3,  title:"絞肉機重演", map:"verdun",   player:"uk",      enemy:"germany", side:0,
+    ace:{ name:"壕溝匠師・柯爾特", cls:"mg" },
     brief:"灰幕在舊戰場挖出了新塹壕：兩道鐵絲網、機槍堡、無人地帶。一百年前的絞肉機重新開張。用工兵、迫砲和耐心，一段一段咬穿它。",
     dialog:[
       { who:"賽琳．杜瓦", text:"初次見面。賽琳．杜瓦，迫擊砲。我的工作是讓拋物線比子彈誠實。" },
@@ -85,9 +86,18 @@ const STORY = [
       { who:"艾拉．科瓦奇", mood:"smile", text:"她說她走上面。我喜歡這傢伙。" },
       { who:"韓沐霜", pos:"right", text:"不開沒把握的槍。這一仗，慢就是快。" }
     ],
+    events:[
+      { turn:2, dialog:[
+        { who:"影山靜", text:"……（比出三根手指，指向鐘樓）" },
+        { who:"艾拉．科瓦奇", text:"鐘樓三個。收到——看她的手勢比聽電台還清楚。" } ] },
+      { turn:5, dialog:[
+        { who:"白老師", mood:"hurt", text:"民宅裡有動靜——是躲起來的居民！各單位，確認目標再開火！" },
+        { who:"韓沐霜", pos:"right", text:"重複：不開沒把握的槍。慢就是快。" } ] }
+    ],
     debrief:"村長握著你的手不放。雷諾把口糧全分給了孩子。你開始相信：他不是內鬼。" },
   { n:5,  title:"沙暴走廊",   map:"desert",   player:"usa",     enemy:"iran",    side:0,
-    brief:"灰幕裝甲縱隊正穿越沙漠走廊撤往港口。第一次，你手上有制空權——但他們的防空飛彈也在等你的飛機。追上去，別讓一輛坦克跑掉。",
+    special:{ type:"timelimit", turns:18, desc:"限時追擊：18 回合內殲滅敵縱隊，否則目標逃脫" },
+    brief:"灰幕裝甲縱隊正穿越沙漠走廊撤往港口。第一次，你手上有制空權——但他們的防空飛彈也在等你的飛機。18 回合內追上去，別讓一輛坦克跑掉。",
     dialog:[
       { who:"汀娜．烏梅", text:"汀娜．烏梅，防空。聽說你們終於要跟天空打交道了？" },
       { who:"韓沐霜", pos:"right", text:"正是。第一次，我們手上有制空權。" },
@@ -99,8 +109,16 @@ const STORY = [
       { who:"汀娜．烏梅", mood:"angry", text:"天上飛的，遲早要下來。地上架著的，現在就讓它躺下。" },
       { who:"韓沐霜", pos:"right", text:"追擊開始。一輛都不准跑掉。" }
     ],
+    events:[
+      { turn:2, dialog:[
+        { who:"汀娜．烏梅", text:"雷達開機。敵防空飛彈車在縱隊尾端——飛機別急著俯衝，先讓我點名。" } ] },
+      { turn:5, dialog:[
+        { who:"巴頓．歐克", mood:"smile", text:"打頭的坦克熄火了！整條走廊都堵住——現在他們是排隊的靶子。" },
+        { who:"韓沐霜", pos:"right", text:"別戀戰。一輛一輛來，別讓任何一輛掉頭。" } ] }
+    ],
     debrief:"沙暴散去，走廊上是燃燒的鋼鐵。但審訊俘虜得到的情報令人不安：這批裝備的流向清單上，有曙光內部的簽名。" },
   { n:6,  title:"林海伏擊",   map:"forest",   player:"vietnam", enemy:"thailand",side:1,
+    ace:{ name:"獵殺者・薇絲",     cls:"sniper" },
     brief:"車隊在林海被包了餃子——這是圈套，有人洩露了行軍路線。利用樹障與高草，把伏擊者變成獵物。",
     dialog:[
       { who:"丁小滿", mood:"hurt", text:"路線只有我們自己人知道……為什麼他們會在這裡？！" },
@@ -111,8 +129,17 @@ const STORY = [
       { who:"白老師", pos:"right", text:"傷員往我這裡送。誰都不准死在樹林裡。" },
       { who:"韓沐霜", pos:"right", mood:"angry", text:"利用樹障與高草。把伏擊者變成獵物。曙光——反咬。" }
     ],
+    events:[
+      { turn:2, dialog:[
+        { who:"雷諾．佛斯", mood:"angry", text:"伏擊點卡得太準了——路線是三小時前才下達的。隊裡有人在漏。" },
+        { who:"韓沐霜", pos:"right", text:"現在先活著出去。帳，之後算。" } ] },
+      { turn:4, dialog:[
+        { who:"影山靜", text:"……（從高草裡回來，攤開手掌：五）" },
+        { who:"艾拉．科瓦奇", mood:"smile", text:"右翼五個。換我們當獵人了。" } ] }
+    ],
     debrief:"突圍了，但代價寫在陣亡名單上。雷諾主動交出通訊紀錄自證清白。內鬼另有其人，而且軍階不低。" },
   { n:7,  title:"斷橋之城",   map:"urban",    player:"germany", enemy:"france",  side:0,
+    ace:{ name:"斷橋守將・格羅斯", cls:"assault" },
     special:{ type:"ban", cls:"mg", desc:"雷諾遭停職調查——本章無法部署機槍兵" },
     brief:"州府巷戰。灰幕指揮官在廣播裡直呼雷諾的名字，稱他「逃兵」。雷諾被暫時解除武裝——這一仗，你沒有機槍手。逐街收復，證明不靠任何人也打得下來。",
     dialog:[
@@ -124,6 +151,14 @@ const STORY = [
       { who:"白老師", mood:"smile", text:"證明不用靠誰——但回來的路，給老雷留一盞燈。" },
       { who:"影山靜", pos:"right", text:"……（把自己的護身符塞進雷諾手裡）" },
       { who:"韓沐霜", pos:"right", text:"收復這座城。然後，把真相也收復回來。" }
+    ],
+    events:[
+      { turn:3, dialog:[
+        { who:"艾拉．科瓦奇", mood:"angry", text:"廣播又在念雷諾的名字！吵死了——誰去把那個喇叭打下來！" },
+        { who:"韓沐霜", pos:"right", text:"不必。用收復的每一條街回答他。" } ] },
+      { turn:6, dialog:[
+        { who:"丁小滿", text:"班長，沒有機槍掩護……大家的推進節奏亂了。" },
+        { who:"韓沐霜", pos:"right", text:"那就放慢。角落交替掩護，一棟一棟來——證明我們不靠任何一個人也打得下來。" } ] }
     ],
     debrief:"城收復了。雷諾隔著鐵絲網對你說出全部：他曾是灰幕創始隊員，因拒絕對平民開火而逃走。你把他的槍還給了他。" },
   { n:8,  title:"紅色灘頭",   map:"beach",    player:"japan",   enemy:"china",   side:0,
@@ -138,6 +173,13 @@ const STORY = [
       { who:"艾拉．科瓦奇", mood:"angry", text:"想搶我第一個的位置？門都沒有！" },
       { who:"韓沐霜", pos:"right", text:"兩波搶灘：第一波撕開口子，第二波釘死它。天黑前，旗要立起來。" }
     ],
+    events:[
+      { turn:2, dialog:[
+        { who:"白老師", text:"第一波上灘了！鐵絲網交給我，登陸艇別停——停下來就是靶。" } ] },
+      { turn:5, dialog:[
+        { who:"賽琳．杜瓦", mood:"smile", text:"碉堡座標裝定。艦砲之後，換我的拋物線敲門。" },
+        { who:"韓沐霜", pos:"right", text:"天黑前要站穩灘頭堡。各班，跟上彈幕前進。" } ] }
+    ],
     debrief:"灘頭插上了曙光的旗。工兵顧問白老師在碉堡殘骸裡找到成箱的仿製零件——灰幕不只擄裝備，他們在量產。" },
   { n:9,  title:"海峽封鎖線", map:"strait",   player:"korea",   enemy:"japan",   side:0,
     brief:"三艘補給船必須通過海峽，而灰幕的潛艦與飛彈艇在水下與霧中等待。驅逐艦反潛開路、戰機撐傘——一艘都不能沉。",
@@ -150,8 +192,16 @@ const STORY = [
       { who:"雷諾．佛斯", pos:"right", text:"驅逐艦反潛開路，戰機撐傘。教科書式的護航——這次是我們的教科書。" },
       { who:"韓沐霜", pos:"right", text:"海上的仗沒有掩體，只有先看見。聲納，開機。" }
     ],
+    events:[
+      { turn:2, dialog:[
+        { who:"汀娜．烏梅", text:"水下接觸！聲納回波兩個——驅逐艦轉向，反潛陣位。補給船別離隊！" } ] },
+      { turn:5, dialog:[
+        { who:"丁小滿", mood:"hurt", text:"霧裡有飛彈艇！距離拉不開——" },
+        { who:"韓沐霜", pos:"right", text:"海上的仗沒有掩體，只有先看見。戰機下降高度，替船團把霧掀開。" } ] }
+    ],
     debrief:"船團靠港。聲納兵摘下耳機時手還在抖。韓沐霜在甲板上說：「海上的仗沒有掩體，只有先看見。」" },
   { n:10, title:"霧港疑雲",   map:"harbor",   player:"uk",      enemy:"russia",  side:0,
+    ace:{ name:"霧夜船長・卡佩爾", cls:"specops" },
     special:{ type:"silence", turns:5, desc:"靜默滲透：前 5 回合不得開火，違者引來敵軍增援" },
     brief:"夜霧籠罩軍港。這是一場不能開大燈的仗：前段靜默滲透，查獲走私貨櫃、揪出把行軍路線賣給灰幕的內鬼；後段強攻奪港。",
     dialog:[
@@ -162,6 +212,14 @@ const STORY = [
       { who:"雷諾．佛斯", pos:"right", mood:"angry", text:"內鬼就躲在貨櫃後面。這一次，換我來揭別人的面具。" },
       { who:"丁小滿", text:"老雷，六章的帳……今晚討回來。" },
       { who:"韓沐霜", pos:"right", text:"靜默滲透。讓霧，替我們作證。" }
+    ],
+    events:[
+      { turn:2, dialog:[
+        { who:"影山靜", text:"……（貼牆，豎起食指抵唇）" },
+        { who:"艾拉．科瓦奇", text:"懂。全隊靜默，燈滅。今晚我們是霧的一部分。" } ] },
+      { turn:6, dialog:[
+        { who:"白老師", mood:"hurt", text:"貨櫃編號對上了——就是林海那批路線文件。內鬼的簽名就在裡面。" },
+        { who:"韓沐霜", pos:"right", mood:"angry", text:"證據到手。接下來，把港口拿回來。" } ] }
     ],
     debrief:"貨櫃裡的文件指向聯絡官布蘭特——六章林海的血債有主了。他被押走時對你笑：「灰王說，你會是最後一個懂他的人。」" },
   { n:11, title:"群山之肩",   map:"verdun",   player:"taiwan",  enemy:"korea",   side:0,
@@ -175,8 +233,16 @@ const STORY = [
       { who:"白老師", text:"山路窄，擔架難走。都給我小心點。" },
       { who:"韓沐霜", pos:"right", text:"不繞路。從正面，把山肩拿下來。" }
     ],
+    events:[
+      { turn:3, dialog:[
+        { who:"賽琳．杜瓦", text:"棱線後的砲位標定完成。他們有高度，我有角度——請欣賞這一輪拋物線。" } ] },
+      { turn:6, dialog:[
+        { who:"巴頓．歐克", mood:"smile", text:"隘口撬開了！最陡的一段我先爬——上面的風景，該換人看了。" },
+        { who:"韓沐霜", pos:"right", text:"穩住節奏。奪下觀察哨，這座山就是我們的眼睛。" } ] }
+    ],
     debrief:"峰頂觀察哨換了主人。從這裡能看見灰幕腹地：燈火通明的離島兵工廠，晝夜不停。" },
   { n:12, title:"鋼鐵洪流",   map:"plain",    player:"ukraine", enemy:"russia",  side:1,
+    ace:{ name:"鐵潮上校・杜蘭",   cls:"tank" },
     special:{ type:"waves", turns:[8,16], desc:"敵軍將於第 8、16 回合發起增援波次——鞏固防線" },
     brief:"灰幕傾巢反撲：裝甲集群將在三十回合內三波衝擊你的防線。鐵絲網、反戰車壕、警戒射擊網——把平原變成他們的墓園。撐過去。",
     dialog:[
@@ -188,6 +254,14 @@ const STORY = [
       { who:"艾拉．科瓦奇", pos:"right", mood:"smile", text:"防守戰？好吧，偶爾當一次鐵砧也不錯。" },
       { who:"賽琳．杜瓦", text:"預設彈幕座標已完成。歡迎光臨，灰幕的葬禮由我伴奏。" },
       { who:"韓沐霜", pos:"right", text:"三十回合。每一回合，都讓平原多一堆廢鐵。" }
+    ],
+    events:[
+      { turn:9, dialog:[
+        { who:"汀娜．烏梅", mood:"hurt", text:"雷達滿屏！第一波裝甲集群壓上來了——防線各段，報告彈藥！" },
+        { who:"韓沐霜", pos:"right", text:"警戒射擊網開啟。放近了打，一發都別浪費。" } ] },
+      { turn:19, dialog:[
+        { who:"丁小滿", mood:"hurt", text:"第二波比第一波還多……班長，撐得住嗎？" },
+        { who:"雷諾．佛斯", text:"撐得住。機槍還熱著，陣地還在，人還在——那就撐得住。" } ] }
     ],
     debrief:"第三十回合的鐘聲像停戰協定。陣地前的殘骸排到地平線。灰幕的機動兵力，就折在了這裡。" },
   { n:13, title:"孤島要塞",   map:"strait",   player:"usa",     enemy:"iran",    side:0,
@@ -201,6 +275,13 @@ const STORY = [
       { who:"汀娜．烏梅", pos:"right", text:"島上防空網密得像蜘蛛網。飛行員們，跟緊我的標記。" },
       { who:"巴頓．歐克", mood:"smile", text:"潛艦斷岸防、艦隊破封鎖、我們上岸砸場子。分工真明確。" },
       { who:"韓沐霜", pos:"right", text:"三軍到齊。把灰幕的心臟，停下來。" }
+    ],
+    events:[
+      { turn:2, dialog:[
+        { who:"汀娜．烏梅", text:"潛艦回報：岸防砲啞了。艦隊，海峽是你們的了。" } ] },
+      { turn:6, dialog:[
+        { who:"白老師", mood:"hurt", text:"生產線還在運轉……他們到最後一刻都在造仿製槍。" },
+        { who:"韓沐霜", pos:"right", mood:"angry", text:"那就親手替它按下停機鍵。目標兵工廠核心，突入。" } ] }
     ],
     debrief:"兵工廠的火熄了。生產線終端還亮著最後一份圖紙的投影——落款是灰王的本名，以及一段你熟悉的軍籍編號。" },
   { n:14, title:"灰幕之後",   map:"urban",    player:"israel",  enemy:"germany", side:0,
@@ -216,8 +297,16 @@ const STORY = [
       { who:"白老師", text:"檔案室的鎖是老式的。給我三十秒。" },
       { who:"韓沐霜", pos:"right", text:"儘量不留屍體。今晚偷的不是檔案，是一個真相。" }
     ],
+    events:[
+      { turn:2, dialog:[
+        { who:"影山靜", text:"……（指向巡邏隊，搖頭；再指向暗巷，點頭）" },
+        { who:"韓沐霜", pos:"right", text:"照她的路走。今晚每留一條命，明天就少一個敵人。" } ] },
+      { turn:4, dialog:[
+        { who:"雷諾．佛斯", mood:"hurt", text:"（對著暗處）……是我。放下槍吧，弟兄們。放下槍的理由，我找到了。" } ] }
+    ],
     debrief:"檔案攤在桌上：灰王曾是聯軍最年輕的名將，因堅持撤僑抗命而被除名——那次撤僑救了三千人，也毀了他。雷諾的舊部有一半連夜放下了武器。" },
   { n:15, title:"黎明線",     map:"urban",    player:"usa",     enemy:"russia",  side:0,
+    ace:{ name:"灰王",             cls:"specops" },
     special:{ type:"waves", turns:[10,20], desc:"最終決戰：敵軍將於第 10、20 回合投入預備隊" },
     brief:"（★暫用地形）總攻要塞。海空壓制外環、陸軍破牆、直取指揮中樞。灰王在最後的廣播裡只說了一句：「讓我看看，正規軍還記不記得自己為何而戰。」讓他看看。",
     dialog:[
@@ -232,6 +321,15 @@ const STORY = [
       { who:"影山靜", text:"……（環視眾人，第一次開口）「……回家。」" },
       { who:"白老師", mood:"smile", text:"都給我回來。我修得好裝備，修不了空著的椅子。" },
       { who:"韓沐霜", pos:"right", mood:"angry", text:"每一發子彈都要有名字。最後一發的名字，叫黎明。" }
+    ],
+    events:[
+      { turn:9, dialog:[
+        { who:"汀娜．烏梅", mood:"hurt", text:"預備隊出現！要塞東門湧出第一波增援——照劇本來了。" },
+        { who:"韓沐霜", pos:"right", text:"照我們的劇本打。外環不退，中路繼續鑿。" } ] },
+      { turn:19, dialog:[
+        { who:"丁小滿", text:"最後一波了……班長，打完這場，早餐還是白老師請嗎？" },
+        { who:"白老師", mood:"smile", text:"請。這次加蛋。" },
+        { who:"韓沐霜", pos:"right", mood:"smile", text:"都聽到了。為了加蛋的早餐——全隊，最後推進！" } ] }
     ],
     debrief:"槍聲停在黎明。灰王交出的不是佩槍，而是一份三千人的撤僑名單——「這是我唯一打贏過的仗。」戰爭結束了；曙光特遣隊的名字，留在了每一座收復城市的碑上。（全劇終——感謝遊玩）" }
 ];
