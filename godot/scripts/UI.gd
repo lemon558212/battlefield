@@ -277,23 +277,32 @@ func _process(delta: float) -> void:
 		if _type_k >= _type_full.length():
 			_typing = false
 
-func _unhandled_input(event: InputEvent) -> void:
+# 用 _input（GUI 吃掉事件前先收）：對話畫面的全螢幕背景/立繪/對話框都是 STOP 控件，
+# 會攔截點擊，若用 _unhandled_input 會永遠收不到 → 對話卡住無法推進。
+func _input(event: InputEvent) -> void:
 	if _dlg_script.is_empty():
 		return
+	var advance := false
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _typing:
-			_typing = false
-			_type_k = _type_full.length()
-			var lbl := root.find_child("DlgText", true, false)
-			if lbl:
-				(lbl as Label).text = _type_full
+		advance = true
+	elif event is InputEventKey and event.pressed and event.keycode in [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]:
+		advance = true
+	if not advance:
+		return
+	get_viewport().set_input_as_handled()
+	if _typing:
+		_typing = false
+		_type_k = _type_full.length()
+		var lbl := root.find_child("DlgText", true, false)
+		if lbl:
+			(lbl as Label).text = _type_full
+	else:
+		_dlg_i += 1
+		if _dlg_i >= _dlg_script.size():
+			_dlg_script = []
+			_dlg_step()
 		else:
-			_dlg_i += 1
-			if _dlg_i >= _dlg_script.size():
-				_dlg_script = []
-				_dlg_step()
-			else:
-				_dlg_step()
+			_dlg_step()
 
 # ---------- 部署面板 ----------
 func show_deploy(ch, budget_left: int, roster: Array, on_pick: Callable, on_go: Callable) -> void:
