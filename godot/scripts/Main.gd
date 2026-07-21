@@ -90,10 +90,12 @@ func _build_env() -> void:
 	e.ambient_light_energy = 0.55
 	env.environment = e
 	add_child(env)
-	# 相機
+	# 相機（預設拉近，看得清單位）
 	cam = TacticalCamera.new()
 	add_child(cam)
-	cam.focus = Vector3(0, 0, 0)
+	cam.focus = Vector3(0, 0, 2)
+	cam.dist = 14.0
+	cam.pitch_deg = 42.0
 
 func _build_scenery() -> void:
 	for info in [["res://assets/models/house-b.glb", Vector3(-12, 0, -10)],
@@ -106,20 +108,46 @@ func _build_scenery() -> void:
 		b.position = info[1]
 		b.scale = Vector3.ONE * 3.0
 
+# 兵種 → Quaternius 模型（各含 24 動畫）＋兵種色（微量疊色區分剪影）
+const CLASS_MODEL := {
+	"rifleman": "res://assets/models/chars/rifleman.glb",
+	"sniper": "res://assets/models/chars/sniper.glb",
+	"mg": "res://assets/models/chars/mg.glb",
+	"assault": "res://assets/models/chars/assault.glb",
+	"at": "res://assets/models/chars/at.glb",
+	"mortar": "res://assets/models/chars/mortar.glb",
+	"engineer": "res://assets/models/chars/engineer.glb",
+	"specops": "res://assets/models/chars/specops.glb",
+	"sam": "res://assets/models/chars/sam.glb",
+}
+const CLASS_TINT := {
+	"rifleman": Color(0.55, 0.75, 0.45), "sniper": Color(0.35, 0.45, 0.6),
+	"mg": Color(0.7, 0.5, 0.3), "assault": Color(0.75, 0.35, 0.3),
+	"at": Color(0.5, 0.4, 0.6), "mortar": Color(0.6, 0.6, 0.35),
+	"engineer": Color(0.4, 0.62, 0.55), "specops": Color(0.25, 0.25, 0.3),
+	"sam": Color(0.5, 0.55, 0.7),
+}
+
+func _make_unit(cls: String, side_i: int, pos: Vector3) -> Unit:
+	var path: String = CLASS_MODEL.get(cls, CLASS_MODEL["rifleman"])
+	var tint: Color = CLASS_TINT.get(cls, Color(0, 0, 0, 0))
+	var u := Unit.spawn(path, cls, side_i, tint)
+	add_child(u)
+	u.position = pos
+	u.rotation.y = 0.0 if side_i == 0 else PI
+	u.shot_fired.connect(_on_shot)
+	units.append(u)
+	return u
+
 func _spawn_units() -> void:
-	var defs := [
-		["res://assets/models/chars/rifleman-tripo.glb", "rifleman", 0, Vector3(-4, 0, 8)],
-		["res://assets/models/chars/sniper-tripo3.glb", "sniper", 0, Vector3(0, 0, 9)],
-		["res://assets/models/chars/assault.glb", "assault", 0, Vector3(4, 0, 8)],
-		["res://assets/models/chars/mg-tripo.glb", "mg", 1, Vector3(2, 0, -6)],
-		["res://assets/models/chars/assault.glb", "assault", 1, Vector3(-3, 0, -7)],
-	]
-	for d in defs:
-		var u := Unit.spawn(d[0], d[1], d[2])
-		add_child(u)
-		u.position = d[3]
-		u.shot_fired.connect(_on_shot)
-		units.append(u)
+	# 我方一排（多兵種展示動畫）
+	var mine := ["rifleman", "sniper", "mg", "assault", "engineer"]
+	for i in mine.size():
+		_make_unit(mine[i], 0, Vector3(-8 + i * 4.0, 0, 9))
+	# 敵方
+	var foes := ["assault", "mg", "at"]
+	for i in foes.size():
+		_make_unit(foes[i], 1, Vector3(-4 + i * 4.0, 0, -6))
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
