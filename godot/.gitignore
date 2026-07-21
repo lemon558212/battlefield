@@ -2,5 +2,7 @@
 *.tmp
 selftest_*.png
 selftest_*.png.import
+st_*.png
+st_*.png.import
 aniprobe.gd*
 boneprobe.gd*
