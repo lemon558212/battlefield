@@ -11,6 +11,11 @@ const CLASS_MODEL := {
 	"engineer": "res://assets/models/chars/engineer.glb", "specops": "res://assets/models/chars/specops.glb",
 	"sam": "res://assets/models/chars/sam.glb",
 }
+const HERO_MODEL := {   # 立繪轉 3D 本人模型（僅我方英雄用；其餘暫用通用兵，待生成補齊）
+	"sniper": "res://assets/models/chars/sniper-tripo3.glb",
+	"rifleman": "res://assets/models/chars/rifleman-tripo.glb",
+	"mg": "res://assets/models/chars/mg-tripo.glb",
+}
 const CLASS_TINT := {
 	"rifleman": Color(0.55, 0.75, 0.45), "sniper": Color(0.35, 0.45, 0.6), "mg": Color(0.7, 0.5, 0.3),
 	"assault": Color(0.75, 0.35, 0.3), "at": Color(0.5, 0.4, 0.6), "mortar": Color(0.6, 0.6, 0.35),
@@ -310,8 +315,11 @@ func _start_battle() -> void:
 # ---------- 單位 ----------
 func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	# 戰場＝3D 動畫身體（VC 做法，立繪只留 UI）；player 藍環自然色、enemy 紅環紅疊色。
-	var node := Unit.spawn(CLASS_MODEL.get(cls, "res://assets/models/chars/soldier.glb"),
-			cls, side_i, side_i == player_side)
+	# 我方英雄優先用「立繪轉 3D」本人模型（tripo），敵軍/無此模型者用通用兵。
+	var mp: String = CLASS_MODEL.get(cls, "res://assets/models/chars/soldier.glb")
+	if side_i == player_side and HERO_MODEL.has(cls):
+		mp = HERO_MODEL[cls]
+	var node := Unit.spawn(mp, cls, side_i, side_i == player_side)
 	add_child(node)
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
