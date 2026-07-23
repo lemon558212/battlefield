@@ -7,8 +7,8 @@ extends Node3D
 
 signal shot_fired(from_pos: Vector3, to_pos: Vector3)
 
-const WALK_SPEED := 6.0
-const TURN_SPEED := 10.0
+const WALK_SPEED := 3.0    # 6 太快像滑行；戰術步行速度更真（治滑步）
+const TURN_SPEED := 7.0
 
 # 語意動作 → Quaternius 片段名（優先），找不到再 regex 泛匹配（相容其他模型）
 const Q_MAP := {
@@ -55,6 +55,7 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 		if not aps.is_empty():
 			u.anim = aps[0]
 			u._map_anims()
+			u._strip_root_motion()
 		u._attach_weapon(model, p_cls)
 	# 腳下識別環
 	var ring := MeshInstance3D.new()
@@ -197,6 +198,32 @@ func _map_anims() -> void:
 				anim_names[key] = n
 				break
 	_play("idle", 0.0)
+
+# 抽離根運動：tripo 走/跑動畫把角色往前位移(root bone)，會跟程式移動疊加成滑步/回彈。
+# 設 root_motion_track 讓 Godot 把該位移從姿勢抽走→動畫變原地踏步，位移純由程式驅動。
+func _strip_root_motion() -> void:
+	if anim == null:
+		return
+	var base: Node = null
+	if anim.root_node != NodePath(""):
+		base = anim.get_node_or_null(anim.root_node)
+	if base == null:
+		base = anim.get_parent()
+	if base == null:
+		return
+	var sks := base.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk := sks[0] as Skeleton3D
+	var rootbone := -1
+	for i in sk.get_bone_count():
+		if sk.get_bone_parent(i) == -1:
+			rootbone = i
+			break
+	if rootbone < 0:
+		return
+	var relp := base.get_path_to(sk)
+	anim.root_motion_track = NodePath(str(relp) + ":" + sk.get_bone_name(rootbone))
 
 func _clip_len(key: String) -> float:
 	if anim and anim_names.has(key):
