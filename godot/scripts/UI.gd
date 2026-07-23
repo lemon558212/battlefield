@@ -70,6 +70,19 @@ func _load_tex(path: String) -> Texture2D:
 	_tex_cache[path] = tex
 	return tex
 
+# 從全身立繪裁出頭肩區當頭像（去背 PNG 四周有透明留白，直接縮會變小小全身）
+func _avatar(tex: Texture2D) -> Texture2D:
+	if tex == null:
+		return null
+	var w := tex.get_width()
+	var h := tex.get_height()
+	if w <= 0 or h <= 0:
+		return tex
+	var at := AtlasTexture.new()
+	at.atlas = tex
+	at.region = Rect2(w * 0.16, h * 0.04, w * 0.68, h * 0.44)   # 頭肩區
+	return at
+
 func _panel(col := Color(0, 0, 0, 0.82)) -> ColorRect:
 	var cr := ColorRect.new()
 	cr.color = col
@@ -324,8 +337,8 @@ func _render_dlg(d: Dictionary, active_side: String) -> void:
 func _process(delta: float) -> void:
 	if _typing:
 		_type_accum += delta
-		while _type_accum >= 0.028 and _type_k < _type_full.length():
-			_type_accum -= 0.028
+		while _type_accum >= 0.016 and _type_k < _type_full.length():
+			_type_accum -= 0.016
 			_type_k += 1
 		var lbl := root.find_child("DlgText", true, false)
 		if lbl:
@@ -400,7 +413,7 @@ func show_deploy(ch, budget_left: int, roster: Array, on_pick: Callable, on_go: 
 		tr.clip_contents = true
 		var pp: String = item.get("portrait", "")
 		if pp != "":
-			tr.texture = load(pp)
+			tr.texture = _avatar(_load_tex(pp))    # 裁頭肩區當頭像（治全身縮一條、比例怪）
 		tr.size = Vector2(56, 64)
 		tr.position = Vector2(0, 0)
 		card.add_child(tr)

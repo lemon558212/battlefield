@@ -8,7 +8,7 @@ extends Node3D
 signal shot_fired(from_pos: Vector3, to_pos: Vector3)
 
 const WALK_SPEED := 3.0    # 6 太快像滑行；戰術步行速度更真（治滑步）
-const TURN_SPEED := 7.0
+const TURN_SPEED := 12.0   # 轉身要快，短距離移動也能先轉正再跑
 
 # 語意動作 → Quaternius 片段名（優先），找不到再 regex 泛匹配（相容其他模型）
 const Q_MAP := {
@@ -304,9 +304,15 @@ func _process(delta: float) -> void:
 			_move_target = null
 			_play("idle")
 			return
-		_face_towards(_move_target, TURN_SPEED * delta)
-		global_position += d.normalized() * WALK_SPEED * delta
-		_play("run" if anim_names.has("run") else "walk")
+		# VC 做法：先轉身面向目標，面向差太大時原地轉身不前進（治「面向一個方向跑」）
+		var target_yaw := atan2(d.x, d.z)
+		rotation.y = lerp_angle(rotation.y, target_yaw, min(1.0, TURN_SPEED * delta))
+		var ang := absf(wrapf(target_yaw - rotation.y, -PI, PI))
+		if ang > 0.6:
+			_play("idle")        # 還沒轉正：原地轉身
+		else:
+			global_position += d.normalized() * WALK_SPEED * delta
+			_play("run" if anim_names.has("run") else "walk")
 	elif _state == "shoot" or _state == "" or _state == "hit":
 		_play("idle")
 
