@@ -27,6 +27,7 @@ var _typing := false
 var _type_full := ""
 var _type_k := 0
 var _type_accum := 0.0
+var _dlg_txt: Label = null      # 直接持有當前對話文字 Label，不靠 find_child（避免搜到殘影）
 
 func _ready() -> void:
 	layer = 10
@@ -35,8 +36,13 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 
+# 立即從樹上移除再釋放：queue_free 是「延遲」刪除，舊節點會殘留一段時間，
+# 導致 find_child("DlgText"/"BudgetLbl"/...) 搜到正要被刪的舊節點 → 字寫進垃圾節點、新節點永遠空白。
+# （2026-07-22 對話第2句以後沒字的真因，根治整類「按名字搜到殘影」的 bug。）
 func _clear() -> void:
+	_dlg_txt = null
 	for c in root.get_children():
+		root.remove_child(c)
 		c.queue_free()
 
 # 載圖：優先用匯入資源，失敗則執行期直接讀原始檔（繞過匯入快取，桌面版從源碼跑最穩）
@@ -320,6 +326,7 @@ func _render_dlg(d: Dictionary, active_side: String) -> void:
 	root.add_child(name_l)
 	var txt := _label("", 19, TXT)
 	txt.name = "DlgText"
+	_dlg_txt = txt
 	txt.custom_minimum_size = Vector2(vp.x * 0.82, 0)
 	txt.size = Vector2(vp.x * 0.82, 70)
 	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -340,9 +347,8 @@ func _process(delta: float) -> void:
 		while _type_accum >= 0.016 and _type_k < _type_full.length():
 			_type_accum -= 0.016
 			_type_k += 1
-		var lbl := root.find_child("DlgText", true, false)
-		if lbl:
-			(lbl as Label).text = _type_full.substr(0, _type_k)
+		if is_instance_valid(_dlg_txt):
+			_dlg_txt.text = _type_full.substr(0, _type_k)
 		if _type_k >= _type_full.length():
 			_typing = false
 
@@ -362,9 +368,8 @@ func _input(event: InputEvent) -> void:
 	if _typing:
 		_typing = false
 		_type_k = _type_full.length()
-		var lbl := root.find_child("DlgText", true, false)
-		if lbl:
-			(lbl as Label).text = _type_full
+		if is_instance_valid(_dlg_txt):
+			_dlg_txt.text = _type_full
 	else:
 		_dlg_i += 1
 		if _dlg_i >= _dlg_script.size():

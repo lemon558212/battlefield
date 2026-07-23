@@ -104,6 +104,16 @@ func _selftest() -> void:
 		ui.show_charcard(selected["cls"], "★" + selected["char_name"], c.get("trait", {}).get("desc", ""), 100, 100)
 	await get_tree().create_timer(1.0).timeout
 	await _snap("res://st_battle.png")
+	# 動態驗證：真實遊戲路徑下的「移動朝向」（治靜態截圖漏掉動態 bug）
+	for t in [[200.0, 0.0, 90.0], [-200.0, 0.0, -90.0], [0.0, 200.0, 0.0], [0.0, -200.0, 180.0]]:
+		var uu = _deployed[0]
+		var dest := _to3d(uu["wx"] + t[0], uu["wy"] + t[1])
+		uu["node"].move_to(dest)
+		await get_tree().create_timer(1.0).timeout
+		var got: float = rad_to_deg(uu["node"].rotation.y)
+		var want: float = t[2]
+		var diff: float = abs(wrapf(got - want, -180.0, 180.0))
+		print("[facechk] want=%.0f got=%.1f diff=%.1f %s" % [want, got, diff, "OK" if diff < 15.0 else "FAIL"])
 	print("[selftest] DONE units=", units.size())
 	get_tree().quit(0)
 
