@@ -34,11 +34,21 @@ var _busy_until := 0.0        # shoot/hit 播放鎖
 var _dead := false
 var _die_fade := 0.0
 var _model: Node3D = null
+# 模型「正面軸」校正：Quaternius 通用兵正面朝 +Z(offset 0)，
+# tripo（立繪轉 3D）正面朝 +X，需 -90° 才會面向移動方向。
+# （2026-07-22 實拍四方位判定：+X 相機才看到 tripo 的臉；治「面向右卻往下」。）
+var yaw_offset := 0.0
+
+# 模型正面在世界空間的方向（已含 yaw_offset 校正）——驗證用，語意正確不依賴模型慣例
+func facing_dir() -> Vector3:
+	var a := rotation.y - yaw_offset
+	return Vector3(sin(a), 0.0, cos(a))
 
 static func spawn(model_path: String, p_cls: String, p_side: int, is_player: bool) -> Unit:
 	var u := Unit.new()
 	u.cls = p_cls
 	u.side = p_side
+	u.yaw_offset = -PI / 2.0 if model_path.contains("tripo") else 0.0   # 見 yaw_offset 註解
 	var packed: PackedScene = null
 	if model_path != "" and ResourceLoader.exists(model_path):
 		packed = load(model_path)
@@ -273,7 +283,7 @@ func _face_towards(p: Vector3, k: float) -> void:
 	var d := p - global_position
 	d.y = 0.0
 	if d.length() < 0.05: return
-	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), k)
+	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z) + yaw_offset, k)
 
 func _process(delta: float) -> void:
 	if _dead:
@@ -305,7 +315,7 @@ func _process(delta: float) -> void:
 			_play("idle")
 			return
 		# VC 做法：先轉身面向目標，面向差太大時原地轉身不前進（治「面向一個方向跑」）
-		var target_yaw := atan2(d.x, d.z)
+		var target_yaw := atan2(d.x, d.z) + yaw_offset
 		rotation.y = lerp_angle(rotation.y, target_yaw, min(1.0, TURN_SPEED * delta))
 		var ang := absf(wrapf(target_yaw - rotation.y, -PI, PI))
 		if ang > 0.6:

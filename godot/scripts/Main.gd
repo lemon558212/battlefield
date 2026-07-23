@@ -105,15 +105,19 @@ func _selftest() -> void:
 	await get_tree().create_timer(1.0).timeout
 	await _snap("res://st_battle.png")
 	# 動態驗證：真實遊戲路徑下的「移動朝向」（治靜態截圖漏掉動態 bug）
-	for t in [[200.0, 0.0, 90.0], [-200.0, 0.0, -90.0], [0.0, 200.0, 0.0], [0.0, -200.0, 180.0]]:
+	# 驗「模型正面向量 vs 實際移動方向」的夾角（不比對 rotation 數值——那會被模型正面軸慣例騙過去）
+	for t in [[200.0, 0.0], [-200.0, 0.0], [0.0, 200.0], [0.0, -200.0]]:
 		var uu = _deployed[0]
+		var from: Vector3 = uu["node"].global_position
 		var dest := _to3d(uu["wx"] + t[0], uu["wy"] + t[1])
 		uu["node"].move_to(dest)
 		await get_tree().create_timer(1.0).timeout
-		var got: float = rad_to_deg(uu["node"].rotation.y)
-		var want: float = t[2]
-		var diff: float = abs(wrapf(got - want, -180.0, 180.0))
-		print("[facechk] want=%.0f got=%.1f diff=%.1f %s" % [want, got, diff, "OK" if diff < 15.0 else "FAIL"])
+		var want_dir: Vector3 = dest - from
+		want_dir.y = 0.0
+		want_dir = want_dir.normalized()
+		var face: Vector3 = uu["node"].facing_dir()
+		var deg: float = rad_to_deg(acos(clamp(face.dot(want_dir), -1.0, 1.0)))
+		print("[facechk] move=(%.0f,%.0f) 正面與移動夾角=%.1f度 %s" % [t[0], t[1], deg, "OK" if deg < 15.0 else "FAIL"])
 	print("[selftest] DONE units=", units.size())
 	get_tree().quit(0)
 
