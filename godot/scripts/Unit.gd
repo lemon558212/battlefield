@@ -34,6 +34,9 @@ var _busy_until := 0.0        # shoot/hit 播放鎖
 var _dead := false
 var _die_fade := 0.0
 var _model: Node3D = null
+var _gun_node: Node3D = null
+var _gun_mount: Node3D = null
+var _gun_fixed := false
 # 正面軸校正改「轉模型子節點」，Unit.rotation.y 一律代表「+Z 為正面」的純朝向。
 # ⚠ 絕不可用檔名判斷模型慣例（2026-07-23 血淚：重定向後檔名沒了 "tripo" 兩字，
 #   校正失效、90 度偏差整個回來）。改用「骨架骨名」判斷＝內容決定，改名不會壞。
@@ -104,22 +107,59 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 	u.add_child(sh)
 	return u
 
+# 縮放到 1.8m。蒙皮網格的 get_aabb() 不可靠（soldier.glb 曾被量成 41m 高 → 巨人橫跨畫面），
+# 故「有骨架就用骨頭靜止姿勢的實際高度」量測，最可靠；並加安全夾限，寧可不縮放也不爆掉。
 func _fit_model(model: Node) -> void:
-	var aabb := _merged_aabb(model)
-	if aabb.size.y > 0.01:
-		var k := 1.8 / aabb.size.y
-		model.scale = Vector3.ONE * k
-		model.position.y = -aabb.position.y * k
+	var h := 0.0
+	var base_y := 0.0
+	var sks := model.find_children("*", "Skeleton3D", true, false)
+	if not sks.is_empty():
+		var sk := sks[0] as Skeleton3D
+		var lo := INF
+		var hi := -INF
+		for i in sk.get_bone_count():
+			var t := sk.get_bone_global_rest(i)
+			lo = minf(lo, t.origin.y)
+			hi = maxf(hi, t.origin.y)
+		if hi > lo:
+			h = (hi - lo) * 1.12          # 骨頭頂點約在頭頂之下，補一點頭高
+			base_y = lo
+	if h <= 0.01:
+		var aabb := _merged_aabb(model)
+		h = aabb.size.y
+		base_y = aabb.position.y
+	if h <= 0.01:
+		return
+	var k: float = 1.8 / h
+	if k < 0.02 or k > 50.0:
+		push_warning("Unit._fit_model 縮放異常 k=%f h=%f，改用原尺寸" % [k, h])
+		return
+	model.scale = Vector3.ONE * k
+	model.position.y = -base_y * k
+
+# 遞迴累積父階變換算 AABB。
+# ⚠ 舊版只用 mi.transform（沒累積父階），巢狀模型會被量得極小 → _fit_model 縮放暴衝
+#   → 單位變成一個橫跨畫面的巨人（使用者看到的「場景黑色邊/灰色巨牆」真因，2026-07-24）。
+func _aabb_rec(n: Node, xf: Transform3D, acc: AABB, has: bool) -> Array:
+	var cur := xf
+	if n is Node3D:
+		cur = xf * (n as Node3D).transform
+	if n is MeshInstance3D:
+		var b: AABB = cur * (n as MeshInstance3D).get_aabb()
+		acc = b if not has else acc.merge(b)
+		has = true
+	for c in n.get_children():
+		var r := _aabb_rec(c, cur, acc, has)
+		acc = r[0]
+		has = r[1]
+	return [acc, has]
 
 func _merged_aabb(node: Node) -> AABB:
-	var out := AABB()
-	var first := true
-	for m in node.find_children("*", "MeshInstance3D", true, false):
-		var mi := m as MeshInstance3D
-		var b: AABB = mi.transform * mi.get_aabb()
-		if first: out = b; first = false
-		else: out = out.merge(b)
-	return out
+	var prev := (node as Node3D).transform
+	(node as Node3D).transform = Transform3D.IDENTITY
+	var r := _aabb_rec(node, Transform3D.IDENTITY, AABB(), false)
+	(node as Node3D).transform = prev
+	return r[0] if r[1] else AABB()
 
 # 換裝：用內建 3D 模型 + 依角色立繪配色重新上色（data/char_look.json）。
 # 模型材質具名(Hair/Skin/Eye/Eyebrows/各衣著色)，依名稱分部位套色；皮膚與眼睛不動。
@@ -192,8 +232,9 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 	ba.bone_name = "Wrist.R"
 	var gun := _make_gun(p_cls)
 	ba.add_child(gun)
-	gun.position = Vector3(0.02, 0.0, 0.10)
 	gun.rotation_degrees = Vector3(0, 90, 8)
+	_gun_node = gun
+	_gun_mount = ba
 
 func _make_gun(p_cls: String) -> Node3D:
 	var root := Node3D.new()
@@ -337,7 +378,24 @@ func _face_towards(p: Vector3, k: float) -> void:
 	if d.length() < 0.05: return
 	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), k)
 
+# 槍械尺度補償：BoneAttachment 的世界縮放要等節點進場景樹才算得準
+# （soldier.glb 掛點世界縮放極大，不補償這把 0.5m 的槍會變成 80+ 公尺長條＝「灰色巨牆」）。
+func _fix_gun_scale() -> void:
+	if _gun_fixed or _gun_node == null or _gun_mount == null:
+		return
+	if not is_inside_tree() or not _gun_mount.is_inside_tree():
+		return
+	_gun_fixed = true
+	var ws := _gun_mount.global_transform.basis.get_scale()
+	var s: float = (absf(ws.x) + absf(ws.y) + absf(ws.z)) / 3.0
+	if s > 0.0001 and (s > 1.15 or s < 0.87):
+		_gun_node.scale = Vector3.ONE / s
+		_gun_node.position = Vector3(0.02, 0.0, 0.10) / s
+	else:
+		_gun_node.position = Vector3(0.02, 0.0, 0.10)
+
 func _process(delta: float) -> void:
+	_fix_gun_scale()
 	if _dead:
 		_die_fade -= delta
 		if _die_fade <= 0.4 and _model:      # 動畫播完後最後 0.4s 淡出

@@ -51,6 +51,30 @@ var budget_left := 0
 var _tracers: Array = []
 var _enemy_queue: Array = []
 var _enemy_t := 0.0
+var _zone_mesh: MeshInstance3D = null
+
+const GROUND_SHADER := """
+shader_type spatial;
+uniform vec3 grass_a = vec3(0.34, 0.45, 0.24);
+uniform vec3 grass_b = vec3(0.47, 0.57, 0.31);
+uniform vec3 dirt    = vec3(0.44, 0.39, 0.28);
+varying vec3 wp;
+void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p){
+	vec2 i = floor(p); vec2 f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+	return mix(mix(h21(i), h21(i+vec2(1,0)), u.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), u.x), u.y);
+}
+void fragment() {
+	float n1 = vnoise(wp.xz * 0.35);
+	float n2 = vnoise(wp.xz * 1.4);
+	vec3 g = mix(grass_a, grass_b, clamp(n1 * 1.25, 0.0, 1.0));
+	float d = smoothstep(0.58, 0.82, vnoise(wp.xz * 0.16));
+	ALBEDO = mix(g, dirt, d * 0.75) * (0.90 + 0.20 * n2);
+	ROUGHNESS = 0.97;
+	SPECULAR = 0.05;
+}
+"""
 
 func _ready() -> void:
 	_build_static()
@@ -231,19 +255,61 @@ func _selftest() -> void:
 	get_tree().quit(0)
 
 func _build_static() -> void:
+	# 太陽：暖色、柔邊陰影、角度更斜（拉長影子＝立體感）
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52, 38, 0)
+	sun.rotation_degrees = Vector3(-42, 128, 0)
+	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.light_energy = 1.15
 	sun.shadow_enabled = true
+	sun.shadow_blur = 1.4
+	sun.directional_shadow_max_distance = 80.0
 	add_child(sun)
+	# 補光：從反方向打冷色弱光，避免暗面全黑（治「黑色邊」的觀感）
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-28, -50, 0)
+	fill.light_color = Color(0.72, 0.80, 0.95)
+	fill.light_energy = 0.35
+	fill.shadow_enabled = false
+	add_child(fill)
+
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.78, 0.82, 0.88)
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.85, 0.88, 0.95)
-	e.ambient_light_energy = 0.5
+	# 程序天空（漸層＋太陽）取代死板純色背景
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.38, 0.55, 0.82)
+	sky_mat.sky_horizon_color = Color(0.78, 0.84, 0.88)
+	sky_mat.ground_bottom_color = Color(0.40, 0.44, 0.38)
+	sky_mat.ground_horizon_color = Color(0.72, 0.78, 0.80)
+	sky_mat.sun_angle_max = 12.0
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	e.background_mode = Environment.BG_SKY
+	e.sky = sky
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	e.ambient_light_energy = 0.9
+	# 環境光遮蔽：物件接地處自然變暗，最有效的「不假」來源
+	e.ssao_enabled = true
+	e.ssao_radius = 1.6
+	e.ssao_intensity = 2.2
+	e.ssao_power = 1.6
+	# 遠景霧氣：拉出空間深度
+	e.fog_enabled = true
+	e.fog_light_color = Color(0.70, 0.77, 0.84)
+	e.fog_density = 0.0035
+	e.fog_sky_affect = 0.08
+	# 色調映射＋微光暈：去除死白、增加層次
+	e.tonemap_mode = Environment.TONE_MAPPER_ACES
+	e.tonemap_exposure = 0.98
+	e.tonemap_white = 6.0
+	e.glow_enabled = true
+	e.glow_intensity = 0.12
+	e.glow_bloom = 0.08
+	e.adjustment_enabled = true
+	e.adjustment_saturation = 1.12
+	e.adjustment_contrast = 1.06
 	var we := WorldEnvironment.new()
 	we.environment = e
 	add_child(we)
+
 	cam = TacticalCamera.new()
 	add_child(cam)
 	cam.dist = 16.0
@@ -421,6 +487,8 @@ func _start_battle() -> void:
 	st = St.CMD
 	turn = 1
 	cp = cp_max
+	if is_instance_valid(_zone_mesh):
+		_zone_mesh.visible = false        # 開戰後收起部署藍框
 	ui.show_hud()
 	ui.update_hud(turn, "player", cp)
 	_refresh_visibility()
@@ -715,43 +783,160 @@ func _build_ground() -> void:
 	add_child(world)
 	var mw: float = map_data.get("w", 960) * WORLD_SCALE
 	var mh: float = map_data.get("h", 600) * WORLD_SCALE
+	# 地面：用 shader 做草地色斑＋土痕，取代單一死綠平面
 	var ground := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(mw * 1.4, mh * 1.4)
+	pm.size = Vector2(mw * 2.2, mh * 2.2)
+	pm.subdivide_width = 24
+	pm.subdivide_depth = 24
 	ground.mesh = pm
-	var gm := StandardMaterial3D.new()
-	gm.albedo_color = Color(0.42, 0.52, 0.30)
-	ground.material_override = gm
+	var sh := Shader.new()
+	sh.code = GROUND_SHADER
+	var sm := ShaderMaterial.new()
+	sm.shader = sh
+	ground.material_override = sm
 	world.add_child(ground)
-	# 建築（依 map solids 略放幾棟）
+
+	# 建築：依實際 AABB 自動縮放到合理樓高（治「放大2.5倍變黑色巨牆」）
 	var solids = map_data.get("solids", [])
-	var models := ["res://assets/models/house-b.glb", "res://assets/models/townhouse-b.glb", "res://assets/models/twostory.glb"]
+	var bmodels := ["res://assets/models/house-b.glb", "res://assets/models/townhouse-b.glb",
+			"res://assets/models/twostory.glb", "res://assets/models/smallbuilding.glb"]
 	if solids is Array:
 		var i := 0
-		for s in solids:
+		for sdef in solids:
 			if i >= 6:
 				break
-			var packed: PackedScene = load(models[i % models.size()])
-			if packed:
-				var b := packed.instantiate()
+			# 建築不得生成在任一方部署區內（否則擋兵、且貼著鏡頭變成一道巨牆）
+			if _in_any_deploy(sdef):
+				continue
+			var mp: String = bmodels[i % bmodels.size()]
+			if ResourceLoader.exists(mp):
+				var b := (load(mp) as PackedScene).instantiate()
 				world.add_child(b)
-				b.position = _to3d(s.get("x", 0) + s.get("w", 40) * 0.5, s.get("y", 0) + s.get("h", 40) * 0.5)
-				b.scale = Vector3.ONE * 2.5
+				var dy: float = _fit_prop(b, 5.2 if i % 2 == 0 else 3.6)   # 樓高 3.6~5.2m
+				b.position = _to3d(sdef.get("x", 0) + sdef.get("w", 40) * 0.5,
+						sdef.get("y", 0) + sdef.get("h", 40) * 0.5) + Vector3(0, dy, 0)
+				b.rotation.y = randf() * TAU
 			i += 1
-	# 我方部署藍框（半透明地面標記）
+
+	# 掩體：沙包（Phase2 掩體系統的實體，先做出來才躲得進去）
+	var sandbags = map_data.get("sandbags", [])
+	if sandbags is Array:
+		for sb in sandbags:
+			_make_sandbag(_to3d(sb.get("x", 0) + sb.get("w", 40) * 0.5, sb.get("y", 0) + sb.get("h", 24) * 0.5),
+					float(sb.get("w", 80)), float(sb.get("h", 24)))
+
+	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感）
+	_scatter_trees(mw, mh)
+
+	# 我方部署藍框（開戰後隱藏）
 	var z := _my_zone()
 	var zone_mesh := MeshInstance3D.new()
+	zone_mesh.name = "DeployZone"
 	var zpm := PlaneMesh.new()
 	zpm.size = Vector2(z.get("w", 300) * WORLD_SCALE, z.get("h", 200) * WORLD_SCALE)
 	zone_mesh.mesh = zpm
 	var zmat := StandardMaterial3D.new()
-	zmat.albedo_color = Color(0.42, 0.78, 1.0, 0.22)
+	zmat.albedo_color = Color(0.42, 0.78, 1.0, 0.20)
 	zmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	zmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	zone_mesh.material_override = zmat
 	zone_mesh.position = _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5) + Vector3(0, 0.05, 0)
 	world.add_child(zone_mesh)
-	# 相機框住我方部署區
+	_zone_mesh = zone_mesh
+
 	cam.set_follow(null)
 	cam.focus = _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5)
 	cam.dist = 18.0
+
+# 遞迴累積父階變換算 AABB（先前只用 mi.transform，巢狀模型會算錯→縮放爆掉變巨牆）
+func _node_aabb(n: Node, xf: Transform3D, acc: AABB, has: bool) -> Array:
+	var cur := xf
+	if n is Node3D:
+		cur = xf * (n as Node3D).transform
+	if n is MeshInstance3D:
+		var b: AABB = cur * (n as MeshInstance3D).get_aabb()
+		acc = b if not has else acc.merge(b)
+		has = true
+	for c in n.get_children():
+		var r := _node_aabb(c, cur, acc, has)
+		acc = r[0]
+		has = r[1]
+	return [acc, has]
+
+# 依模型實際尺寸縮放到指定高度；回傳「讓底部貼地」所需的 y 偏移
+func _fit_prop(node: Node3D, target_h: float) -> float:
+	var prev := node.transform
+	node.transform = Transform3D.IDENTITY
+	var r := _node_aabb(node, Transform3D.IDENTITY, AABB(), false)
+	node.transform = prev
+	if not r[1]:
+		return 0.0
+	var ab: AABB = r[0]
+	if ab.size.y <= 0.01:
+		return 0.0
+	var k: float = target_h / ab.size.y
+	node.scale = Vector3.ONE * k
+	return -ab.position.y * k
+
+# 該矩形是否與任一方部署區重疊（含 40px 邊界）
+func _in_any_deploy(sdef: Dictionary) -> bool:
+	var dz = map_data.get("deploy", [])
+	if not (dz is Array):
+		return false
+	var m := 40.0
+	var ax: float = sdef.get("x", 0) - m
+	var ay: float = sdef.get("y", 0) - m
+	var aw: float = sdef.get("w", 40) + m * 2.0
+	var ah: float = sdef.get("h", 40) + m * 2.0
+	for z in dz:
+		var bx: float = z.get("x", 0)
+		var by: float = z.get("y", 0)
+		var bw: float = z.get("w", 0)
+		var bh: float = z.get("h", 0)
+		if ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by:
+			return true
+	return false
+
+func _make_sandbag(pos: Vector3, w_px: float, h_px: float) -> void:
+	var holder := Node3D.new()
+	world.add_child(holder)
+	holder.position = pos
+	var long_x: bool = w_px >= h_px
+	var count := 5
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.62, 0.57, 0.42)
+	mat.roughness = 0.95
+	for row in 2:
+		for i in count:
+			var bag := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.62, 0.28, 0.42)
+			bag.mesh = bm
+			bag.material_override = mat
+			var off: float = (float(i) - (count - 1) * 0.5) * 0.60 + (0.3 if row == 1 else 0.0)
+			bag.position = Vector3(off if long_x else 0.0, 0.16 + row * 0.27, 0.0 if long_x else off)
+			if not long_x:
+				bag.rotation.y = PI / 2.0
+			bag.rotation.y += randf_range(-0.08, 0.08)
+			holder.add_child(bag)
+
+func _scatter_trees(mw: float, mh: float) -> void:
+	var tm := ["res://assets/models/tree-single.glb", "res://assets/models/pinetrees.glb"]
+	var avail: Array[String] = []
+	for t in tm:
+		if ResourceLoader.exists(t):
+			avail.append(t)
+	if avail.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260724
+	for i in 26:
+		var t := (load(avail[i % avail.size()]) as PackedScene).instantiate()
+		world.add_child(t)
+		var dy: float = _fit_prop(t, rng.randf_range(3.0, 5.5))
+		# 邊緣多、中央少（不擋戰場）
+		var ang := rng.randf() * TAU
+		var r: float = rng.randf_range(0.55, 1.05)
+		t.position = Vector3(cos(ang) * mw * r, dy, sin(ang) * mh * r)
+		t.rotation.y = rng.randf() * TAU
