@@ -36,7 +36,7 @@ func _ready() -> void:
 	cam.look_at(Vector3(0,1.0,0), Vector3.UP)
 	add_child(cam)
 	cam.make_current()
-	u = Unit.spawn("res://assets/models/chars/sniper-tripo3.glb", "sniper", 0, true)
+	u = Unit.spawn("res://assets/models/chars/sniper-hero.glb", "sniper", 0, true)
 	add_child(u)
 	if "selftest" in OS.get_cmdline_user_args():
 		_run()

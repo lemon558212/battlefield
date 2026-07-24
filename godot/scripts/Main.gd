@@ -11,10 +11,12 @@ const CLASS_MODEL := {
 	"engineer": "res://assets/models/chars/engineer.glb", "specops": "res://assets/models/chars/specops.glb",
 	"sam": "res://assets/models/chars/sam.glb",
 }
-const HERO_MODEL := {   # 立繪轉 3D 本人模型（僅我方英雄用；其餘暫用通用兵，待生成補齊）
-	"sniper": "res://assets/models/chars/sniper-tripo3.glb",
-	"rifleman": "res://assets/models/chars/rifleman-tripo.glb",
-	"mg": "res://assets/models/chars/mg-tripo.glb",
+# 立繪轉 3D 本人模型 +「重定向 Quaternius 專業動畫」版（tools/retarget.py 產出）。
+# 治「動作僵硬」：tripo 自帶 6 動畫是自動綁骨的粗品且無瞄準姿勢；重定向後拿到 8 個好動畫含 Idle_Gun_Pointing。
+const HERO_MODEL := {
+	"sniper": "res://assets/models/chars/sniper-hero.glb",
+	"rifleman": "res://assets/models/chars/rifleman-hero.glb",
+	"mg": "res://assets/models/chars/mg-hero.glb",
 }
 const CLASS_TINT := {
 	"rifleman": Color(0.55, 0.75, 0.45), "sniper": Color(0.35, 0.45, 0.6), "mg": Color(0.7, 0.5, 0.3),

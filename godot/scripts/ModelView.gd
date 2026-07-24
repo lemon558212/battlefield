@@ -1,56 +1,55 @@
-# ModelView.gd — 決定性診斷：用「遊戲實際的 Unit.spawn」生成單位，rotation.y 固定 0，
-# 從世界 +Z/+X/-Z/-X 四方位各拍一張。看到「臉」的那張＝模型正面朝的軸。
+# ModelView.gd — 重定向動畫逐格檢視：播指定動畫、跨週期存 N 格，看骨架有無扭曲。
 extends Node3D
 
 var _cam: Camera3D
-
-var models: Array[String] = [
-	"res://assets/models/chars/soldier.glb",
-	"res://assets/models/chars/sniper-tripo3.glb",
-]
-var views := [
-	["camPosZ", Vector3(0, 1.2, 3.6)],
-	["camPosX", Vector3(3.6, 1.2, 0)],
-	["camNegZ", Vector3(0, 1.2, -3.6)],
-	["camNegX", Vector3(-3.6, 1.2, 0)],
+var jobs := [
+	["res://assets/models/chars/sniper-hero.glb", "Walk", 5],
+	["res://assets/models/chars/sniper-hero.glb", "Idle_Gun_Pointing", 3],
+	["res://assets/models/chars/sniper-hero.glb", "Gun_Shoot", 4],
 ]
 
 func _ready() -> void:
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.20, 0.23, 0.27)
+	e.background_color = Color(0.22, 0.25, 0.3)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(1, 1, 1)
-	e.ambient_light_energy = 1.1
-	var we := WorldEnvironment.new()
-	we.environment = e
-	add_child(we)
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, 30, 0)
-	add_child(sun)
-	_cam = Camera3D.new()
-	add_child(_cam)
-	_cam.make_current()
+	e.ambient_light_energy = 1.15
+	var we := WorldEnvironment.new(); we.environment = e; add_child(we)
+	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-45, 25, 0); add_child(sun)
+	_cam = Camera3D.new(); add_child(_cam); _cam.make_current()
 	if "selftest" in OS.get_cmdline_user_args():
 		_run()
 
 func _run() -> void:
-	for mp in models:
-		var u := Unit.spawn(mp, "rifleman", 0, true)
-		add_child(u)
-		u.global_position = Vector3.ZERO
-		u.rotation.y = 0.0                     # ★關鍵：轉角固定 0
-		var tagm := mp.get_file().get_basename()
-		for v in views:
-			u.rotation.y = 0.0                 # 每張都確保是 0（避免動畫/邏輯改到）
-			_cam.position = v[1]
-			_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
+	for job in jobs:
+		var path: String = job[0]
+		var clip: String = job[1]
+		var frames: int = job[2]
+		if not ResourceLoader.exists(path):
+			print("[rt] MISSING ", path); continue
+		var m := (load(path) as PackedScene).instantiate()
+		add_child(m)
+		# 用 Unit 的縮放邏輯不好取，這裡直接固定縮放與相機（模型約 1 單位高）
+		m.scale = Vector3.ONE * 1.8
+		var aps := m.find_children("*", "AnimationPlayer", true, false)
+		if aps.is_empty():
+			print("[rt] no AnimationPlayer"); m.queue_free(); continue
+		var ap := aps[0] as AnimationPlayer
+		if not ap.has_animation(clip):
+			print("[rt] missing clip ", clip, " have=", ap.get_animation_list()); m.queue_free(); continue
+		var a := ap.get_animation(clip)
+		ap.play(clip)
+		for i in frames:
+			ap.seek(a.length * float(i) / float(frames), true)
+			_cam.position = Vector3(1.3, 1.1, 1.9)
+			_cam.look_at(Vector3(0, 0.85, 0), Vector3.UP)
 			await get_tree().process_frame
 			await get_tree().process_frame
 			await RenderingServer.frame_post_draw
-			get_viewport().get_texture().get_image().save_png("res://fw_%s_%s.png" % [tagm, v[0]])
-		print("[fw] ", tagm, " rotY=", u.rotation.y)
-		u.queue_free()
+			get_viewport().get_texture().get_image().save_png("res://rt_%s_%d.png" % [clip, i])
+		print("[rt] ", clip, " x", frames, " len=", a.length)
+		m.queue_free()
 		await get_tree().process_frame
-	print("[fw] DONE")
+	print("[rt] DONE")
 	get_tree().quit(0)

@@ -48,7 +48,7 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 	var u := Unit.new()
 	u.cls = p_cls
 	u.side = p_side
-	u.yaw_offset = -PI / 2.0 if model_path.contains("tripo") else 0.0   # 見 yaw_offset 註解
+	u.yaw_offset = -PI / 2.0 if model_path.contains("tripo") else 0.0   # -hero 版用 Quaternius 骨架方向，offset 0   # 見 yaw_offset 註解
 	var packed: PackedScene = null
 	if model_path != "" and ResourceLoader.exists(model_path):
 		packed = load(model_path)
