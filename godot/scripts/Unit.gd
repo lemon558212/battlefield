@@ -66,8 +66,10 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 		u.add_child(model)
 		u._fit_model(model)
 		model.rotation.y = _forward_fix(model)   # ★正面軸對齊：讓模型正面朝 Unit 的 +Z
-		# 敵軍紅疊色一眼可辨；我方保留自然貼圖（僅極輕兵種色）
-		u._tint(model, Color(0.9, 0.2, 0.16) if not is_player else Color(1, 1, 1, 0), 0.4 if not is_player else 0.0)
+		if is_player:
+			u._apply_look(model, p_cls)                    # 依立繪配色換裝（2026-07-24）
+		else:
+			u._tint(model, Color(0.9, 0.2, 0.16), 0.4)     # 敵軍紅疊色一眼可辨
 		var aps := model.find_children("*", "AnimationPlayer", true, false)
 		if not aps.is_empty():
 			u.anim = aps[0]
@@ -118,6 +120,49 @@ func _merged_aabb(node: Node) -> AABB:
 		if first: out = b; first = false
 		else: out = out.merge(b)
 	return out
+
+# 換裝：用內建 3D 模型 + 依角色立繪配色重新上色（data/char_look.json）。
+# 模型材質具名(Hair/Skin/Eye/Eyebrows/各衣著色)，依名稱分部位套色；皮膚與眼睛不動。
+const _KEEP := ["skin", "eye", "eyebrow", "moustache", "teeth", "mouth"]
+func _apply_look(model: Node, p_cls: String) -> void:
+	var look: Dictionary = GameData.char_look.get(p_cls, {})
+	if look.is_empty():
+		return
+	var c_hair := Color(look.get("hair", "#333333"))
+	var c_coat := Color(look.get("coat", "#3b3b3b"))
+	var c_low := Color(look.get("lower", "#4a4a4a"))
+	var c_acc := Color(look.get("accent", "#7a7a7a"))
+	for m in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		var cnt: int = maxi(mi.get_surface_override_material_count(), 1)
+		for si in cnt:
+			var base := mi.get_active_material(si)
+			if not (base is StandardMaterial3D):
+				continue
+			var nm: String = (base as StandardMaterial3D).resource_name.to_lower()
+			var keep := false
+			for k in _KEEP:
+				if nm.contains(k):
+					keep = true
+					break
+			if keep:
+				continue
+			var src: Color = (base as StandardMaterial3D).albedo_color
+			var target: Color
+			if nm.contains("hair"):
+				target = c_hair
+			else:
+				# 依原色明度分派：亮的走下身/點綴色，暗的走主外套色，保留原模型的層次
+				var lum := src.get_luminance()
+				if lum > 0.62:
+					target = c_low
+				elif lum > 0.34:
+					target = c_acc
+				else:
+					target = c_coat
+			var dup := (base as StandardMaterial3D).duplicate()
+			dup.albedo_color = src.lerp(target, 0.82)
+			mi.set_surface_override_material(si, dup)
 
 func _tint(model: Node, tint: Color, strength: float) -> void:
 	if strength <= 0.001:

@@ -11,12 +11,20 @@ const CLASS_MODEL := {
 	"engineer": "res://assets/models/chars/engineer.glb", "specops": "res://assets/models/chars/specops.glb",
 	"sam": "res://assets/models/chars/sam.glb",
 }
-# 立繪轉 3D 本人模型 +「重定向 Quaternius 專業動畫」版（tools/retarget.py 產出）。
-# 治「動作僵硬」：tripo 自帶 6 動畫是自動綁骨的粗品且無瞄準姿勢；重定向後拿到 8 個好動畫含 Idle_Gun_Pointing。
+# 2026-07-24 使用者裁定：放棄「立繪轉 3D」(tripo 綁骨爛/正面軸坑多)，改用內建 Quaternius 兵種模型，
+# 再依各角色立繪配色「換裝」(data/char_look.json + Unit._apply_look)。骨架乾淨、動畫原生正確、零校正。
+# 我方英雄基底：內建模型多為平民，僅 soldier(女性SWAT)/specops(黑色戰術)像軍人，
+# 故依「立繪氣質」挑最接近者當基底，再以 char_look.json 換裝上色（2026-07-24 實拍對照表挑選）。
 const HERO_MODEL := {
-	"sniper": "res://assets/models/chars/sniper-hero.glb",
-	"rifleman": "res://assets/models/chars/rifleman-hero.glb",
-	"mg": "res://assets/models/chars/mg-hero.glb",
+	"sniper":   "res://assets/models/chars/soldier.glb",    # 韓沐霜：唯一女性模型(馬尾)
+	"rifleman": "res://assets/models/chars/specops.glb",    # 丁小滿：黑色戰術裝
+	"engineer": "res://assets/models/chars/engineer.glb",   # 白老師：工兵/工人裝正合適
+	"mg":       "res://assets/models/chars/rifleman.glb",   # 雷諾：大鬍子老兵感
+	"assault":  "res://assets/models/chars/assault.glb",    # 艾拉：衝勁造型
+	"at":       "res://assets/models/chars/at.glb",         # 巴頓
+	"mortar":   "res://assets/models/chars/mortar.glb",     # 賽琳：俐落西裝
+	"specops":  "res://assets/models/chars/specops.glb",    # 影山：黑色戰術
+	"sam":      "res://assets/models/chars/sam.glb",        # 汀娜：裝甲
 }
 const CLASS_TINT := {
 	"rifleman": Color(0.55, 0.75, 0.45), "sniper": Color(0.35, 0.45, 0.6), "mg": Color(0.7, 0.5, 0.3),

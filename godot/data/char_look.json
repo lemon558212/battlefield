@@ -1,0 +1,12 @@
+{
+  "_doc": "角色外觀換裝表：用內建 Quaternius 3D 模型，依各角色立繪配色重新上色（2026-07-24 使用者裁定放棄立繪上戰場）。色值取自 godot/assets/portraits/<cls>.png 的髮/上衣/下身區域中位色。materials 依模型內具名材質(Hair/Skin/Eye/各衣著色)分部位套用。",
+  "sniper":   { "name": "韓沐霜", "hair": "#2b2622", "coat": "#3c3c3d", "lower": "#c9c7c0", "accent": "#8d8f96" },
+  "rifleman": { "name": "丁小滿", "hair": "#2a2724", "coat": "#3b3a34", "lower": "#404240", "accent": "#6b6f5e" },
+  "engineer": { "name": "白老師", "hair": "#968980", "coat": "#3f3c3f", "lower": "#424043", "accent": "#8a7f6a" },
+  "mg":       { "name": "雷諾．佛斯", "hair": "#575459", "coat": "#313027", "lower": "#3d3b34", "accent": "#7a6a4f" },
+  "assault":  { "name": "艾拉．科瓦奇", "hair": "#794f41", "coat": "#522a25", "lower": "#8e6668", "accent": "#b07a5a" },
+  "at":       { "name": "巴頓．歐克", "hair": "#938477", "coat": "#4f4b3c", "lower": "#5d5146", "accent": "#8b7a5e" },
+  "mortar":   { "name": "賽琳．杜瓦", "hair": "#bd9f8c", "coat": "#2e2d2c", "lower": "#525352", "accent": "#9a8f7d" },
+  "specops":  { "name": "影山靜", "hair": "#2b2d2f", "coat": "#26272d", "lower": "#797b81", "accent": "#4a4d55" },
+  "sam":      { "name": "汀娜．烏梅", "hair": "#684f35", "coat": "#3e3533", "lower": "#625450", "accent": "#8a7358" }
+}
