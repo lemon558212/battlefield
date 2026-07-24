@@ -1,55 +1,40 @@
-# ModelView.gd — 重定向動畫逐格檢視：播指定動畫、跨週期存 N 格，看骨架有無扭曲。
+# ModelView.gd — 對照驗證：把「已知正確的通用兵」與「英雄」並排，
+# 兩者都用 Unit.spawn（會套 _forward_fix）、給相同 rotation.y，從 +Z 拍。
+# 兩個都露正臉 ⇒ 英雄的正面軸與通用兵一致 ⇒ 朝向邏輯對兩者都成立。
 extends Node3D
 
 var _cam: Camera3D
-var jobs := [
-	["res://assets/models/chars/sniper-hero.glb", "Walk", 5],
-	["res://assets/models/chars/sniper-hero.glb", "Idle_Gun_Pointing", 3],
-	["res://assets/models/chars/sniper-hero.glb", "Gun_Shoot", 4],
-]
 
 func _ready() -> void:
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.22, 0.25, 0.3)
+	e.background_color = Color(0.55, 0.62, 0.45)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(1, 1, 1)
-	e.ambient_light_energy = 1.15
+	e.ambient_light_energy = 1.3
 	var we := WorldEnvironment.new(); we.environment = e; add_child(we)
-	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-45, 25, 0); add_child(sun)
+	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-40, 10, 0); add_child(sun)
 	_cam = Camera3D.new(); add_child(_cam); _cam.make_current()
 	if "selftest" in OS.get_cmdline_user_args():
 		_run()
 
 func _run() -> void:
-	for job in jobs:
-		var path: String = job[0]
-		var clip: String = job[1]
-		var frames: int = job[2]
-		if not ResourceLoader.exists(path):
-			print("[rt] MISSING ", path); continue
-		var m := (load(path) as PackedScene).instantiate()
-		add_child(m)
-		# 用 Unit 的縮放邏輯不好取，這裡直接固定縮放與相機（模型約 1 單位高）
-		m.scale = Vector3.ONE * 1.8
-		var aps := m.find_children("*", "AnimationPlayer", true, false)
-		if aps.is_empty():
-			print("[rt] no AnimationPlayer"); m.queue_free(); continue
-		var ap := aps[0] as AnimationPlayer
-		if not ap.has_animation(clip):
-			print("[rt] missing clip ", clip, " have=", ap.get_animation_list()); m.queue_free(); continue
-		var a := ap.get_animation(clip)
-		ap.play(clip)
-		for i in frames:
-			ap.seek(a.length * float(i) / float(frames), true)
-			_cam.position = Vector3(1.3, 1.1, 1.9)
-			_cam.look_at(Vector3(0, 0.85, 0), Vector3.UP)
-			await get_tree().process_frame
-			await get_tree().process_frame
-			await RenderingServer.frame_post_draw
-			get_viewport().get_texture().get_image().save_png("res://rt_%s_%d.png" % [clip, i])
-		print("[rt] ", clip, " x", frames, " len=", a.length)
-		m.queue_free()
+	var soldier := Unit.spawn("res://assets/models/chars/soldier.glb", "rifleman", 0, true)
+	add_child(soldier)
+	soldier.global_position = Vector3(-1.1, 0, 0)
+	var hero := Unit.spawn("res://assets/models/chars/sniper-hero.glb", "sniper", 0, true)
+	add_child(hero)
+	hero.global_position = Vector3(1.1, 0, 0)
+	# 四種朝向各拍一張：0=面向+Z(朝鏡頭)、90=+X(右)、180=-Z(背對)、-90=-X(左)
+	for d in [0.0, 90.0, 180.0, -90.0]:
+		soldier.rotation.y = deg_to_rad(d)
+		hero.rotation.y = deg_to_rad(d)
+		_cam.position = Vector3(0, 1.5, 4.6)
+		_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
 		await get_tree().process_frame
-	print("[rt] DONE")
+		await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png("res://cmp_%d.png" % int(d))
+		print("[cmp] yaw=", d)
+	print("[cmp] DONE (左=通用兵已驗證正確, 右=英雄)")
 	get_tree().quit(0)

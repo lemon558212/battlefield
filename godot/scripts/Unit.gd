@@ -34,21 +34,27 @@ var _busy_until := 0.0        # shoot/hit 播放鎖
 var _dead := false
 var _die_fade := 0.0
 var _model: Node3D = null
-# 模型「正面軸」校正：Quaternius 通用兵正面朝 +Z(offset 0)，
-# tripo（立繪轉 3D）正面朝 +X，需 -90° 才會面向移動方向。
-# （2026-07-22 實拍四方位判定：+X 相機才看到 tripo 的臉；治「面向右卻往下」。）
-var yaw_offset := 0.0
-
-# 模型正面在世界空間的方向（已含 yaw_offset 校正）——驗證用，語意正確不依賴模型慣例
+# 正面軸校正改「轉模型子節點」，Unit.rotation.y 一律代表「+Z 為正面」的純朝向。
+# ⚠ 絕不可用檔名判斷模型慣例（2026-07-23 血淚：重定向後檔名沒了 "tripo" 兩字，
+#   校正失效、90 度偏差整個回來）。改用「骨架骨名」判斷＝內容決定，改名不會壞。
 func facing_dir() -> Vector3:
-	var a := rotation.y - yaw_offset
-	return Vector3(sin(a), 0.0, cos(a))
+	return Vector3(sin(rotation.y), 0.0, cos(rotation.y))
+
+# tripo 系骨架(Hip/L_Upperarm/L_Thigh)網格正面朝 +X → 模型需轉 -90° 才對齊 +Z；
+# Quaternius 系(Hips/UpperArm.L)本就朝 +Z → 0。
+static func _forward_fix(model: Node) -> float:
+	var sks := model.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return 0.0
+	var sk := sks[0] as Skeleton3D
+	if sk.find_bone("L_Upperarm") >= 0 or sk.find_bone("L_Thigh") >= 0:
+		return -PI / 2.0
+	return 0.0
 
 static func spawn(model_path: String, p_cls: String, p_side: int, is_player: bool) -> Unit:
 	var u := Unit.new()
 	u.cls = p_cls
 	u.side = p_side
-	u.yaw_offset = -PI / 2.0 if model_path.contains("tripo") else 0.0   # -hero 版用 Quaternius 骨架方向，offset 0   # 見 yaw_offset 註解
 	var packed: PackedScene = null
 	if model_path != "" and ResourceLoader.exists(model_path):
 		packed = load(model_path)
@@ -59,6 +65,7 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 		u._model = model
 		u.add_child(model)
 		u._fit_model(model)
+		model.rotation.y = _forward_fix(model)   # ★正面軸對齊：讓模型正面朝 Unit 的 +Z
 		# 敵軍紅疊色一眼可辨；我方保留自然貼圖（僅極輕兵種色）
 		u._tint(model, Color(0.9, 0.2, 0.16) if not is_player else Color(1, 1, 1, 0), 0.4 if not is_player else 0.0)
 		var aps := model.find_children("*", "AnimationPlayer", true, false)
@@ -283,7 +290,7 @@ func _face_towards(p: Vector3, k: float) -> void:
 	var d := p - global_position
 	d.y = 0.0
 	if d.length() < 0.05: return
-	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z) + yaw_offset, k)
+	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), k)
 
 func _process(delta: float) -> void:
 	if _dead:
@@ -315,7 +322,7 @@ func _process(delta: float) -> void:
 			_play("idle")
 			return
 		# VC 做法：先轉身面向目標，面向差太大時原地轉身不前進（治「面向一個方向跑」）
-		var target_yaw := atan2(d.x, d.z) + yaw_offset
+		var target_yaw := atan2(d.x, d.z)
 		rotation.y = lerp_angle(rotation.y, target_yaw, min(1.0, TURN_SPEED * delta))
 		var ang := absf(wrapf(target_yaw - rotation.y, -PI, PI))
 		if ang > 0.6:
