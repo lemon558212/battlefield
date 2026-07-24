@@ -37,6 +37,9 @@ var _model: Node3D = null
 var _gun_node: Node3D = null
 var _gun_mount: Node3D = null
 var _gun_fixed := false
+var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
+var _model_base_y := 0.0
+var _crouch := 0.0             # 0=站 1=蹲（平滑過渡）
 # 正面軸校正改「轉模型子節點」，Unit.rotation.y 一律代表「+Z 為正面」的純朝向。
 # ⚠ 絕不可用檔名判斷模型慣例（2026-07-23 血淚：重定向後檔名沒了 "tripo" 兩字，
 #   校正失效、90 度偏差整個回來）。改用「骨架骨名」判斷＝內容決定，改名不會壞。
@@ -136,6 +139,7 @@ func _fit_model(model: Node) -> void:
 		return
 	model.scale = Vector3.ONE * k
 	model.position.y = -base_y * k
+	_model_base_y = model.position.y
 
 # 遞迴累積父階變換算 AABB。
 # ⚠ 舊版只用 mi.transform（沒累積父階），巢狀模型會被量得極小 → _fit_model 縮放暴衝
@@ -344,6 +348,11 @@ func _play(key: String, blend := 0.2) -> void:
 	anim.play(clip, blend)
 	_state = key
 
+# 立即中止移動/射擊（到位後擺蹲姿、或被打斷時用）
+func stop() -> void:
+	_move_target = null
+	_shoot_target = null
+
 func move_to(p: Vector3) -> void:
 	if _dead: return
 	_shoot_target = null
@@ -394,8 +403,19 @@ func _fix_gun_scale() -> void:
 	else:
 		_gun_node.position = Vector3(0.02, 0.0, 0.10)
 
+# 蹲姿：Quaternius 動畫組沒有 crouch，故以「壓低身體＋前傾」模擬躲在掩體後。
+# 移動中一律站起（跑步蹲著不合理）。
+func _update_crouch(delta: float) -> void:
+	if _model == null:
+		return
+	var target: float = 1.0 if (want_cover and not _dead and _move_target == null) else 0.0
+	_crouch = move_toward(_crouch, target, delta * 3.2)
+	_model.position.y = _model_base_y - 0.42 * _crouch
+	_model.rotation.x = 0.13 * _crouch
+
 func _process(delta: float) -> void:
 	_fix_gun_scale()
+	_update_crouch(delta)
 	if _dead:
 		_die_fade -= delta
 		if _die_fade <= 0.4 and _model:      # 動畫播完後最後 0.4s 淡出

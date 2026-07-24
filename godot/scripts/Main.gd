@@ -52,6 +52,9 @@ var _tracers: Array = []
 var _enemy_queue: Array = []
 var _enemy_t := 0.0
 var _zone_mesh: MeshInstance3D = null
+# 掩體登記表（GDD/13 Phase2）：每筆＝{wx,wy,r,val,type}，座標為遊戲 px。
+# val＝遮蔽強度 0~1；sandbag 硬掩體、building 全掩體、bush 只給隱蔽(降敵視野)不擋彈。
+var _covers: Array = []
 
 const GROUND_SHADER := """
 shader_type spatial;
@@ -251,6 +254,48 @@ func _selftest() -> void:
 	await get_tree().create_timer(1.2).timeout
 	var moved: float = p_before.distance_to(pu["node"].global_position)
 	print("[movechk] 點地面後位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	# ---- Phase2 掩體系統驗證 ----
+	var sb := {}
+	for c in _covers:
+		if c["type"] == "sandbag":
+			sb = c
+			break
+	if sb.is_empty():
+		print("[coverchk] FAIL 場上沒有沙包掩體")
+	else:
+		var tu = _deployed[0]
+		# A) 站在沙包旁、射手在沙包那一側 → 應有遮蔽
+		tu["wx"] = sb["wx"] + 20.0
+		tu["wy"] = sb["wy"]
+		var fx: float = sb["wx"] - 300.0     # 射手在沙包外側
+		# 隔離：只留這一個沙包，才驗得到「方向性」本身（否則附近建築會混進來）
+		var all_covers := _covers
+		_covers = [sb]
+		var cov_front: float = cover_at(tu["wx"], tu["wy"], fx, sb["wy"])
+		# B) 射手繞到背後 → 遮蔽應消失（方向性掩體）
+		var cov_back: float = cover_at(tu["wx"], tu["wy"], sb["wx"] + 300.0, sb["wy"])
+		# C) 遠離掩體 → 無遮蔽
+		var cov_open: float = cover_at(sb["wx"] + 600.0, sb["wy"] + 600.0, fx, sb["wy"])
+		_covers = all_covers
+		print("[coverchk] 沙包正面遮蔽=%.2f %s" % [cov_front, "OK" if cov_front > 0.4 else "FAIL"])
+		print("[coverchk] 繞背後遮蔽=%.2f %s" % [cov_back, "OK" if cov_back < 0.01 else "FAIL(方向性失效)"])
+		print("[coverchk] 空曠地遮蔽=%.2f %s" % [cov_open, "OK" if cov_open < 0.01 else "FAIL"])
+		# D) 蹲姿：站到掩體旁應自動蹲下
+		tu["node"].stop()                         # 先停下前面 facechk 的移動，否則不會蹲
+		tu["node"].global_position = _to3d(tu["wx"], tu["wy"])
+		_update_cover_state(tu)
+		await get_tree().create_timer(0.9).timeout
+		var crouched: bool = tu["node"]._crouch > 0.8
+		print("[coverchk] 掩體旁自動蹲姿 crouch=%.2f %s" % [tu["node"]._crouch, "OK" if crouched else "FAIL"])
+		cam.set_follow(null)
+		cam.focus = tu["node"].global_position + Vector3(0, 0.8, 0)
+		cam.dist = 6.5
+		await get_tree().create_timer(0.6).timeout
+		await _snap("res://cover_crouch.png")
+		# E) 移動中應站起
+		tu["node"].move_to(_to3d(tu["wx"] + 400.0, tu["wy"]))
+		await get_tree().create_timer(0.5).timeout
+		print("[coverchk] 移動中站起 crouch=%.2f %s" % [tu["node"]._crouch, "OK" if tu["node"]._crouch < 0.5 else "FAIL"])
 	print("[selftest] DONE units=", units.size())
 	get_tree().quit(0)
 
@@ -429,6 +474,7 @@ func _try_place(wx: float, wy: float) -> void:
 		ui.update_budget(budget_left, "大型艦上限 2")
 		return
 	var u = _spawn_unit(cls, player_side, wx, wy, _pending_named)
+	_update_cover_state(u)
 	_deployed.append(u)
 	if _pending_named:
 		_placed_named[cls] = true
@@ -523,7 +569,7 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 		"hp": hp, "maxhp": hp, "alive": true,
 		"weapon": GameData.weapon_of(nation[side_i], cls),
 		"named": named, "char_name": chr.get("name", ""),
-		"acted": false,
+		"acted": false, "cover": "",
 	}
 	node.set_meta("u", u)
 	units.append(u)
@@ -550,7 +596,12 @@ func _refresh_visibility() -> void:
 		for p in units:
 			if p["side"] != player_side or not p["alive"]:
 				continue
-			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() <= SIGHT:
+			var sight := SIGHT
+			for c in _covers:                       # 躲樹叢＝隱蔽，被發現距離砍半
+				if c["type"] == "bush" and Vector2(c["wx"] - u["wx"], c["wy"] - u["wy"]).length() <= c["r"]:
+					sight = SIGHT * 0.5
+					break
+			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() <= sight:
 				vis = true
 				break
 		if u["alive"]:                    # 陣亡者交給 die() 淡出，別強制隱藏
@@ -614,8 +665,13 @@ func _click(sp: Vector2) -> void:
 			selected = best
 			cam.set_follow(best["node"])
 			var chr: Dictionary = GameData.characters.get(best["cls"], {})
+			var cv: String = best.get("cover", "")
+			var cov_txt := ""
+			match cv:
+				"sandbag": cov_txt = "　🛡 沙包掩體 (命中-33%)"
+				"building": cov_txt = "　🛡 建築掩體 (命中-45%)"
 			ui.show_charcard(best["cls"], ("★" + best["char_name"]) if best["named"] else GameData.class_base.get(best["cls"], {}).get("zh", best["cls"]),
-					chr.get("trait", {}).get("desc", ""), int(best["hp"]), int(best["maxhp"]))
+					chr.get("trait", {}).get("desc", "") + cov_txt, int(best["hp"]), int(best["maxhp"]))
 		elif selected != null and cp > 0 and not selected["acted"]:
 			_fire(selected, best)
 		return
@@ -645,7 +701,10 @@ func _fire(shooter, target) -> void:
 	cp = max(0, cp - 1)
 	ui.update_hud(turn, "player" if st == St.CMD else "enemy", cp)
 	await get_tree().create_timer(0.32).timeout
-	if GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px) > randf():
+	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
+	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
+	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px) * (1.0 - cov * 0.6)
+	if hc > randf():
 		target["hp"] -= GameData.damage(_wrap(shooter), _wrap(target))
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
@@ -746,6 +805,7 @@ func _enemy_step() -> void:
 		e["wx"] += dirp.x
 		e["wy"] += dirp.y
 		e["node"].move_to(_to3d(e["wx"], e["wy"]))
+		_update_cover_state(e)
 		_refresh_visibility()
 
 # ---------- 勝敗 ----------
@@ -781,6 +841,7 @@ func _teardown_world() -> void:
 func _build_ground() -> void:
 	world = Node3D.new()
 	add_child(world)
+	_covers = []
 	var mw: float = map_data.get("w", 960) * WORLD_SCALE
 	var mh: float = map_data.get("h", 600) * WORLD_SCALE
 	# 地面：用 shader 做草地色斑＋土痕，取代單一死綠平面
@@ -809,6 +870,10 @@ func _build_ground() -> void:
 			# 建築不得生成在任一方部署區內（否則擋兵、且貼著鏡頭變成一道巨牆）
 			if _in_any_deploy(sdef):
 				continue
+			_covers.append({"wx": sdef.get("x", 0) + sdef.get("w", 40) * 0.5,
+					"wy": sdef.get("y", 0) + sdef.get("h", 40) * 0.5,
+					"r": maxf(sdef.get("w", 40), sdef.get("h", 40)) * 0.85 + 30.0,
+					"val": 0.75, "type": "building"})
 			var mp: String = bmodels[i % bmodels.size()]
 			if ResourceLoader.exists(mp):
 				var b := (load(mp) as PackedScene).instantiate()
@@ -823,6 +888,9 @@ func _build_ground() -> void:
 	var sandbags = map_data.get("sandbags", [])
 	if sandbags is Array:
 		for sb in sandbags:
+			_covers.append({"wx": sb.get("x", 0) + sb.get("w", 40) * 0.5,
+					"wy": sb.get("y", 0) + sb.get("h", 24) * 0.5,
+					"r": 52.0, "val": 0.55, "type": "sandbag"})
 			_make_sandbag(_to3d(sb.get("x", 0) + sb.get("w", 40) * 0.5, sb.get("y", 0) + sb.get("h", 24) * 0.5),
 					float(sb.get("w", 80)), float(sb.get("h", 24)))
 
@@ -878,6 +946,40 @@ func _fit_prop(node: Node3D, target_h: float) -> float:
 	var k: float = target_h / ab.size.y
 	node.scale = Vector3.ONE * k
 	return -ab.position.y * k
+
+# 依單位所在位置更新「是否躲掩體」（會擺蹲姿＋受掩體命中修正）
+func _update_cover_state(u) -> void:
+	var c := cover_here(u["wx"], u["wy"])
+	u["cover"] = c.get("type", "")
+	if is_instance_valid(u["node"]):
+		u["node"].want_cover = not c.is_empty()
+
+# 掩體查詢：目標在 (wx,wy)、射手在 (fx,fy)，回傳遮蔽值 0~1。
+# 方向性：掩體必須位於「目標朝射手」那一側 ±75 度內才有效（背後的沙包擋不了正面來的子彈）。
+func cover_at(wx: float, wy: float, fx: float, fy: float) -> float:
+	var best := 0.0
+	var to_shooter := Vector2(fx - wx, fy - wy)
+	if to_shooter.length() < 1.0:
+		return 0.0
+	to_shooter = to_shooter.normalized()
+	for c in _covers:
+		var d := Vector2(c["wx"] - wx, c["wy"] - wy)
+		var dist: float = d.length()
+		if dist > c["r"]:
+			continue
+		if dist > 1.0 and d.normalized().dot(to_shooter) < 0.26:   # cos75°
+			continue
+		best = maxf(best, float(c["val"]))
+	return best
+
+# 該單位所在位置是否處於任何掩體旁（不分方向）——決定是否擺蹲姿
+func cover_here(wx: float, wy: float) -> Dictionary:
+	for c in _covers:
+		if c["type"] == "bush":
+			continue
+		if Vector2(c["wx"] - wx, c["wy"] - wy).length() <= c["r"]:
+			return c
+	return {}
 
 # 該矩形是否與任一方部署區重疊（含 40px 邊界）
 func _in_any_deploy(sdef: Dictionary) -> bool:
@@ -940,3 +1042,9 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		var r: float = rng.randf_range(0.55, 1.05)
 		t.position = Vector3(cos(ang) * mw * r, dy, sin(ang) * mh * r)
 		t.rotation.y = rng.randf() * TAU
+		# 樹叢＝隱蔽（降低被發現距離），不擋子彈
+		var gw: float = map_data.get("w", 960)
+		var gh: float = map_data.get("h", 600)
+		_covers.append({"wx": t.position.x / WORLD_SCALE + gw * 0.5,
+				"wy": t.position.z / WORLD_SCALE + gh * 0.5,
+				"r": 40.0, "val": 0.30, "type": "bush"})
