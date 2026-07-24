@@ -56,8 +56,91 @@ func _ready() -> void:
 	ui.end_turn.connect(_end_player_turn)
 	ui.back_menu.connect(_open_menu)
 	_open_menu()
-	if "selftest" in OS.get_cmdline_user_args():
+	if "e2e" in OS.get_cmdline_user_args():
+		_e2e()
+	elif "selftest" in OS.get_cmdline_user_args():
 		_selftest()
+
+# ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
+# （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
+func _find_btn(txt: String) -> Button:
+	for n in ui.root.find_children("*", "Button", true, false):
+		var b := n as Button
+		if b.text.replace(" ", "").replace("　", "").contains(txt.replace(" ", "")):
+			return b
+	return null
+
+func _click_btn(txt: String) -> bool:
+	var b := _find_btn(txt)
+	if b == null:
+		print("[e2e] FAIL 找不到按鈕: ", txt)
+		return false
+	_send_click(b.get_global_rect().get_center())
+	await get_tree().create_timer(0.35).timeout
+	return true
+
+func _e2e() -> void:
+	await get_tree().create_timer(0.6).timeout
+	print("[e2e] 1 主選單 → 劇情戰役")
+	if not await _click_btn("劇情戰役"): get_tree().quit(1); return
+	print("[e2e] 2 章節 01")
+	var chb := _find_btn("01")
+	if chb == null: print("[e2e] FAIL 無章節按鈕"); get_tree().quit(1); return
+	_send_click(chb.get_global_rect().get_center())
+	await get_tree().create_timer(0.5).timeout
+	print("[e2e] 3 簡報 → 出擊")
+	if not await _click_btn("出擊"): get_tree().quit(1); return
+	print("[e2e] 4 對話：連點推進 (st=", st, ")")
+	var guard := 0
+	while st == St.DIALOGUE and guard < 40:
+		_send_click(Vector2(640, 300))
+		await get_tree().create_timer(0.12).timeout
+		guard += 1
+	print("[e2e]   對話結束 st=", st, " (應為 DEPLOY=", St.DEPLOY, ")")
+	if st != St.DEPLOY: print("[e2e] FAIL 沒進到部署"); get_tree().quit(1); return
+	print("[e2e] 5 部署：點卡片 → 點藍框放置")
+	var cards := ui.root.find_children("*", "Button", true, false)
+	var card_btn: Button = null
+	for n in cards:
+		var b := n as Button
+		if b.flat and b.size.x > 250:
+			card_btn = b; break
+	if card_btn == null: print("[e2e] FAIL 找不到部署卡"); get_tree().quit(1); return
+	_send_click(card_btn.get_global_rect().get_center())
+	await get_tree().create_timer(0.3).timeout
+	var z := _my_zone()
+	var wp := _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5)
+	_send_click(cam.unproject_position(wp + Vector3(0, 0.05, 0)))
+	await get_tree().create_timer(0.4).timeout
+	print("[e2e]   已部署數=", _deployed.size(), (" OK" if _deployed.size() > 0 else " FAIL(放不下去)"))
+	if _deployed.is_empty(): get_tree().quit(1); return
+	print("[e2e] 6 開始戰鬥")
+	if not await _click_btn("開始戰鬥"): get_tree().quit(1); return
+	await get_tree().create_timer(0.8).timeout
+	print("[e2e]   st=", st, " (應為 CMD=", St.CMD, ")")
+	print("[e2e] 7 選兵 → 點地面移動")
+	var pu = _deployed[0]
+	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
+	await get_tree().create_timer(0.25).timeout
+	print("[e2e]   選取=", "OK" if selected != null else "FAIL(點不到兵)")
+	var before: Vector3 = pu["node"].global_position
+	var dest := _to3d(pu["wx"] + 150.0, pu["wy"] + 100.0)
+	_send_click(cam.unproject_position(dest + Vector3(0, 0.02, 0)))
+	await get_tree().create_timer(1.5).timeout
+	var moved: float = before.distance_to(pu["node"].global_position)
+	print("[e2e]   位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	await _snap("res://e2e_battle.png")
+	print("[e2e] DONE")
+	get_tree().quit(0)
+
+# 送出「真正的」滑鼠事件走完整派送鏈（UI → _unhandled_input），才驗得到「點擊被 UI 吃掉」這類病
+func _send_click(pos: Vector2) -> void:
+	for pressed in [true, false]:
+		var ev := InputEventMouseButton.new()
+		ev.button_index = MOUSE_BUTTON_LEFT
+		ev.pressed = pressed
+		ev.position = pos
+		get_viewport().push_input(ev)
 
 func _snap(p: String) -> void:
 	await RenderingServer.frame_post_draw
@@ -120,6 +203,22 @@ func _selftest() -> void:
 		var face: Vector3 = uu["node"].facing_dir()
 		var deg: float = rad_to_deg(acos(clamp(face.dot(want_dir), -1.0, 1.0)))
 		print("[facechk] move=(%.0f,%.0f) 正面與移動夾角=%.1f度 %s" % [t[0], t[1], deg, "OK" if deg < 15.0 else "FAIL"])
+	# ★真實操作路徑驗證：模擬「滑鼠點兵選取 → 點地面移動」，確認人物真的會動
+	# （治「只測 move_to() 直呼、沒測點擊路徑」的驗證盲區）
+	await get_tree().create_timer(0.5).timeout
+	selected = null
+	var pu = _deployed[0]
+	var sp_unit: Vector2 = cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0))
+	_send_click(sp_unit)
+	await get_tree().create_timer(0.25).timeout
+	print("[movechk] 合成點擊選取 selected=", "OK" if selected != null else "FAIL(點擊被吃掉/選不到兵)")
+	var p_before: Vector3 = pu["node"].global_position
+	var ground := _to3d(pu["wx"] + 150.0, pu["wy"] + 100.0)
+	var sp_ground: Vector2 = cam.unproject_position(ground + Vector3(0, 0.02, 0))
+	_send_click(sp_ground)
+	await get_tree().create_timer(1.2).timeout
+	var moved: float = p_before.distance_to(pu["node"].global_position)
+	print("[movechk] 點地面後位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
 	print("[selftest] DONE units=", units.size())
 	get_tree().quit(0)
 
@@ -410,15 +509,28 @@ func _deploy_click(sp: Vector2) -> void:
 	wy = clamp(wy, z.get("y", 0), z.get("y", 0) + z.get("h", 200))
 	_try_place(wx, wy)
 
+# 點到線段的距離（螢幕空間）
+func _dist_to_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var L2 := ab.length_squared()
+	if L2 < 0.0001:
+		return p.distance_to(a)
+	var t: float = clampf((p - a).dot(ab) / L2, 0.0, 1.0)
+	return p.distance_to(a + ab * t)
+
 func _click(sp: Vector2) -> void:
+	# 命中判定：點到「腳→頭」整條身體線段都算，門檻隨角色在螢幕上的大小縮放。
+	# （治「固定 44px 對準胸口一點」在拉伸/縮放下選不到兵 → 等於不能移動）
 	var best = null
-	var best_d := 44.0
+	var best_d := 1e9
 	for u in units:
 		if not u["alive"] or not u["node"].visible:
 			continue
-		var wsp := cam.unproject_position(u["node"].global_position + Vector3(0, 1.0, 0))
-		var d := wsp.distance_to(sp)
-		if d < best_d:
+		var foot := cam.unproject_position(u["node"].global_position)
+		var head := cam.unproject_position(u["node"].global_position + Vector3(0, 1.85, 0))
+		var d := _dist_to_seg(sp, foot, head)
+		var tol: float = clampf(foot.distance_to(head) * 0.55, 34.0, 140.0)
+		if d < tol and d < best_d:
 			best_d = d
 			best = u
 	if best != null:
