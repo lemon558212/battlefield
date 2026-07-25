@@ -6,6 +6,11 @@ const CASES := [
 	["sniper", "res://assets/models/chars/hr_w_Swat.fbx"],
 	["rifleman", "res://assets/models/chars/hr_m_Soldier.fbx"],
 	["specops", "res://assets/models/chars/hr_m_SciFi.fbx"],
+	# 沒有真實武器模型、靠 _make_gun 程式生成的兵種也要驗（它們原本連瞄準姿都沒有）
+	["mg", "res://assets/models/chars/hr_m_Soldier.fbx"],
+	["at", "res://assets/models/chars/hr_m_Soldier.fbx"],
+	["sam", "res://assets/models/chars/hr_m_Soldier.fbx"],
+	["mortar", "res://assets/models/chars/hr_m_Soldier.fbx"],
 ]
 
 var _cam: Camera3D

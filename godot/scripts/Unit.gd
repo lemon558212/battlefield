@@ -315,6 +315,20 @@ const WEAPON_MODEL := {
 	"engineer": ["res://assets/models/weapons/Pistol_1.obj", 0.22],
 }
 const HAND_BONES := ["Wrist.R", "Hand.R", "hand_r"]
+# 程式生成武器（無真實模型的兵種）的三個持槍關鍵點：槍托／右手握把／左手前護木。
+# 座標＝_make_gun 的慣例：local +Z＝槍口、原點在握把附近。
+# 迫砲不是肩射武器（砲管本身已含 60° 仰角），故錨點下移到腰際、雙手扶砲管與握把。
+const PROC_GRIP := {
+	"mg":     [Vector3(0, 0.00, -0.28), Vector3(0, -0.06, -0.02), Vector3(0, -0.05, 0.26)],
+	"at":     [Vector3(0, -0.02, -0.04), Vector3(0, -0.10, 0.04), Vector3(0, -0.09, 0.30)],
+	"sam":    [Vector3(0, -0.02, -0.06), Vector3(0, -0.10, 0.02), Vector3(0, -0.09, 0.28)],
+	"mortar": [Vector3(0, -0.14, -0.10), Vector3(0, -0.09, 0.00), Vector3(0, 0.22, 0.28)],
+}
+# 抵肩點下移量（0＝抵右肩窩）。迫砲抱在腰際，抵肩會變成「拿砲管當狙擊槍」。
+const PROC_POCKET_DROP := {"mortar": 0.40}
+# 槍口軸換算：真實武器模型（obj）槍管沿 +X，程式生成的沿 +Z。
+const PROC_AXIS_FIX := Basis(Vector3(0, 0, -1), Vector3(0, 1, 0), Vector3(1, 0, 0))
+var _gun_axis_fix := Basis.IDENTITY
 # 手骨命名在各包不一致（舊 soldier.glb＝Wrist.R、hr_ 骨架＝Hand.R）。
 # ⚠ 寫死名稱時 IK 會「安靜地失敗」——槍架好了、雙手卻垂在身側，很難一眼看出（2026-07-25）。
 var _hand_r := "Wrist.R"
@@ -370,6 +384,17 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 		_gun_stock = Vector3(ab.position.x + 0.03 * raw, ab.position.y + 0.62 * ab.size.y, ab.get_center().z)
 		_gun_grip = Vector3(ab.position.x + 0.30 * raw, ab.position.y + 0.46 * ab.size.y, ab.get_center().z)
 		_gun_fore = Vector3(ab.position.x + 0.46 * raw, ab.position.y + 0.56 * ab.size.y, ab.get_center().z)
+		_gun_armed = true
+	elif PROC_GRIP.has(p_cls):
+		# 沒有真實武器模型的兵種（機槍/火箭筒/防空）：程式生成的槍身尺寸是自己定的，
+		# 三個關鍵點直接寫死即可，一樣能抵肩出槍——原本這裡沒設 _gun_armed，
+		# 導致 _aim_pose 整段提早返回，這幾個兵種連蹲姿修正都吃不到。
+		var g: Array = PROC_GRIP[p_cls]
+		_gun_stock = g[0]
+		_gun_grip = g[1]
+		_gun_fore = g[2]
+		_gun_len_scale = 1.0
+		_gun_axis_fix = PROC_AXIS_FIX     # 程式生成的槍口是 +Z，瞄準基底以 +X 為槍口
 		_gun_armed = true
 
 func _mat(col: Color, metal: float, rough: float) -> StandardMaterial3D:
@@ -770,14 +795,17 @@ func _aim_pose() -> void:
 	_rig.add_world_rotation("Chest", right, -pitch * 0.45)
 	_rig.add_world_rotation("Head", right, -pitch * 0.40)
 	# 2) 槍：槍托抵右肩窩、槍口指向目標
-	var pocket: Vector3 = (sk.global_transform * sk.get_bone_global_pose(si).origin) - Vector3.UP * 0.06
+	var pocket: Vector3 = (sk.global_transform * sk.get_bone_global_pose(si).origin) \
+			- Vector3.UP * (0.06 + float(PROC_POCKET_DROP.get(cls, 0.0)))
 	var aim: Vector3 = (tgt - pocket).normalized()
+	if PROC_POCKET_DROP.has(cls):
+		aim = facing_dir()      # 迫砲：砲管自帶仰角，方向只取水平，否則會被拉成平射
 	var up_ref := Vector3.UP
 	if absf(aim.dot(up_ref)) > 0.97:
 		up_ref = facing_dir()                    # 目標近乎正上/正下時叉積會退化
 	var z_axis := aim.cross(up_ref).normalized()
 	var y_axis := z_axis.cross(aim).normalized()
-	var b := Basis(aim * _gun_len_scale, y_axis * _gun_len_scale, z_axis * _gun_len_scale)
+	var b := Basis(aim * _gun_len_scale, y_axis * _gun_len_scale, z_axis * _gun_len_scale) * _gun_axis_fix
 	var xf := Transform3D(b, pocket + aim * 0.02 - b * _gun_stock)
 	# 3) 兩手抓上槍（右手握把、左手前護木）＋手指握攏
 	# 肘部極向量：兩肘都朝下外側，這是持槍的自然姿勢；沒有約束會扭成怪解
