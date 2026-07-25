@@ -20,6 +20,6 @@ ERROR: Failed loading resource: res://assets/art/title-key-visual.jpg.
 [e2e]   st=5 (應為 CMD=5)
 [e2e] 7 選兵 → 點地面移動
 [e2e]   選取=OK
-[e2e]   位移=4.22m OK
+[e2e]   位移=4.21m OK
 [selftest] saved res://e2e_battle.png
 [e2e] DONE

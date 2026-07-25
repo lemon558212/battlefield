@@ -271,9 +271,12 @@ func bend_bone(bone: String, axis: int, degrees: float, weight: float = 1.0) -> 
 		ax = Vector3.UP
 	elif axis == 2:
 		ax = Vector3.BACK
-	var rest := _dst.get_bone_rest(bi).basis.get_rotation_quaternion()
-	var want := rest * Quaternion(ax, deg_to_rad(degrees))
-	_dst.set_bone_pose_rotation(bi, _dst.get_bone_pose_rotation(bi).slerp(want, clampf(weight, 0.0, 1.0)))
+	# ⚠ 必須用「讀出目前姿勢再疊加」的寫法。
+	# 直接 set_bone_pose_rotation 寫死 local 姿勢在此時機會被吃掉（動畫仍會蓋回去），
+	# 實測完全無效——與有效的 add_world_rotation 對照才發現差別在這裡（2026-07-25）。
+	var g := _dst.get_bone_global_pose(bi).basis.get_rotation_quaternion()
+	var axis_world := (g * ax).normalized()
+	_rotate_bone(bi, Quaternion(axis_world, deg_to_rad(degrees) * clampf(weight, 0.0, 1.0)))
 
 # 姿勢擺完後量「最低的腳骨」離地多少，回傳需要補的高度（正值＝要往上抬）。
 # 治「蹲下時腳陷進地面」：不靠猜的固定位移，直接量出來。

@@ -670,15 +670,9 @@ func _aim_pose() -> void:
 		_rig.bend_bone("LowerLeg.R", LEG_AXIS, 8.0, _prone)
 		_rig.bend_bone("Abdomen", LEG_AXIS, -18.0, _prone)   # 上身抬起才看得到前方
 		_rig.bend_bone("Torso", LEG_AXIS, -14.0, _prone)
-	# 手寫蹲姿：重定向在這具骨架會扭壞，改用可控的固定角度（軸 0 為膝蓋彎曲軸，掃描驗得）
-	if _crouch > 0.001:
-		_rig.bend_bone("UpperLeg.L", LEG_AXIS, -48.0, _crouch)
-		_rig.bend_bone("UpperLeg.R", LEG_AXIS, -48.0, _crouch)
-		_rig.bend_bone("LowerLeg.L", LEG_AXIS, 82.0, _crouch)
-		_rig.bend_bone("LowerLeg.R", LEG_AXIS, 82.0, _crouch)
-		_rig.bend_bone("Foot.L", LEG_AXIS, -30.0, _crouch)
-		_rig.bend_bone("Foot.R", LEG_AXIS, -30.0, _crouch)
-		_rig.bend_bone("Abdomen", LEG_AXIS, 12.0, _crouch)
+	# ⚠ 手寫蹲姿暫時停用：三個候選軸實測都無法真正屈膝
+	#   （站姿腿跨距 0.93，軸0=0.928 等同沒彎、軸1/2=0.872 只縮 6cm，應縮到約 0.59）。
+	#   原因未明，待查；先不套用，避免留下半成品姿勢。
 	_aiming = (not _dead) and _move_target == null
 	if not _aiming:
 		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
@@ -715,7 +709,7 @@ func _aim_pose() -> void:
 	_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf
-	_ground_model()
+	_crouch_offset()
 
 var _in_pose := false          # skeleton_updated 內改骨骼會再觸發信號，需防遞迴
 func _on_skeleton_updated() -> void:
@@ -763,20 +757,10 @@ func _ready() -> void:
 	if USE_RETARGET_CROUCH and _crouch_pose.is_empty() and not _crouch_busy:
 		_crouch_busy = true
 		_capture_crouch()
-
-# 自動貼地：姿勢擺完後量「最低的腳骨」離地多少，把模型補到剛好踩在地面。
-# 舊做法是蹲下時固定把模型往下壓 0.42m，腳會陷進地裡；用量的就不會。
-func _ground_model() -> void:
-	if _model == null or _rig == null:
+# 蹲姿位移：手寫屈膝尚未成功前，先用單純的整體下壓（幅度縮小，避免腳明顯陷地）。
+# 重點是「只有這裡會寫模型高度」，不再與其他地方互相覆蓋。
+func _crouch_offset() -> void:
+	if _model == null:
 		return
-	if _crouch <= 0.001 and _prone <= 0.001:
-		_model.position.y = _model_base_y
-		_model.rotation.x = 0.0
-		return
-	if _prone <= 0.001:
-		_model.rotation.x = 0.0
-	var bones := ["Foot.L", "Foot.R"]
-	if _prone > 0.5:
-		bones = ["Hips", "Chest", "Foot.L", "Foot.R"]   # 趴著時最低點是軀幹不是腳
-	var off: float = _rig.ground_offset(bones) + (0.16 * _prone)   # 身體厚度，不讓人埋進地裡
-	_model.position.y = clampf(_model.position.y + off, _model_base_y - 1.2, _model_base_y + 0.2)
+	_model.position.y = _model_base_y - 0.22 * _crouch
+	_model.rotation.x = 0.10 * _crouch
