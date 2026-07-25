@@ -40,6 +40,11 @@ func _run() -> void:
 		u.rotation.y = 0.0
 		for i in 30:
 			await get_tree().process_frame
+		# 蹲姿：want_cover 由 Main 依掩體位置設定，這裡直接開起來驗收
+		if cls == "sniper":
+			u.want_cover = true
+			for i in 60:
+				await get_tree().process_frame
 		for shot in [["front", Vector3(0, 1.15, 2.8)], ["side", Vector3(2.8, 1.15, 0.0)], ["q", Vector3(2.0, 1.5, 2.0)]]:
 			_cam.position = shot[1]
 			_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)

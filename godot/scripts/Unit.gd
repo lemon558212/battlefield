@@ -84,6 +84,12 @@ var _gun_fore := Vector3.ZERO  # 左手前護木
 var _gun_carry_xf := Transform3D.IDENTITY   # 攜行時的 local 變換（校正結果，離開瞄準要還原）
 var _aiming := false
 var aim_point = null           # 由 Main/射擊流程指定的瞄準目標點（世界座標）
+const UAL_ANIMS := "res://assets/models/anims/ual_standard.glb"
+# ⚠ 2026-07-25：重定向到「遊戲內這具骨架」會把身體扭壞（換到 hr_ 骨架時正常），
+# 判斷是該骨架 rest 差異問題，待修；先關掉、退回原本的壓低身體蹲法，不把壞的留在遊戲裡。
+const USE_RETARGET_CROUCH := false
+static var _crouch_pose := {}   # 全體共用：蹲姿只需算一次，不必每個單位都揹一份動畫來源
+static var _crouch_busy := false
 var _gun_pos := Vector3.ZERO
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
 var _model_base_y := 0.0
@@ -503,6 +509,7 @@ func shoot_at(target: Unit) -> void:
 	_move_target = null
 	_shoot_target = target
 	_shoot_timer = 0.3
+	aim_point = target.global_position + Vector3(0, 1.2, 0)   # 瞄胸口，槍口會依高低差自動抬壓
 	_face_towards(target.global_position, 1.0)
 	_play("aim", 0.12)
 
@@ -572,8 +579,13 @@ func _update_crouch(delta: float) -> void:
 		return
 	var target: float = 1.0 if (want_cover and not _dead and _move_target == null) else 0.0
 	_crouch = move_toward(_crouch, target, delta * 3.2)
-	_model.position.y = _model_base_y - 0.42 * _crouch
-	_model.rotation.x = 0.13 * _crouch
+	# 有真蹲姿（UAL Crouch_Idle 重定向）就不再壓低模型——那是沒有蹲姿動畫時的權宜做法
+	if not USE_RETARGET_CROUCH or _crouch_pose.is_empty():
+		_model.position.y = _model_base_y - 0.42 * _crouch
+		_model.rotation.x = 0.13 * _crouch
+	else:
+		_model.position.y = _model_base_y - 0.30 * _crouch
+		_model.rotation.x = 0.0
 
 func _process(delta: float) -> void:
 	_fix_gun_scale()
@@ -589,6 +601,7 @@ func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if _shoot_target != null:
 		_face_towards(_shoot_target.global_position, 0.5)
+		aim_point = _shoot_target.global_position + Vector3(0, 1.2, 0)
 		_shoot_timer -= delta
 		if _shoot_timer <= 0.0:
 			_play("shoot", 0.05)
@@ -596,6 +609,7 @@ func _process(delta: float) -> void:
 			shot_fired.emit(global_position + Vector3(0, 1.35, 0),
 					_shoot_target.global_position + Vector3(0, 1.2, 0))
 			_shoot_target = null
+			aim_point = null
 		return
 	if now < _busy_until:
 		return
@@ -640,6 +654,8 @@ func _aim_pose() -> void:
 	if sks.is_empty():
 		return
 	var sk := sks[0] as Skeleton3D
+	if USE_RETARGET_CROUCH and not _crouch_pose.is_empty() and _crouch > 0.001:
+		_rig.blend_pose(_crouch_pose, _crouch, false)   # 先蹲，IK 再疊上去；髖位移交給模型下壓
 	_aiming = (not _dead) and _move_target == null
 	if not _aiming:
 		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
@@ -684,3 +700,42 @@ func _on_skeleton_updated() -> void:
 	_in_pose = true
 	_aim_pose()
 	_in_pose = false
+
+# 蹲姿：模型自帶動畫組沒有 crouch，改由 UAL 動作庫的 Crouch_Idle 重定向過來。
+# 只在第一個單位生成時算一次，結果存成靜態姿勢表全體共用（省掉每單位一份骨架與動畫播放器）。
+func _capture_crouch() -> void:
+	if _model == null or not ResourceLoader.exists(UAL_ANIMS):
+		return
+	var sks := _model.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk := sks[0] as Skeleton3D
+	var src := (load(UAL_ANIMS) as PackedScene).instantiate()
+	add_child(src)
+	src.position = Vector3(0, 0, -500)
+	for mi in src.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).visible = false
+	var aps := src.find_children("*", "AnimationPlayer", true, false)
+	var ssk := src.find_children("*", "Skeleton3D", true, false)
+	if aps.is_empty() or ssk.is_empty():
+		src.queue_free()
+		return
+	var ap2 := aps[0] as AnimationPlayer
+	if not ap2.has_animation("Crouch_Idle"):
+		src.queue_free()
+		return
+	ap2.play("Crouch_Idle")
+	ap2.seek(0.6, true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var rt2 = RIG.new()
+	var n: int = rt2.setup(ssk[0] as Skeleton3D, sk)
+	rt2.apply()
+	_crouch_pose = rt2.capture_pose()
+	print("[crouch] 擷取完成 pairs=", n, " bones=", (_crouch_pose["rot"] as Dictionary).size())
+	src.queue_free()
+
+func _ready() -> void:
+	if USE_RETARGET_CROUCH and _crouch_pose.is_empty() and not _crouch_busy:
+		_crouch_busy = true
+		_capture_crouch()

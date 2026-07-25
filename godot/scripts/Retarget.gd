@@ -18,6 +18,9 @@ const MAP := {
 	"thigh_r": "UpperLeg.R", "calf_r": "LowerLeg.R", "foot_r": "Foot.R",
 }
 
+# 同一套 Quaternius 骨架在不同包裡手骨名不同（Hand.R / Wrist.R），找不到就試替代名
+const ALT := {"Hand.L": "Wrist.L", "Hand.R": "Wrist.R"}
+
 var _src: Skeleton3D
 var _dst: Skeleton3D
 var _pairs: Array = []      # [src_idx, dst_idx]
@@ -34,7 +37,10 @@ func setup(src: Skeleton3D, dst: Skeleton3D) -> int:
 	_pairs.clear()
 	for s in MAP.keys():
 		var si := src.find_bone(s)
-		var di := dst.find_bone(MAP[s])
+		var dname: String = MAP[s]
+		var di := dst.find_bone(dname)
+		if di < 0 and ALT.has(dname):
+			di = dst.find_bone(ALT[dname])
 		if si >= 0 and di >= 0:
 			_pairs.append([si, di])
 			if s == "pelvis":
@@ -222,3 +228,34 @@ func curl_fingers(side: String, axis: int, degrees: float, thumb_degrees: float 
 			continue
 		var rest := _dst.get_bone_rest(i).basis.get_rotation_quaternion()
 		_dst.set_bone_pose_rotation(i, rest * Quaternion(ax, deg_to_rad(deg)))
+
+# 擷取「目標骨架被重定向後的姿勢」成一張表：{骨名: local 旋轉} + 髖部位移。
+# 用途：蹲姿這種靜態姿勢不必讓每個單位都揹一份動畫來源，算一次快取全體共用。
+func capture_pose() -> Dictionary:
+	var out := {"rot": {}, "hips": Vector3.ZERO, "hips_bone": ""}
+	for p in _pairs:
+		var di: int = p[1]
+		out["rot"][_dst.get_bone_name(di)] = _dst.get_bone_pose_rotation(di)
+	if _hips[1] >= 0:
+		out["hips"] = _dst.get_bone_pose_position(_hips[1])
+		out["hips_bone"] = _dst.get_bone_name(_hips[1])
+	return out
+
+# 把快取的姿勢以 weight 混入目前（動畫產生的）姿勢。weight=0 完全不影響。
+func blend_pose(pose: Dictionary, weight: float, with_hips: bool = true) -> void:
+	if weight <= 0.001 or _dst == null:
+		return
+	var w: float = clampf(weight, 0.0, 1.0)
+	var rots: Dictionary = pose.get("rot", {})
+	for bname in rots.keys():
+		var bi := _dst.find_bone(bname)
+		if bi < 0:
+			continue
+		_dst.set_bone_pose_rotation(bi, _dst.get_bone_pose_rotation(bi).slerp(rots[bname], w))
+	if not with_hips:
+		return
+	var hb: String = pose.get("hips_bone", "")
+	if hb != "":
+		var hi := _dst.find_bone(hb)
+		if hi >= 0:
+			_dst.set_bone_pose_position(hi, _dst.get_bone_pose_position(hi).lerp(pose["hips"], w))
