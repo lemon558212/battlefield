@@ -3,9 +3,9 @@
 extends Node3D
 
 const CASES := [
-	["sniper", "res://assets/models/chars/soldier.glb"],
-	["rifleman", "res://assets/models/chars/specops.glb"],
-	["specops", "res://assets/models/chars/specops.glb"],
+	["sniper", "res://assets/models/chars/hr_w_Swat.fbx"],
+	["rifleman", "res://assets/models/chars/hr_m_Soldier.fbx"],
+	["specops", "res://assets/models/chars/hr_m_SciFi.fbx"],
 ]
 
 var _cam: Camera3D

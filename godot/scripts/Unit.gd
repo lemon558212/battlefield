@@ -52,6 +52,14 @@ const Q_MAP := {
 	"aim": "Idle_Gun_Pointing", "shoot": "Gun_Shoot", "run_shoot": "Run_Shoot",
 	"hit": "HitRecieve", "death": "Death", "wave": "Wave",
 }
+# hr_ 骨架的角色沒有內建動畫，動作全部來自 UAL 動作庫（真人 mocap）並即時重定向。
+const UAL_MAP := {
+	"idle": "Pistol_Idle", "walk": "Walk", "run": "Jog_Fwd",
+	"aim": "Pistol_Aim_Neutral", "shoot": "Pistol_Shoot", "run_shoot": "Jog_Fwd",
+	"hit": "Hit_Chest", "death": "Death01", "wave": "Interact",
+	"crouch": "Crouch_Idle", "crouch_walk": "Crouch_Fwd", "reload": "Pistol_Reload",
+}
+
 const RX_MAP := {
 	"idle": "(?i)idle", "walk": "(?i)walk", "run": "(?i)^run$|running",
 	"aim": "(?i)aim|point", "shoot": "(?i)shoot|fire|attack|gun",
@@ -76,6 +84,8 @@ var _gun_fixed := false
 var _gun_fix_wait := 0        # 等動畫姿勢真的套上骨骼再校正（同幀 advance 讀不到新姿勢）
 const RIG := preload("res://scripts/Retarget.gd")
 var _rig = null                # IK / 俯仰 / 握拳工具（綁在本模型骨架上）
+var _anim_src: Node3D = null   # UAL 動作來源（模型自身沒有動畫時用它 + 重定向）
+var _retarget := false         # true＝動作來自 UAL 重定向
 var _gun_armed := false        # 有真實武器模型才做程式化持槍姿
 var _gun_len_scale := 1.0      # 網格 → 真實槍長的縮放
 var _gun_stock := Vector3.ZERO # 抵肩點（mesh 座標）
@@ -138,7 +148,11 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 		else:
 			u._tint(model, Color(0.9, 0.2, 0.16), 0.4)     # 敵軍紅疊色一眼可辨
 		var aps := model.find_children("*", "AnimationPlayer", true, false)
-		if not aps.is_empty():
+		# 注意：FBX 匯入可能產生「空的 AnimationPlayer」，那也算沒有動畫，
+		# 否則會走進原生動畫分支卻一支都播不出來，角色停在 rest 姿勢。
+		if aps.is_empty() or (aps[0] as AnimationPlayer).get_animation_list().is_empty():
+			u._make_anim_source()
+		elif true:
 			u.anim = aps[0]
 			u._map_anims()
 			u._strip_root_motion()
@@ -323,7 +337,14 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 	_gun_mount = mount
 	_gun_fixed = false         # 交由 _fix_gun_scale 在進場景樹後補償縮放
 	_rig = RIG.new()
-	_rig.bind(sk)
+	if _anim_src != null:
+		var ssk := _anim_src.find_children("*", "Skeleton3D", true, false)
+		if not ssk.is_empty():
+			print("[rig] ", cls, " 重定向骨對數=", _rig.setup(ssk[0] as Skeleton3D, sk))
+		else:
+			_rig.bind(sk)
+	else:
+		_rig.bind(sk)
 	# 動畫每幀都會覆寫骨骼姿勢，IK 必須等它寫完才套，否則手臂會被打回動畫姿勢。
 	if sk.has_signal("skeleton_updated"):
 		sk.skeleton_updated.connect(_on_skeleton_updated)
@@ -435,6 +456,13 @@ func _cyl(r: float, h: float, mat: Material) -> MeshInstance3D:
 
 func _map_anims() -> void:
 	if anim == null: return
+	if _retarget:
+		var have0 := anim.get_animation_list()
+		for k in UAL_MAP.keys():
+			if have0.has(UAL_MAP[k]):
+				anim_names[k] = UAL_MAP[k]
+		_play("idle", 0.0)
+		return
 	var have := anim.get_animation_list()
 	for key in RX_MAP.keys():
 		# ⚠ 部分模型(如 soldier.glb)片段名帶 "CharacterArmature|" 前綴，
@@ -739,6 +767,10 @@ func _on_skeleton_updated() -> void:
 	if _in_pose:
 		return
 	_in_pose = true
+	# 重定向必須在這裡做（不是在 _aim_pose 裡）：_aim_pose 以「有武器模型」為前提會提早返回，
+	# 但動作是全體都需要的。
+	if _retarget and _rig != null:
+		_rig.apply()
 	_aim_pose()
 	_in_pose = false
 
@@ -789,3 +821,22 @@ func _crouch_offset() -> void:
 		_model.position.y = _model_base_y
 		_model.position.z = 0.0
 		_model.rotation.x = 0.0
+
+# 建立 UAL 動作來源：hr_ 骨架的角色沒有內建動畫，動作全部來自這個真人 mocap 庫。
+# 來源本身的網格隱藏並移出視野，只當「姿勢提供者」。
+func _make_anim_source() -> void:
+	if not ResourceLoader.exists(UAL_ANIMS):
+		return
+	var src := (load(UAL_ANIMS) as PackedScene).instantiate()
+	add_child(src)
+	src.position = Vector3(0, 0, -400)
+	for mi in src.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).visible = false
+	var aps := src.find_children("*", "AnimationPlayer", true, false)
+	if aps.is_empty():
+		src.queue_free()
+		return
+	_anim_src = src
+	_retarget = true
+	anim = aps[0]
+	_map_anims()
