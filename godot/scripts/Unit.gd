@@ -308,6 +308,10 @@ const WEAPON_MODEL := {
 	"engineer": ["res://assets/models/weapons/Pistol_1.obj", 0.22],
 }
 const HAND_BONES := ["Wrist.R", "Hand.R", "hand_r"]
+# 手骨命名在各包不一致（舊 soldier.glb＝Wrist.R、hr_ 骨架＝Hand.R）。
+# ⚠ 寫死名稱時 IK 會「安靜地失敗」——槍架好了、雙手卻垂在身側，很難一眼看出（2026-07-25）。
+var _hand_r := "Wrist.R"
+var _hand_l := "Wrist.L"
 
 func _attach_weapon(model: Node, p_cls: String) -> void:
 	var sks := model.find_children("*", "Skeleton3D", true, false)
@@ -321,6 +325,8 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 			break
 	if bone == "":
 		return
+	_hand_r = bone
+	_hand_l = ("Hand.L" if sk.find_bone("Hand.L") >= 0 else "Wrist.L")
 	var mount := BoneAttachment3D.new()
 	mount.name = "WeaponMount"
 	mount.bone_name = bone
@@ -740,10 +746,20 @@ func _aim_pose() -> void:
 	var tgt: Vector3 = global_position + facing_dir() * 8.0 + Vector3.UP * 1.2
 	if aim_point != null:
 		tgt = aim_point
-	# 1) 上半身與頭先跟著俯仰——會動到肩膀位置，故必須排在算抵肩點之前
-	var eye := global_position + Vector3.UP * 1.45
-	var pitch: float = asin(clampf((tgt - eye).normalized().y, -1.0, 1.0))
 	var right := global_basis.x.normalized()
+	# 0) 蹲姿是真人「低姿潛行」動作：上身前傾 35°、頭朝地面——戰鬥中看不到前方也架不了槍。
+	#    故沿上半身骨鏈逐節扳回（腰保留一點前傾才自然），頭是子骨會跟著一起抬起來。
+	if _crouch > 0.001 and anim_names.has("crouch"):
+		_rig.add_world_rotation("Abdomen", right, deg_to_rad(-9.0) * _crouch)
+		_rig.add_world_rotation("Torso", right, deg_to_rad(-11.0) * _crouch)
+		_rig.add_world_rotation("Chest", right, deg_to_rad(-11.0) * _crouch)
+	# 1) 上半身與頭先跟著俯仰——會動到肩膀位置，故必須排在算抵肩點之前
+	#    視線高度取真實頭骨位置：蹲下時眼睛會低半個身子，用固定 1.45m 會讓槍口一直往下壓。
+	var eye := global_position + Vector3.UP * 1.45
+	var hi := sk.find_bone("Head")
+	if hi >= 0:
+		eye = sk.global_transform * sk.get_bone_global_pose(hi).origin
+	var pitch: float = asin(clampf((tgt - eye).normalized().y, -1.0, 1.0))
 	_rig.add_world_rotation("Chest", right, -pitch * 0.45)
 	_rig.add_world_rotation("Head", right, -pitch * 0.40)
 	# 2) 槍：槍托抵右肩窩、槍口指向目標
@@ -760,8 +776,8 @@ func _aim_pose() -> void:
 	# 肘部極向量：兩肘都朝下外側，這是持槍的自然姿勢；沒有約束會扭成怪解
 	var down := -Vector3.UP
 	var rightv := global_basis.x.normalized()
-	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", "Wrist.R", xf * _gun_grip, (down * 0.85 + rightv * 0.5).normalized())
-	_rig.ik_two_bone("UpperArm.L", "LowerArm.L", "Wrist.L", xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
+	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.85 + rightv * 0.5).normalized())
+	_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
 	_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏

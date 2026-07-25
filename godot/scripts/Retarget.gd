@@ -24,8 +24,10 @@ const ALT := {"Hand.L": "Wrist.L", "Hand.R": "Wrist.R"}
 var _src: Skeleton3D
 var _dst: Skeleton3D
 var _pairs: Array = []      # [src_idx, dst_idx]
+var _detached: Array = []   # [src_idx, dst_idx]：目標骨掛在 Root（不跟著髖部走）→ 位置也要自己補
 var _hips: Array = [-1, -1]
 var _height_ratio := 1.0
+var _ratio_ok := false      # 體型比例必須在「進場景樹後」才量得到（global_transform 才有效）
 
 # 只綁目標骨架：遊戲內用模型自帶動畫，不需要來源姿勢，但仍要用 IK/俯仰/握拳這些工具。
 func bind(dst: Skeleton3D) -> void:
@@ -35,28 +37,55 @@ func setup(src: Skeleton3D, dst: Skeleton3D) -> int:
 	_src = src
 	_dst = dst
 	_pairs.clear()
+	_detached.clear()
+	_ratio_ok = false
 	for s in MAP.keys():
 		var si := src.find_bone(s)
 		var dname: String = MAP[s]
 		var di := dst.find_bone(dname)
 		if di < 0 and ALT.has(dname):
 			di = dst.find_bone(ALT[dname])
-		if si >= 0 and di >= 0 and _parent_ok(src, dst, si, di):
-			_pairs.append([si, di])
-			if s == "pelvis":
-				_hips = [si, di]
-	# 體型比例：以「世界座標」的髖高度換算位移。
-	# 不可直接取 .y——FBX 骨架多為 Z 軸向上，取 .y 會得到 0，導致蹲下時髖部不下沉、整個人浮空。
-	if _hips[0] >= 0:
-		var sh: float = (src.global_transform * src.get_bone_global_rest(_hips[0]).origin).y
-		var dh: float = (dst.global_transform * dst.get_bone_global_rest(_hips[1]).origin).y
-		if absf(sh) > 0.0001:
-			_height_ratio = dh / sh
+		if si < 0 or di < 0:
+			continue
+		_pairs.append([si, di])
+		if s == "pelvis":
+			_hips = [si, di]
+		elif _broken_parent(src, dst, si, di):
+			# 目標骨架把大腿直接掛在 Root（hr_ 骨架就是這樣）：旋轉照轉沒問題，
+			# 但髖部下沉時它不會跟著走 → 蹲下變成「上半身沉下去、腿還站著」。
+			# 這類骨頭的位置也要自己補上。
+			_detached.append([si, di])
 	return _pairs.size()
+
+# 體型比例：以「世界座標」的髖高度換算位移。
+# ⚠ 必須等骨架進場景樹後才量：global_transform 在樹外回傳單位矩陣，
+#   量到的是骨架空間原始值（此類 FBX 為 100 倍且 Z 軸向上），比例會整個錯。
+func _ensure_ratio() -> void:
+	if _ratio_ok or _hips[0] < 0 or not _dst.is_inside_tree() or not _src.is_inside_tree():
+		return
+	var sh: float = (_src.global_transform * _src.get_bone_global_rest(_hips[0]).origin).y
+	var dh: float = (_dst.global_transform * _dst.get_bone_global_rest(_hips[1]).origin).y
+	if absf(sh) > 0.0001:
+		_height_ratio = dh / sh
+	_ratio_ok = true
+
+# 把「來源骨相對自身 rest 的世界位移」轉印到目標骨，並換回該骨相對父骨的 local 位置。
+func _copy_position(si: int, di: int) -> void:
+	var s_xf := _src.global_transform
+	var rest_w: Vector3 = s_xf * _src.get_bone_global_rest(si).origin
+	var pose_w: Vector3 = s_xf * _src.get_bone_global_pose(si).origin
+	var target_w: Vector3 = (_dst.global_transform * _dst.get_bone_global_rest(di).origin) \
+		+ (pose_w - rest_w) * _height_ratio
+	var in_skel: Vector3 = _dst.global_transform.affine_inverse() * target_w
+	var dp := _dst.get_bone_parent(di)
+	if dp >= 0:
+		in_skel = _dst.get_bone_global_pose(dp).affine_inverse() * in_skel
+	_dst.set_bone_pose_position(di, in_skel)
 
 func apply() -> void:
 	# 兩邊骨架空間可能不同軸向（glTF 為 Y-up、FBX 匯入常帶 -90°X），
 	# 故一律換算到世界座標再轉回目標骨架空間，否則差量會套錯軸。
+	_ensure_ratio()
 	var s_root := _src.global_basis.get_rotation_quaternion()
 	var d_root := _dst.global_basis.get_rotation_quaternion()
 	var d_root_inv := d_root.inverse()
@@ -77,19 +106,11 @@ func apply() -> void:
 	# 髖部位移（蹲下/跳躍需要）：全程走世界座標，最後再換回目標骨架的 local，
 	# 這樣才同時吃得下「軸向不同」與「FBX 單位放大 100 倍」兩件事。
 	if _hips[0] >= 0:
-		var si: int = _hips[0]
-		var di: int = _hips[1]
-		var s_xf := _src.global_transform
-		var rest_w: Vector3 = s_xf * _src.get_bone_global_rest(si).origin
-		var pose_w: Vector3 = s_xf * _src.get_bone_global_pose(si).origin
-		var target_w: Vector3 = (_dst.global_transform * _dst.get_bone_global_rest(di).origin) \
-			+ (pose_w - rest_w) * _height_ratio
-		# 世界 → 目標骨架空間 → 該骨相對父骨的 local
-		var in_skel: Vector3 = _dst.global_transform.affine_inverse() * target_w
-		var dp := _dst.get_bone_parent(di)
-		if dp >= 0:
-			in_skel = _dst.get_bone_global_pose(dp).affine_inverse() * in_skel
-		_dst.set_bone_pose_position(di, in_skel)
+		_copy_position(_hips[0], _hips[1])
+	# 掛在 Root 的肢體（hr_ 骨架的大腿）：位置不會跟著髖部走，必須一起補，
+	# 否則蹲下時只有上半身沉下去、腿還直挺挺站著（2026-07-25 蹲姿失敗的真因）。
+	for p in _detached:
+		_copy_position(p[0], p[1])
 
 # 解析式雙骨 IK（含極向量約束肘部朝向）。
 # CCD 沒有肘部約束，會收斂到「手臂扭轉一圈」的怪解——蒙皮會塌成一條細長怪物（2026-07-25 實測）。
@@ -305,19 +326,13 @@ func leg_end(lower: String, foot: String) -> Vector3:
 	var shin_local: Vector3 = _dst.get_bone_global_rest(li).affine_inverse() * _dst.get_bone_global_rest(fi).origin
 	return _dst.global_transform * (_dst.get_bone_global_pose(li) * shin_local)
 
-# 父子關係健檢：只有「兩邊的父骨也互相對應」的骨頭才納入重定向。
-# 血淚來源：遊戲內這具 Quaternius 骨架的 Foot 骨父階是 Root（不是 LowerLeg），
-# 把腿鏈的旋轉寫到它身上等於在身體根部亂轉——這就是先前重定向把整個人扭壞的真因。
-func _parent_ok(src: Skeleton3D, dst: Skeleton3D, si: int, di: int) -> bool:
+# 父子關係健檢：找出「目標骨掛在骨架根部、但來源骨其實在肢體鏈中間」的骨頭。
+# hr_ 骨架的 UpperLeg.L/R 就掛在 Root——旋轉照轉沒問題（父骨 Root 不動，反而穩），
+# 但位置不會跟著髖部走，所以這種骨頭要另外補位置（見 _detached）。
+# 先前的做法是把它整根排除，結果就是「蹲下時腿完全不動」。
+func _broken_parent(src: Skeleton3D, dst: Skeleton3D, si: int, di: int) -> bool:
 	var sp := src.get_bone_parent(si)
-	if sp < 0:
-		return true
 	var dp := dst.get_bone_parent(di)
-	if dp < 0:
+	if sp < 0 or dp < 0:
 		return false
-	# 只擋真正病態的情形：目標骨掛在骨架根部，而來源骨其實在肢體鏈中間。
-	# 中間多一節（如 UpperLeg 掛在 Body 而非 Hips）無妨，旋轉仍相對於穩定的父骨。
-	var dpn := dst.get_bone_name(dp)
-	if dpn == "Root" and src.get_bone_name(sp) != "root":
-		return false
-	return true
+	return dst.get_bone_name(dp) == "Root" and src.get_bone_name(sp) != "root"

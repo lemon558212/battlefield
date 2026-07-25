@@ -38,19 +38,18 @@ func _run() -> void:
 		add_child(u)
 		u.global_position = Vector3.ZERO
 		u.rotation.y = 0.0
-		for i in 30:
-			await get_tree().process_frame
-		# 開蹲姿驗收
-		u.want_cover = true
-		for i in 60:
-			await get_tree().process_frame
-		for shot in [["front", Vector3(0, 1.15, 2.8)], ["side", Vector3(2.8, 1.15, 0.0)], ["q", Vector3(2.0, 1.5, 2.0)]]:
-			_cam.position = shot[1]
-			_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
-			await get_tree().process_frame
-			await RenderingServer.frame_post_draw
-			get_viewport().get_texture().get_image().save_png("res://u_%s_%s.png" % [cls, shot[0]])
-		print("[u] shot ", cls)
+		# 站姿與蹲姿都要拍：只拍蹲姿會漏掉「站著時被改壞」（姿勢兩態互相牽動過好幾次）
+		for stance in ["stand", "crouch"]:
+			u.want_cover = (stance == "crouch")
+			for i in (30 if stance == "stand" else 60):
+				await get_tree().process_frame
+			for shot in [["front", Vector3(0, 1.15, 2.8)], ["side", Vector3(2.8, 1.15, 0.0)], ["q", Vector3(2.0, 1.5, 2.0)]]:
+				_cam.position = shot[1]
+				_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
+				await get_tree().process_frame
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png("res://u_%s_%s_%s.png" % [cls, stance, shot[0]])
+			print("[u] shot ", cls, " ", stance)
 		u.queue_free()
 		await get_tree().process_frame
 	print("[u] DONE")

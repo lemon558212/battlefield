@@ -32,3 +32,9 @@ assets/models/chars/knight_texture.png*
 assets/models/chars/mage_texture.png*
 assets/models/chars/ranger_texture.png*
 assets/models/chars/rogue_texture.png*
+# 姿勢驗收台輸出（GunTest / PoseProbe / e2e 截圖）：只是看圖用，不進版控
+u_*.png*
+p_*.png*
+e2e_*.png*
+cat_*.png*
+ax_*.png*
