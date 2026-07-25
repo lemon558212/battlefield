@@ -23,3 +23,7 @@ ERROR: Failed loading resource: res://assets/art/title-key-visual.jpg.
 [e2e]   位移=4.22m OK
 [selftest] saved res://e2e_battle.png
 [e2e] DONE
+WARNING: 2 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 1 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

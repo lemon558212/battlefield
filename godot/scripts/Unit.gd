@@ -90,7 +90,9 @@ const UAL_ANIMS := "res://assets/models/anims/ual_standard.glb"
 const USE_RETARGET_CROUCH := false
 static var _crouch_pose := {}   # 全體共用：蹲姿只需算一次，不必每個單位都揹一份動畫來源
 static var _crouch_busy := false
-const CROUCH_DEPTH := 0.34   # 蹲下時身體下沉高度
+const CROUCH_DEPTH := 0.14   # 蹲下時髖部下沉
+const CROUCH_BACK := 0.05    # 髖部同時後移（少了這個會變成坐椅子）
+const STANCE_W := 0.16       # 雙腳站距（半寬）   # 蹲下時身體下沉高度
 const ANKLE_H := 0.08        # 腳踝骨離地高度
 const LEG_AXIS := 0      # 這具骨架的膝蓋彎曲軸（三軸掃描驗得）
 var _gun_pos := Vector3.ZERO
@@ -677,17 +679,20 @@ func _aim_pose() -> void:
 	# 這是真實遊戲做無動畫蹲姿的標準手法，且沿用已驗證可用的雙骨 IK（手臂誤差僅 6cm）。
 	# ⚠ 除錯提醒：在 skeleton_updated 內「當幀讀回」骨骼位置會拿到舊值，
 	#   看起來像 IK 沒作用，其實畫面是對的——要看渲染結果，不要信同幀讀數。
+	# 蹲姿（2026-07-25 保守版）：屈膝 IK 幾何試了多種組合，
+	# 都會變成「坐在看不見的椅子上」或小腿被拉平——使用者兩次都一眼看出來。
+	# 故先退成「微幅低身 + 上身前傾」：幅度小、不出戲，等真蹲姿做出來再換掉。
+	# 真正的解法應該是讓 UAL 的 Crouch_Idle 重定向成功（那是真人 mocap），而非手算幾何。
 	if _crouch > 0.001:
 		_model.position.y = _model_base_y - CROUCH_DEPTH * _crouch
+		_model.position.z = 0.0
 		_model.rotation.x = 0.0
-		var fwd := facing_dir()   # 膝蓋朝正前方彎
+		var rightax := global_basis.x.normalized()
+		_rig.add_world_rotation("Abdomen", rightax, deg_to_rad(16.0) * _crouch)
+		_rig.add_world_rotation("Torso", rightax, deg_to_rad(8.0) * _crouch)
 		for sd in ["L", "R"]:
-			var fb := sk.find_bone("Foot." + sd)
-			if fb < 0:
-				continue
-			var fw: Vector3 = sk.global_transform * sk.get_bone_global_pose(fb).origin
-			var tgt := Vector3(fw.x, global_position.y + ANKLE_H, fw.z)
-			_rig.ik_two_bone("UpperLeg." + sd, "LowerLeg." + sd, "Foot." + sd, tgt, fwd)
+			_rig.bend_bone("UpperLeg." + sd, LEG_AXIS, 16.0, _crouch)
+			_rig.bend_bone("LowerLeg." + sd, LEG_AXIS, -22.0, _crouch)
 	_aiming = (not _dead) and _move_target == null
 	if not _aiming:
 		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
@@ -779,4 +784,5 @@ func _crouch_offset() -> void:
 		return
 	if _crouch <= 0.001 and _prone <= 0.001:
 		_model.position.y = _model_base_y
+		_model.position.z = 0.0
 		_model.rotation.x = 0.0
