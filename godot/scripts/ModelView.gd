@@ -19,19 +19,21 @@ func _ready() -> void:
 
 const HERO := {
 	"sniper": "res://assets/models/chars/soldier.glb",
-	"rifleman": "res://assets/models/chars/specops.glb",
-	"engineer": "res://assets/models/chars/engineer.glb",
 	"mg": "res://assets/models/chars/rifleman.glb",
+	"at": "res://assets/models/chars/at.glb",
+	"sam": "res://assets/models/chars/sam.glb",
+	"mortar": "res://assets/models/chars/mortar.glb",
+	"rifleman": "res://assets/models/chars/specops.glb",
 }
 func _run() -> void:
 	for cls in HERO.keys():
-		var u := Unit.spawn(HERO[cls], cls, 0, true)   # 走遊戲實際路徑(含換裝)
+		var u := Unit.spawn(HERO[cls], cls, 0, true)
 		add_child(u)
 		u.global_position = Vector3.ZERO
 		u.rotation.y = 0.0
-		await get_tree().create_timer(0.25).timeout
-		_cam.position = Vector3(0, 1.05, 3.1)
-		_cam.look_at(Vector3(0, 0.9, 0), Vector3.UP)
+		await get_tree().create_timer(0.3).timeout
+		_cam.position = Vector3(0, 1.1, 2.7)
+		_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
 		await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png("res://cat_%s.png" % cls)

@@ -7,12 +7,48 @@ extends Node3D
 
 signal shot_fired(from_pos: Vector3, to_pos: Vector3)
 
+# 賽璐璐描邊（往鳴潮卡通渲染靠）：背面沿法線外擴、只塗深色，形成輪廓線。
+const OUTLINE_SHADER := """
+shader_type spatial;
+render_mode cull_front, unshaded, shadows_disabled;
+uniform float width = 0.014;
+uniform vec4 line_color : source_color = vec4(0.06, 0.06, 0.08, 1.0);
+void vertex() { VERTEX += NORMAL * width; }
+void fragment() { ALBEDO = line_color.rgb; }
+"""
+static var _outline_mat: ShaderMaterial
+
+static func _get_outline() -> ShaderMaterial:
+	if _outline_mat == null:
+		var sh := Shader.new()
+		sh.code = OUTLINE_SHADER
+		_outline_mat = ShaderMaterial.new()
+		_outline_mat.shader = sh
+	return _outline_mat
+
+# 給模型所有 StandardMaterial3D 加描邊 next_pass + 卡通化(降高光/加邊緣光感)
+static func _cel_shade(model: Node) -> void:
+	for m in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		var cnt: int = maxi(mi.get_surface_override_material_count(), 1)
+		for si in cnt:
+			var base := mi.get_active_material(si)
+			if base is StandardMaterial3D:
+				var d := (base as StandardMaterial3D).duplicate()
+				d.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+				d.roughness = maxf(d.roughness, 0.6)
+				d.rim_enabled = true
+				d.rim = 0.35
+				d.rim_tint = 0.4
+				d.next_pass = _get_outline()
+				mi.set_surface_override_material(si, d)
+
 const WALK_SPEED := 3.0    # 6 太快像滑行；戰術步行速度更真（治滑步）
 const TURN_SPEED := 12.0   # 轉身要快，短距離移動也能先轉正再跑
 
 # 語意動作 → Quaternius 片段名（優先），找不到再 regex 泛匹配（相容其他模型）
 const Q_MAP := {
-	"idle": "Idle_Gun", "walk": "Walk", "run": "Run",
+	"idle": "Idle_Gun_Pointing", "walk": "Walk", "run": "Run",
 	"aim": "Idle_Gun_Pointing", "shoot": "Gun_Shoot", "run_shoot": "Run_Shoot",
 	"hit": "HitRecieve", "death": "Death", "wave": "Wave",
 }
@@ -37,6 +73,7 @@ var _model: Node3D = null
 var _gun_node: Node3D = null
 var _gun_mount: Node3D = null
 var _gun_fixed := false
+var _gun_pos := Vector3.ZERO
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
 var _model_base_y := 0.0
 var _crouch := 0.0             # 0=站 1=蹲（平滑過渡）
@@ -221,57 +258,96 @@ func _tint(model: Node, tint: Color, strength: float) -> void:
 				dup.albedo_color = dup.albedo_color.lerp(tint, strength)
 				mi.set_surface_override_material(si, dup)
 
-# 武器掛骨 Wrist.R，隨骨架動畫一起動；兵種決定槍型（剪影可辨）
+# 武器揹背（2026-07-24 使用者：手持會懸空很假）：通用模型待機手不握槍，故改揹背。
+# 掛在 Unit 本體固定位置(不依賴各模型不一致的骨骼慣例)，斜掛右肩後方，槍口朝右上。
 func _attach_weapon(model: Node, p_cls: String) -> void:
-	var sks := model.find_children("*", "Skeleton3D", true, false)
-	if sks.is_empty():
-		return
-	var sk := sks[0] as Skeleton3D
-	var bi := sk.find_bone("Wrist.R")
-	if bi < 0:
-		return
-	var ba := BoneAttachment3D.new()
-	ba.name = "WeaponMount"
-	sk.add_child(ba)
-	ba.bone_name = "Wrist.R"
+	var mount := Node3D.new()
+	mount.name = "WeaponMount"
+	add_child(mount)
+	mount.position = Vector3(0.16, 1.18, -0.14)      # 右肩後
+	mount.rotation_degrees = Vector3(-18, 20, 58)     # 斜揹
 	var gun := _make_gun(p_cls)
-	ba.add_child(gun)
-	gun.rotation_degrees = Vector3(0, 90, 8)
+	mount.add_child(gun)
 	_gun_node = gun
-	_gun_mount = ba
+	_gun_mount = mount
+	_gun_fixed = true          # 揹背固定掛法不需骨骼縮放補償
 
+func _mat(col: Color, metal: float, rough: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col
+	m.metallic = metal
+	m.roughness = rough
+	return m
+
+# 依兵種造出剪影可辨的專屬武器（GDD/02：狙擊槍/機槍/火箭筒/防空/迫砲/步槍）。
+# 慣例：local +Z＝槍口方向，武器原點在握把附近，掛右手腕 Wrist.R。
 func _make_gun(p_cls: String) -> Node3D:
 	var root := Node3D.new()
-	var dark := StandardMaterial3D.new()
-	dark.albedo_color = Color(0.11, 0.11, 0.12)
-	dark.metallic = 0.6
-	dark.roughness = 0.5
-	var wood := StandardMaterial3D.new()
-	wood.albedo_color = Color(0.28, 0.19, 0.12)
-	var body_len := 0.34
-	var barrel_len := 0.30
-	var barrel_r := 0.012
+	var metal := _mat(Color(0.13, 0.13, 0.14), 0.7, 0.42)
+	var dark := _mat(Color(0.07, 0.07, 0.08), 0.8, 0.35)
+	var poly := _mat(Color(0.10, 0.11, 0.12), 0.1, 0.7)   # 塑膠件
+	var wood := _mat(Color(0.30, 0.20, 0.12), 0.0, 0.75)
+	var glass := _mat(Color(0.25, 0.45, 0.55), 0.2, 0.15)
 	match p_cls:
-		"sniper": body_len = 0.40; barrel_len = 0.55; barrel_r = 0.010
-		"mg": body_len = 0.42; barrel_len = 0.42; barrel_r = 0.018
-		"at": body_len = 0.30; barrel_len = 0.62; barrel_r = 0.045
-		"mortar", "sam": body_len = 0.30; barrel_len = 0.50; barrel_r = 0.035
-		"rifleman", "assault", "specops", "engineer": body_len = 0.34; barrel_len = 0.34
-	var body := _box(0.05, 0.11, body_len, dark)
-	root.add_child(body)
-	var barrel := _cyl(barrel_r, barrel_len, dark)
-	barrel.rotation_degrees.x = 90
-	barrel.position = Vector3(0, 0.02, body_len * 0.5 + barrel_len * 0.5)
-	root.add_child(barrel)
-	var grip := _box(0.04, 0.10, 0.05, wood)
-	grip.position = Vector3(0, -0.09, -body_len * 0.3)
-	root.add_child(grip)
-	if p_cls == "sniper":
-		var scope := _cyl(0.016, 0.12, dark)
-		scope.rotation_degrees.x = 90
-		scope.position = Vector3(0, 0.09, 0.05)
-		root.add_child(scope)
+		"sniper":
+			var rec := _box(0.05, 0.10, 0.42, metal); rec.position.z = 0.0; root.add_child(rec)
+			var bar := _cyl(0.011, 0.62, dark); bar.rotation_degrees.x = 90; bar.position.z = 0.52; root.add_child(bar)
+			var brake := _cyl(0.022, 0.06, dark); brake.rotation_degrees.x = 90; brake.position.z = 0.85; root.add_child(brake)
+			var scope := _cyl(0.022, 0.20, dark); scope.rotation_degrees.x = 90; scope.position = Vector3(0, 0.10, 0.06); root.add_child(scope)
+			var lens := _cyl(0.020, 0.02, glass); lens.rotation_degrees.x = 90; lens.position = Vector3(0, 0.10, 0.17); root.add_child(lens)
+			var stock := _box(0.045, 0.13, 0.24, poly); stock.position = Vector3(0, -0.02, -0.30); root.add_child(stock)
+			var mag := _box(0.035, 0.11, 0.06, poly); mag.position = Vector3(0, -0.10, -0.02); root.add_child(mag)
+			_bipod(root, 0.62)
+		"mg":
+			var rec := _box(0.07, 0.12, 0.40, metal); root.add_child(rec)
+			var bar := _cyl(0.018, 0.46, dark); bar.rotation_degrees.x = 90; bar.position.z = 0.44; root.add_child(bar)
+			for i in 5:
+				var fin := _cyl(0.026, 0.012, dark); fin.rotation_degrees.x = 90; fin.position.z = 0.30 + i * 0.03; root.add_child(fin)
+			var box := _box(0.11, 0.11, 0.13, poly); box.position = Vector3(0.02, -0.10, -0.06); root.add_child(box)  # 彈鼓/彈箱
+			var stock := _box(0.05, 0.12, 0.22, poly); stock.position = Vector3(0, -0.01, -0.30); root.add_child(stock)
+			_bipod(root, 0.58)
+		"at":
+			var tube := _cyl(0.048, 0.78, dark); tube.rotation_degrees.x = 90; tube.position.z = 0.30; root.add_child(tube)
+			var cone := _conemesh(0.048, 0.085, 0.10, dark); cone.rotation_degrees.x = -90; cone.position.z = -0.14; root.add_child(cone)  # 後噴口
+			var warhead := _conemesh(0.055, 0.02, 0.10, _mat(Color(0.35,0.28,0.12),0.3,0.6)); warhead.rotation_degrees.x = 90; warhead.position.z = 0.72; root.add_child(warhead)
+			var sight := _box(0.02, 0.07, 0.04, metal); sight.position = Vector3(0, 0.075, 0.20); root.add_child(sight)
+			var grip := _box(0.03, 0.09, 0.05, poly); grip.position = Vector3(0, -0.09, 0.12); root.add_child(grip)
+		"sam":
+			var tube := _box(0.09, 0.09, 0.62, poly); tube.position.z = 0.24; root.add_child(tube)   # 方形發射管
+			var tip := _conemesh(0.05, 0.006, 0.09, metal); tip.rotation_degrees.x = 90; tip.position.z = 0.58; root.add_child(tip)
+			var seeker := _box(0.06, 0.05, 0.05, glass); seeker.position = Vector3(0.06, 0.03, 0.10); root.add_child(seeker)
+			var grip := _box(0.03, 0.09, 0.05, poly); grip.position = Vector3(0, -0.09, 0.06); root.add_child(grip)
+		"mortar":
+			var mtube := _cyl(0.032, 0.70, metal); mtube.rotation_degrees.x = 60; mtube.position = Vector3(0, 0.14, 0.16); root.add_child(mtube)
+			var basep := _box(0.20, 0.02, 0.20, dark); basep.position = Vector3(0, -0.14, -0.10); root.add_child(basep)
+			var grip := _box(0.03, 0.09, 0.05, poly); grip.position = Vector3(0, -0.09, 0.0); root.add_child(grip)
+		_:
+			# 步槍/卡賓（rifleman/assault/specops/engineer 等）
+			var rec := _box(0.05, 0.10, 0.30, metal); root.add_child(rec)
+			var bar := _cyl(0.012, 0.30, dark); bar.rotation_degrees.x = 90; bar.position.z = 0.30; root.add_child(bar)
+			var hand := _box(0.045, 0.06, 0.16, poly); hand.position.z = 0.18; root.add_child(hand)
+			var mag := _box(0.035, 0.13, 0.055, poly); mag.position = Vector3(0, -0.11, -0.01); mag.rotation_degrees.x = 12; root.add_child(mag)
+			var stock := _box(0.045, 0.10, 0.18, poly); stock.position = Vector3(0, -0.01, -0.24); root.add_child(stock)
+			var sight := _box(0.015, 0.045, 0.10, metal); sight.position = Vector3(0, 0.075, 0.02); root.add_child(sight)
 	return root
+
+func _bipod(root: Node3D, front_z: float) -> void:
+	var m := _mat(Color(0.08, 0.08, 0.09), 0.6, 0.5)
+	for sgn in [-1.0, 1.0]:
+		var leg := _cyl(0.006, 0.24, m)
+		leg.rotation_degrees = Vector3(28, 0, sgn * 22)
+		leg.position = Vector3(sgn * 0.05, -0.12, front_z * 0.55)
+		root.add_child(leg)
+
+func _conemesh(bottom_r: float, top_r: float, h: float, mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.bottom_radius = bottom_r
+	cm.top_radius = top_r
+	cm.height = h
+	mi.mesh = cm
+	mi.material_override = mat
+	return mi
 
 func _box(x: float, y: float, z: float, mat: Material) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -390,18 +466,22 @@ func _face_towards(p: Vector3, k: float) -> void:
 # 槍械尺度補償：BoneAttachment 的世界縮放要等節點進場景樹才算得準
 # （soldier.glb 掛點世界縮放極大，不補償這把 0.5m 的槍會變成 80+ 公尺長條＝「灰色巨牆」）。
 func _fix_gun_scale() -> void:
-	if _gun_fixed or _gun_node == null or _gun_mount == null:
-		return
+	return   # 揹背固定掛法：不需骨骼縮放/朝向補償
 	if not is_inside_tree() or not _gun_mount.is_inside_tree():
 		return
 	_gun_fixed = true
+	# 動態對齊：讀「手腕在模型空間的朝向」反算，使槍口(+Z)朝角色正前、瞄具(+Y)朝上，
+	# 不論模型/動畫幀差異都成立（治火箭筒指天、狙擊槍穿身）。
+	var mdl: Node3D = _model if _model else self
+	var wrist := (mdl.global_transform.affine_inverse() * _gun_mount.global_transform).basis.orthonormalized()
+	# 槍口對齊角色正前（+Z）、瞄具朝上；不論模型/動畫手部姿勢差異都成立
+	var rot := Basis.looking_at(Vector3(0, 0, 1), Vector3(0, 1, 0))
+	rot = wrist.inverse() * rot
 	var ws := _gun_mount.global_transform.basis.get_scale()
 	var s: float = (absf(ws.x) + absf(ws.y) + absf(ws.z)) / 3.0
-	if s > 0.0001 and (s > 1.15 or s < 0.87):
-		_gun_node.scale = Vector3.ONE / s
-		_gun_node.position = Vector3(0.02, 0.0, 0.10) / s
-	else:
-		_gun_node.position = Vector3(0.02, 0.0, 0.10)
+	if s < 0.0001:
+		s = 1.0
+	_gun_node.transform = Transform3D(rot.scaled(Vector3.ONE / s), _gun_pos / s)
 
 # 蹲姿：Quaternius 動畫組沒有 crouch，故以「壓低身體＋前傾」模擬躲在掩體後。
 # 移動中一律站起（跑步蹲著不合理）。
