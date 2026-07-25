@@ -24,6 +24,10 @@ var _pairs: Array = []      # [src_idx, dst_idx]
 var _hips: Array = [-1, -1]
 var _height_ratio := 1.0
 
+# 只綁目標骨架：遊戲內用模型自帶動畫，不需要來源姿勢，但仍要用 IK/俯仰/握拳這些工具。
+func bind(dst: Skeleton3D) -> void:
+	_dst = dst
+
 func setup(src: Skeleton3D, dst: Skeleton3D) -> int:
 	_src = src
 	_dst = dst

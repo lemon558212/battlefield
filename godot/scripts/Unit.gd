@@ -74,6 +74,16 @@ var _gun_node: Node3D = null
 var _gun_mount: Node3D = null
 var _gun_fixed := false
 var _gun_fix_wait := 0        # 等動畫姿勢真的套上骨骼再校正（同幀 advance 讀不到新姿勢）
+const RIG := preload("res://scripts/Retarget.gd")
+var _rig = null                # IK / 俯仰 / 握拳工具（綁在本模型骨架上）
+var _gun_armed := false        # 有真實武器模型才做程式化持槍姿
+var _gun_len_scale := 1.0      # 網格 → 真實槍長的縮放
+var _gun_stock := Vector3.ZERO # 抵肩點（mesh 座標）
+var _gun_grip := Vector3.ZERO  # 右手握把
+var _gun_fore := Vector3.ZERO  # 左手前護木
+var _gun_carry_xf := Transform3D.IDENTITY   # 攜行時的 local 變換（校正結果，離開瞄準要還原）
+var _aiming := false
+var aim_point = null           # 由 Main/射擊流程指定的瞄準目標點（世界座標）
 var _gun_pos := Vector3.ZERO
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
 var _model_base_y := 0.0
@@ -299,6 +309,21 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 	_gun_node = gun
 	_gun_mount = mount
 	_gun_fixed = false         # 交由 _fix_gun_scale 在進場景樹後補償縮放
+	_rig = RIG.new()
+	_rig.bind(sk)
+	# 動畫每幀都會覆寫骨骼姿勢，IK 必須等它寫完才套，否則手臂會被打回動畫姿勢。
+	if sk.has_signal("skeleton_updated"):
+		sk.skeleton_updated.connect(_on_skeleton_updated)
+	# 量出槍身上的三個關鍵點（mesh 座標）：抵肩的槍托、右手握把、左手前護木
+	if gun is MeshInstance3D and WEAPON_MODEL.has(p_cls):
+		var ab: AABB = (gun as MeshInstance3D).get_aabb()
+		var raw: float = ab.size.x
+		if raw > 0.0001:
+			_gun_len_scale = float(WEAPON_MODEL[p_cls][1]) / raw
+		_gun_stock = Vector3(ab.position.x + 0.03 * raw, ab.position.y + 0.62 * ab.size.y, ab.get_center().z)
+		_gun_grip = Vector3(ab.position.x + 0.30 * raw, ab.position.y + 0.46 * ab.size.y, ab.get_center().z)
+		_gun_fore = Vector3(ab.position.x + 0.46 * raw, ab.position.y + 0.56 * ab.size.y, ab.get_center().z)
+		_gun_armed = true
 
 func _mat(col: Color, metal: float, rough: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -538,6 +563,7 @@ func _fix_gun_scale() -> void:
 		grip = Vector3(ab.position.x + 0.30 * raw, ab.position.y + 0.46 * ab.size.y, ab.get_center().z)
 	var b := (wrist.inverse() * desired).scaled(Vector3.ONE * (scale_f / s))
 	_gun_node.transform = Transform3D(b, -(b * grip))
+	_gun_carry_xf = _gun_node.transform
 
 # 蹲姿：Quaternius 動畫組沒有 crouch，故以「壓低身體＋前傾」模擬躲在掩體後。
 # 移動中一律站起（跑步蹲著不合理）。
@@ -603,3 +629,55 @@ func _fade(k: float) -> void:
 				d.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 				d.albedo_color.a = k
 				mi.set_surface_override_material(si, d)
+
+# 程式化持槍姿（GDD/13，2026-07-25）：模型自帶動畫是「單手指槍」，長槍必須雙手才合理。
+# 作法同真實遊戲的疊加瞄準層：槍托抵右肩、槍口指向目標，再用 IK 把兩隻手抓上槍。
+# 移動中不套用（跑步時雙手鎖在槍上會與跑步動畫打架），改回攜行姿。
+func _aim_pose() -> void:
+	if not _gun_armed or _rig == null or _gun_node == null or not _gun_fixed or _model == null:
+		return
+	var sks := _model.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk := sks[0] as Skeleton3D
+	_aiming = (not _dead) and _move_target == null
+	if not _aiming:
+		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
+		return
+	var si := sk.find_bone("Shoulder.R")
+	if si < 0:
+		return
+	var tgt: Vector3 = global_position + facing_dir() * 8.0 + Vector3.UP * 1.2
+	if aim_point != null:
+		tgt = aim_point
+	# 1) 上半身與頭先跟著俯仰——會動到肩膀位置，故必須排在算抵肩點之前
+	var eye := global_position + Vector3.UP * 1.45
+	var pitch: float = asin(clampf((tgt - eye).normalized().y, -1.0, 1.0))
+	var right := global_basis.x.normalized()
+	_rig.add_world_rotation("Chest", right, -pitch * 0.45)
+	_rig.add_world_rotation("Head", right, -pitch * 0.40)
+	# 2) 槍：槍托抵右肩窩、槍口指向目標
+	var pocket: Vector3 = (sk.global_transform * sk.get_bone_global_pose(si).origin) - Vector3.UP * 0.06
+	var aim: Vector3 = (tgt - pocket).normalized()
+	var up_ref := Vector3.UP
+	if absf(aim.dot(up_ref)) > 0.97:
+		up_ref = facing_dir()                    # 目標近乎正上/正下時叉積會退化
+	var z_axis := aim.cross(up_ref).normalized()
+	var y_axis := z_axis.cross(aim).normalized()
+	var b := Basis(aim * _gun_len_scale, y_axis * _gun_len_scale, z_axis * _gun_len_scale)
+	var xf := Transform3D(b, pocket + aim * 0.02 - b * _gun_stock)
+	# 3) 兩手抓上槍（右手握把、左手前護木）＋手指握攏
+	_rig.ik_reach("UpperArm.R", "LowerArm.R", "Wrist.R", xf * _gun_grip)
+	_rig.ik_reach("UpperArm.L", "LowerArm.L", "Wrist.L", xf * _gun_fore)
+	_rig.curl_fingers(".R", 0, 55.0, 35.0)
+	_rig.curl_fingers(".L", 0, 55.0, 35.0)
+	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
+	_gun_node.global_transform = xf
+
+var _in_pose := false          # skeleton_updated 內改骨骼會再觸發信號，需防遞迴
+func _on_skeleton_updated() -> void:
+	if _in_pose:
+		return
+	_in_pose = true
+	_aim_pose()
+	_in_pose = false
