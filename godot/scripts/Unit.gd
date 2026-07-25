@@ -73,6 +73,7 @@ var _model: Node3D = null
 var _gun_node: Node3D = null
 var _gun_mount: Node3D = null
 var _gun_fixed := false
+var _gun_fix_wait := 0        # 等動畫姿勢真的套上骨骼再校正（同幀 advance 讀不到新姿勢）
 var _gun_pos := Vector3.ZERO
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
 var _model_base_y := 0.0
@@ -258,19 +259,46 @@ func _tint(model: Node, tint: Color, strength: float) -> void:
 				dup.albedo_color = dup.albedo_color.lerp(tint, strength)
 				mi.set_surface_override_material(si, dup)
 
-# 武器揹背（2026-07-24 使用者：手持會懸空很假）：通用模型待機手不握槍，故改揹背。
-# 掛在 Unit 本體固定位置(不依賴各模型不一致的骨骼慣例)，斜掛右肩後方，槍口朝右上。
+# 武器改回「握在手裡」（2026-07-25）：揹背只是繞過掛點縮放暴衝，並非修好。
+# 真因：BoneAttachment3D 的世界縮放非 1（此類模型為 100 倍），不補償就會把槍放大成巨牆。
+# 現改為掛右手腕骨 + 縮放補償 + 依網格實際尺寸自動校正握把，武器才真的在手上。
+# 兵種若有真實武器模型就用，沒有的沿用程式生成外形（機槍/火箭筒/迫砲/防空）。
+const WEAPON_MODEL := {
+	"rifleman": ["res://assets/models/weapons/AssaultRifle_1.obj", 0.90],
+	"sniper": ["res://assets/models/weapons/SniperRifle_1.obj", 1.25],
+	"specops": ["res://assets/models/weapons/SubmachineGun_1.obj", 0.62],
+	"assault": ["res://assets/models/weapons/Shotgun_1.obj", 0.95],
+	"engineer": ["res://assets/models/weapons/Pistol_1.obj", 0.22],
+}
+const HAND_BONES := ["Wrist.R", "Hand.R", "hand_r"]
+
 func _attach_weapon(model: Node, p_cls: String) -> void:
-	var mount := Node3D.new()
+	var sks := model.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk := sks[0] as Skeleton3D
+	var bone := ""
+	for b in HAND_BONES:
+		if sk.find_bone(b) >= 0:
+			bone = b
+			break
+	if bone == "":
+		return
+	var mount := BoneAttachment3D.new()
 	mount.name = "WeaponMount"
-	add_child(mount)
-	mount.position = Vector3(0.16, 1.18, -0.14)      # 右肩後
-	mount.rotation_degrees = Vector3(-18, 20, 58)     # 斜揹
-	var gun := _make_gun(p_cls)
+	mount.bone_name = bone
+	sk.add_child(mount)
+	var gun: Node3D
+	if WEAPON_MODEL.has(p_cls):
+		var mi := MeshInstance3D.new()
+		mi.mesh = load(WEAPON_MODEL[p_cls][0])
+		gun = mi
+	else:
+		gun = _make_gun(p_cls)
 	mount.add_child(gun)
 	_gun_node = gun
 	_gun_mount = mount
-	_gun_fixed = true          # 揹背固定掛法不需骨骼縮放補償
+	_gun_fixed = false         # 交由 _fix_gun_scale 在進場景樹後補償縮放
 
 func _mat(col: Color, metal: float, rough: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -371,9 +399,19 @@ func _map_anims() -> void:
 	if anim == null: return
 	var have := anim.get_animation_list()
 	for key in RX_MAP.keys():
-		if Q_MAP.has(key) and have.has(Q_MAP[key]):
-			anim_names[key] = Q_MAP[key]
-			continue
+		# ⚠ 部分模型(如 soldier.glb)片段名帶 "CharacterArmature|" 前綴，
+		# 只做等值比對會失敗→退回 regex 抓到空手的 "Idle"，角色就變成垂手站著、槍飄在旁邊。
+		# 故一律比對「| 之後的片段名」。
+		if Q_MAP.has(key):
+			var want: String = Q_MAP[key]
+			var hit := ""
+			for n in have:
+				if n == want or n.substr(n.rfind("|") + 1) == want:
+					hit = n
+					break
+			if hit != "":
+				anim_names[key] = hit
+				continue
 		var rx := RegEx.new()
 		rx.compile(RX_MAP[key])
 		for n in have:
@@ -466,22 +504,40 @@ func _face_towards(p: Vector3, k: float) -> void:
 # 槍械尺度補償：BoneAttachment 的世界縮放要等節點進場景樹才算得準
 # （soldier.glb 掛點世界縮放極大，不補償這把 0.5m 的槍會變成 80+ 公尺長條＝「灰色巨牆」）。
 func _fix_gun_scale() -> void:
-	return   # 揹背固定掛法：不需骨骼縮放/朝向補償
+	# 只校正一次：校正後槍即自然跟隨手骨擺動。
+	# 若每幀重算會把槍鎖成永遠水平朝前，走路時手在擺、槍不動，反而脫節。
+	if _gun_fixed or _gun_mount == null or _gun_node == null:
+		return
 	if not is_inside_tree() or not _gun_mount.is_inside_tree():
 		return
 	_gun_fixed = true
-	# 動態對齊：讀「手腕在模型空間的朝向」反算，使槍口(+Z)朝角色正前、瞄具(+Y)朝上，
+	# ⚠ 校正必須在「瞄準姿勢」下做，不能用第一幀的垂手靜止姿：
+	#   校正完槍就固定跟著手骨走，若基準是垂手姿，動畫把手抬起來時槍口會跟著翹上天。
+	if _gun_fix_wait < 6:
+		_gun_fix_wait += 1
+		_gun_fixed = false
+		return
+	# 動態對齊：讀「手腕在模型空間的朝向」反算，使槍口朝角色正前、瞄具朝上，
 	# 不論模型/動畫幀差異都成立（治火箭筒指天、狙擊槍穿身）。
-	var mdl: Node3D = _model if _model else self
-	var wrist := (mdl.global_transform.affine_inverse() * _gun_mount.global_transform).basis.orthonormalized()
-	# 槍口對齊角色正前（+Z）、瞄具朝上；不論模型/動畫手部姿勢差異都成立
-	var rot := Basis.looking_at(Vector3(0, 0, 1), Vector3(0, 1, 0))
-	rot = wrist.inverse() * rot
+	# 以 Unit 本體為參考（_model 內部另有正面軸校正，拿它當基準會對錯方向）
+	var wrist := (global_transform.affine_inverse() * _gun_mount.global_transform).basis.orthonormalized()
 	var ws := _gun_mount.global_transform.basis.get_scale()
 	var s: float = (absf(ws.x) + absf(ws.y) + absf(ws.z)) / 3.0
 	if s < 0.0001:
 		s = 1.0
-	_gun_node.transform = Transform3D(rot.scaled(Vector3.ONE / s), _gun_pos / s)
+	var desired := Basis.IDENTITY     # 程式生成的武器：槍口已是 +Z
+	var scale_f := 1.0
+	var grip := Vector3.ZERO
+	if _gun_node is MeshInstance3D and WEAPON_MODEL.has(cls):
+		var ab: AABB = (_gun_node as MeshInstance3D).get_aabb()
+		var raw: float = ab.size.x
+		if raw > 0.0001:
+			scale_f = float(WEAPON_MODEL[cls][1]) / raw   # 依真實槍長換算，各槍網格尺寸不一
+		desired = Basis(Vector3(0, 0, 1), Vector3(0, 1, 0), Vector3(-1, 0, 0))   # 槍管 +X → 角色正前 +Z
+		# 握把柄：槍身後端往前 30%、下緣往上 46%（取槍管中線會讓槍浮在手掌上方）
+		grip = Vector3(ab.position.x + 0.30 * raw, ab.position.y + 0.46 * ab.size.y, ab.get_center().z)
+	var b := (wrist.inverse() * desired).scaled(Vector3.ONE * (scale_f / s))
+	_gun_node.transform = Transform3D(b, -(b * grip))
 
 # 蹲姿：Quaternius 動畫組沒有 crouch，故以「壓低身體＋前傾」模擬躲在掩體後。
 # 移動中一律站起（跑步蹲著不合理）。

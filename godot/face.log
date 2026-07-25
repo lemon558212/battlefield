@@ -1,0 +1,14 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 596.21 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+ERROR: Node not inside tree. Use look_at_from_position() instead.
+   at: look_at (scene/3d/node_3d.cpp:1253)
+   GDScript backtrace (most recent call first):
+       [0] _ready (res://scripts/FacingTest.gd:36)
+[anim] sniper idle=Idle_Gun_Pointing aim=Idle_Gun_Pointing shoot=Gun_Shoot
+[face] posX_紅 pos=(1.313995, 0.0, 0.0) rotY_deg=89.8445337385903
+[face] negX_橙 pos=(-0.763338, 0.0, 0.0) rotY_deg=-88.5289505119867
+[face] posZ_藍 pos=(0.0, 0.0, 0.8512) rotY_deg=-1.0756808361349
+[face] negZ_青 pos=(0.0, 0.0, -0.763587) rotY_deg=-178.456136369723
+[face] DONE
