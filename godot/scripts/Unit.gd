@@ -126,6 +126,9 @@ const RECOIL_DECAY := 5.5
 var _reload_at := 0.0        # >0＝這個時間點該接換彈動作
 const LEG_AXIS := 0      # 這具骨架的膝蓋彎曲軸（三軸掃描驗得）
 var _gun_pos := Vector3.ZERO
+# 移動速度倍率：敵方階段用來加速「玩家根本看不到」的行軍段，免得每回合空等。
+# 看得見的敵人一律 1.0——那段是玩家要看的（也是迎擊發生的地方）。
+var speed_mul := 1.0
 var want_prone := false        # 趴姿：全身伏地出槍（狙擊/壓制用）
 var _prone := 0.0
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
@@ -755,9 +758,11 @@ func _process(delta: float) -> void:
 		if ang > 0.6:
 			_play("idle")        # 還沒轉正：原地轉身
 		else:
-			global_position += d.normalized() * (WALK_SPEED * (0.45 if _crouch > 0.5 else 1.0)) * delta
+			global_position += d.normalized() * (WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul)) * delta
 			if _crouch > 0.5 and anim_names.has("crouch_walk"):
 				_play("crouch_walk")              # 蹲行：掩體後移動不站起來
+			elif speed_mul > 1.5 and anim_names.has("sprint"):
+				_play("sprint")                   # 加速行軍用衝刺動作，腳步才跟得上速度
 			else:
 				_play("run" if anim_names.has("run") else "walk")
 	elif want_cover and anim_names.has("crouch"):

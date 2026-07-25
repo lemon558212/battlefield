@@ -58,6 +58,9 @@ const AP_DECAY := 0.7      # 同一單位第 N 次下令：AP 上限 = 滿 AP ×
 var acting = null          # 目前在行動模式的單位（null＝指令模式）
 var _act_last := Vector3.ZERO   # 上一幀位置，用來扣 AP
 var _ap_ring: MeshInstance3D = null
+var enemy_cp := 0          # 敵方階段的 CP 池（與我方同公式）
+var _ai_state := ""        # ""＝待派下一個單位；"move"＝移動中；"fire"＝已開火收尾
+var _ai_t := 0.0           # 每個敵方行動的逾時保險，避免卡住整場
 var budget_left := 0
 var _tracers: Array = []
 var _enemy_queue: Array = []
@@ -431,6 +434,31 @@ func _selftest() -> void:
 				_covers = keep
 				print("[alertchk] 建築擋視線 穿越=%s 繞過=%s %s" % [thru, side_ok,
 						"OK" if (thru and side_ok) else "FAIL"])
+		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
+		var epos := {}
+		for x in units:
+			if x["alive"] and x["side"] != player_side:
+				epos[x["node"]] = x["node"].global_position
+		var t_start := Time.get_ticks_msec()
+		_end_player_turn()
+		var cp_start: int = enemy_cp
+		var guard := 0
+		while st == St.ENEMY and guard < 300:
+			await get_tree().create_timer(0.2).timeout
+			guard += 1
+			if guard == 10:
+				await _snap("res://ai_turn.png")     # 敵方階段實拍：AI 是走過來的，不是瞬移
+		var secs: float = (Time.get_ticks_msec() - t_start) / 1000.0
+		var moved_n := 0
+		for k in epos.keys():
+			if is_instance_valid(k) and k.global_position.distance_to(epos[k]) > 0.5:
+				moved_n += 1
+		print("[aichk] 敵方 CP 起始=%d 剩餘=%d %s" % [cp_start, enemy_cp,
+				"OK" if enemy_cp < cp_start else "FAIL(沒花 CP)"])
+		print("[aichk] 敵方單位真的移動 %d 個 %s" % [moved_n, "OK" if moved_n > 0 else "FAIL"])
+		print("[aichk] 敵方階段結束回到指令模式 st=%d 耗時=%.1fs %s" % [st, secs,
+				"OK" if st == St.CMD else "FAIL(卡在敵方階段)"])
+		print("[aichk] 新回合 CP=%d 回合數=%d %s" % [cp, turn, "OK" if cp == _turn_cp() and turn == 2 else "FAIL"])
 		# I) 受擊與陣亡：換骨架後這兩支動作也全部改走重定向，不驗等於沒換完
 		#    （判斷用頭部高度：站著約 1.5m，倒地應明顯下降）
 		var head_up: float = u3._rig.bone_pos("Head").y - u3.global_position.y
@@ -654,11 +682,15 @@ func _order_cost(u) -> int:
 # 進入行動模式：扣 CP、依下令次數遞減 AP 上限
 func _begin_action(u) -> bool:
 	var cost := _order_cost(u)
-	if cp < cost or not u["alive"]:
+	var pool: int = cp if u["side"] == player_side else enemy_cp
+	if pool < cost or not u["alive"]:
 		return false
 	if acting != null and acting != u:
 		_end_action()
-	cp -= cost
+	if u["side"] == player_side:
+		cp -= cost
+	else:
+		enemy_cp -= cost
 	u["orders"] = int(u.get("orders", 0)) + 1
 	var full: float = float(GameData.class_base.get(u["cls"], {}).get("ap", 150))
 	u["ap"] = full * pow(AP_DECAY, u["orders"] - 1)
@@ -666,9 +698,10 @@ func _begin_action(u) -> bool:
 	u["fired"] = false
 	acting = u
 	_act_last = u["node"].global_position
-	ui.update_hud(turn, "player", cp)
-	ui.show_ap(u["ap"], u["ap_max"])
-	_update_ap_ring()
+	if u["side"] == player_side:
+		ui.update_hud(turn, "player", cp)
+		ui.show_ap(u["ap"], u["ap_max"])
+		_update_ap_ring()
 	return true
 
 # 結束行動：單位進入警戒狀態（GDD/01 §2 最後一條）
@@ -992,8 +1025,26 @@ func _end_player_turn() -> void:
 	for u in units:
 		if u["alive"] and u["side"] != player_side:
 			_enemy_queue.append(u)
+	# 先動離我方最近的：那才是真的有威脅的單位（也讓玩家的迎擊有事可做）
+	_enemy_queue.sort_custom(func(a, b): return _dist_to_nearest_foe(a) < _dist_to_nearest_foe(b))
+	enemy_cp = _enemy_turn_cp()
+	_ai_state = ""
 	_enemy_t = 0.6
-	ui.update_hud(turn, "enemy", 0)
+	ui.update_hud(turn, "enemy", enemy_cp)
+
+func _dist_to_nearest_foe(u) -> float:
+	var best := 1e9
+	for x in units:
+		if x["alive"] and x["side"] != u["side"]:
+			best = minf(best, Vector2(x["wx"] - u["wx"], x["wy"] - u["wy"]).length())
+	return best
+
+func _enemy_turn_cp() -> int:
+	var tanks := 0
+	for u in units:
+		if u["alive"] and u["side"] != player_side and u["cls"] == "tank":
+			tanks += 1
+	return mini(CP_BASE + tanks, CP_CAP)
 
 func _process(delta: float) -> void:
 	for tr in _tracers.duplicate():
@@ -1006,17 +1057,20 @@ func _process(delta: float) -> void:
 	_intercept_tick(delta)
 	if st == St.ENEMY:
 		_enemy_t -= delta
+		_ai_t += delta
 		if _enemy_t <= 0:
 			_enemy_step()
-			_enemy_t = 1.1
+			_enemy_t = 0.25
 
 # 行動模式每幀：依實際移動距離扣 AP，歸零就停下（GDD/01 §2：不可殘留走不了的尾數）
+# 敵我共用同一套扣法——AI 若不吃 AP，玩家受限而敵人不受，那才是真的不公平。
 func _action_tick(_delta: float) -> void:
-	if acting == null or st != St.CMD:
+	if acting == null or (st != St.CMD and st != St.ENEMY):
 		return
 	if not is_instance_valid(acting["node"]) or not acting["alive"]:
 		_end_action()
 		return
+	var mine: bool = acting["side"] == player_side
 	var pos: Vector3 = acting["node"].global_position
 	var moved: float = Vector2(pos.x - _act_last.x, pos.z - _act_last.z).length()
 	_act_last = pos
@@ -1027,48 +1081,104 @@ func _action_tick(_delta: float) -> void:
 		acting["wy"] = p.y
 		if acting["ap"] <= 0.0:
 			acting["node"].stop()
-			ui.flash_msg("AP 用盡", Color(1.0, 0.8, 0.4))
-		ui.show_ap(acting["ap"], acting["ap_max"])
-		_update_ap_ring()
+			if mine:
+				ui.flash_msg("AP 用盡", Color(1.0, 0.8, 0.4))
+		if mine:
+			ui.show_ap(acting["ap"], acting["ap_max"])
+			_update_ap_ring()
 
+# 敵方階段（AI09）：與玩家同一套行動經濟——花 CP 下令、移動吃 AP、每次行動開火一次。
+# 舊版是「每 1.1 秒把單位硬移 120px」，玩家受 AP 限制而敵人不受，且移動是瞬移不會被迎擊。
 func _enemy_step() -> void:
-	if _enemy_queue.is_empty():
-		# 敵回合結束
-		turn += 1
-		if turn > 30:
-			_win(1 - player_side, "防守方撐過 30 回合")
+	# A) 目前有單位在行動：等它走完/AP 用盡 → 開火 → 收尾
+	if acting != null and acting["side"] != player_side:
+		if not acting["alive"]:
+			_finish_enemy_action()
 			return
-		st = St.CMD
-		cp = _turn_cp()
-		for u in units:
-			u["acted"] = false
-			u["orders"] = 0
-		ui.update_hud(turn, "player", cp)
+		var tgt = _nearest_foe(acting)
+		var moving: bool = acting["node"].is_moving()
+		if _ai_state == "move":
+			var stalled: bool = (not moving) or float(acting["ap"]) <= 0.0
+			if stalled or _ai_t > 12.0:
+				_ai_state = "fire"
+				if tgt != null and not bool(acting.get("fired", false)):
+					var d: float = Vector2(tgt["wx"] - acting["wx"], tgt["wy"] - acting["wy"]).length()
+					if d <= float(acting["weapon"].get("range", 200)) and _los_clear(_live_px(acting), _live_px(tgt)):
+						_fire(acting, tgt)
+						_enemy_t = 1.0        # 等開火動作演完再收尾
+						return
+				_finish_enemy_action()
+		else:
+			_finish_enemy_action()
 		return
-	var e = _enemy_queue.pop_front()
-	if not e["alive"]:
+	# B) 沒單位在行動：派下一個（CP 不足或沒兵可派就結束敵方階段）
+	while not _enemy_queue.is_empty():
+		var e = _enemy_queue.pop_front()
+		if not e["alive"] or not is_instance_valid(e["node"]):
+			continue
+		if not _begin_action(e):
+			break                      # CP 不夠了
+		var tgt2 = _nearest_foe(e)
+		if tgt2 == null:
+			_finish_enemy_action()
+			continue
+		# 只跟拍「玩家看得見」的敵人：跟著迷霧裡的單位＝整段盯著空草地看（實拍發現）
+		if e["node"].visible:
+			cam.set_follow(e["node"])
+		else:
+			cam.set_follow(null)
+		ui.update_hud(turn, "enemy", enemy_cp)
+		# 玩家看不見的敵人加速行軍：整場敵方階段實測 21.5 秒太久，
+		# 但看得見的那段不能加速——那正是玩家要看、也是迎擊發生的地方。
+		e["node"].speed_mul = 1.0 if e["node"].visible else 3.0
+		_ai_state = "move"
+		_ai_t = 0.0
+		# 目標點：推進到「射程 0.7 倍」處，並受剩餘 AP 限制（GDD/09：推進到射程內再開火）
+		var here: Vector3 = e["node"].global_position
+		var to_t: Vector3 = tgt2["node"].global_position - here
+		to_t.y = 0.0
+		var want: float = float(e["weapon"].get("range", 200)) * 0.7 * WORLD_SCALE
+		var step: float = maxf(to_t.length() - want, 0.0)
+		var reach: float = _ap_metres(e)
+		if step <= 0.05:
+			_ai_state = "fire"         # 已在射程內：原地開火
+			_enemy_t = 0.4
+			return
+		e["node"].move_to(here + to_t.normalized() * minf(step, reach))
+		_enemy_t = 0.3
 		return
-	# 找最近我方 → 可見則跟拍 + 開槍，否則移動靠近
+	_end_enemy_turn()
+
+func _nearest_foe(u):
 	var tgt = null
 	var td := 1e9
-	for u in units:
-		if u["side"] == player_side and u["alive"]:
-			var d := Vector2(u["wx"] - e["wx"], u["wy"] - e["wy"]).length()
+	for x in units:
+		if x["side"] != u["side"] and x["alive"]:
+			var d := Vector2(x["wx"] - u["wx"], x["wy"] - u["wy"]).length()
 			if d < td:
 				td = d
-				tgt = u
-	if tgt == null:
+				tgt = x
+	return tgt
+
+func _finish_enemy_action() -> void:
+	if acting != null and is_instance_valid(acting["node"]):
+		acting["node"].speed_mul = 1.0
+	_end_action()
+	_ai_state = ""
+	_enemy_t = 0.35
+
+func _end_enemy_turn() -> void:
+	_end_action()
+	turn += 1
+	if turn > 30:
+		_win(1 - player_side, "防守方撐過 30 回合")
 		return
-	cam.set_follow(e["node"])
-	if td <= e["weapon"].get("range", 200):
-		_fire(e, tgt)
-	else:
-		var dirp := Vector2(tgt["wx"] - e["wx"], tgt["wy"] - e["wy"]).normalized() * 120.0
-		e["wx"] += dirp.x
-		e["wy"] += dirp.y
-		e["node"].move_to(_to3d(e["wx"], e["wy"]))
-		_update_cover_state(e)
-		_refresh_visibility()
+	st = St.CMD
+	cp = _turn_cp()
+	for u in units:
+		u["acted"] = false
+		u["orders"] = 0
+	ui.update_hud(turn, "player", cp)
 
 # ---------- 警戒射擊（GDD/01 §3：本作靈魂，不可閹割） ----------
 # 敵單位「移動中」會被我方警戒單位自動射擊；傷害減半、不消耗 CP、不算該單位已行動。
