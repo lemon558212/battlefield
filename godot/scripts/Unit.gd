@@ -6,6 +6,8 @@ class_name Unit
 extends Node3D
 
 signal shot_fired(from_pos: Vector3, to_pos: Vector3)
+# 抵達目的地：Main 要靠這個重算掩體狀態，否則玩家移動到掩體後不會自動蹲下
+signal arrived
 
 # 賽璐璐描邊（往鳴潮卡通渲染靠）：背面沿法線外擴、只塗深色，形成輪廓線。
 const OUTLINE_SHADER := """
@@ -58,7 +60,17 @@ const UAL_MAP := {
 	"aim": "Pistol_Aim_Neutral", "shoot": "Pistol_Shoot", "run_shoot": "Jog_Fwd",
 	"hit": "Hit_Chest", "death": "Death01", "wave": "Interact",
 	"crouch": "Crouch_Idle", "crouch_walk": "Crouch_Fwd", "reload": "Pistol_Reload",
+	# 2026-07-25 補齊全動作：長距離衝刺、工兵修理/治療、佔領據點、赤手待機
+	"sprint": "Sprint", "fix": "Fixing_Kneeling", "capture": "Interact", "idle_relaxed": "Idle",
 }
+# 雙手 IK 會把手鎖在槍上，其他動作全被鎖死看不出來，故分兩級放手：
+# 雙手全放（槍留在右手掛點上，動畫怎麼擺就怎麼擺）
+const FREEHAND_STATES := ["fix", "capture", "idle_relaxed", "death"]
+# 只放左手：右手仍握著槍、槍維持低姿預備，左手去拿彈匣／護住傷處——
+# 換彈若雙手全放，長槍會被舉成一根直挺挺的旗杆（2026-07-25 實拍發現）。
+const LEFTHAND_FREE := ["reload", "hit"]
+# 會循環播放的動作（其餘播一次就回 idle）
+const LOOP_KEYS := ["idle", "idle_relaxed", "walk", "run", "sprint", "aim", "crouch", "crouch_walk", "fix"]
 
 const RX_MAP := {
 	"idle": "(?i)idle", "walk": "(?i)walk", "run": "(?i)^run$|running",
@@ -105,6 +117,13 @@ const CROUCH_BACK := 0.05    # 髖部同時後移（少了這個會變成坐椅�
 const STANCE_W := 0.16       # 雙腳站距（半寬）   # 蹲下時身體下沉高度
 const ANKLE_H := 0.08        # 腳踝骨離地高度
 const PRONE_H := 0.26        # 趴姿時髖部離地高度（人趴著髖部大約在這個高度）
+const CROUCH_WALK_MAX := 4.0 # 掩體區內移動幾公尺以內用蹲行（再遠就站起來跑）
+const SHOTS_PER_MAG := 3     # 打幾發換一次彈匣
+var _shots := 0
+# 後座力：雙手被 IK 鎖在槍上，射擊動作本身幾乎看不出來——不加這個「開槍」在畫面上是無聲無息的
+var _recoil := 0.0
+const RECOIL_DECAY := 5.5
+var _reload_at := 0.0        # >0＝這個時間點該接換彈動作
 const LEG_AXIS := 0      # 這具骨架的膝蓋彎曲軸（三軸掃描驗得）
 var _gun_pos := Vector3.ZERO
 var want_prone := false        # 趴姿：全身伏地出槍（狙擊/壓制用）
@@ -561,11 +580,19 @@ func _play(key: String, blend := 0.2) -> void:
 	if anim == null or not anim_names.has(key): return
 	if _state == key and anim.is_playing(): return
 	var clip: String = anim_names[key]
-	if key in ["idle", "walk", "run", "aim"]:
+	if key in LOOP_KEYS:
 		var a := anim.get_animation(clip)
 		if a: a.loop_mode = Animation.LOOP_LINEAR
 	anim.play(clip, blend)
 	_state = key
+
+# 一次性動作（工兵修理/治療、佔領據點…）：播完之前不會被待機狀態蓋掉。
+# ⚠ 直接呼叫 _play 沒用——_process 每幀都會把 shoot/hit/crouch/空 狀態打回 idle。
+func perform(key: String, hold := 0.0) -> void:
+	if _dead or not anim_names.has(key):
+		return
+	_play(key, 0.15)
+	_busy_until = Time.get_ticks_msec() / 1000.0 + (hold if hold > 0.0 else maxf(0.6, _clip_len(key)))
 
 # 立即中止移動/射擊（到位後擺蹲姿、或被打斷時用）
 func stop() -> void:
@@ -579,6 +606,7 @@ func is_moving() -> bool:
 func move_to(p: Vector3) -> void:
 	if _dead: return
 	_shoot_target = null
+	_busy_until = 0.0        # 移動命令要能打斷修理/佔領這類一次性動作，否則玩家點了不動
 	_move_target = Vector3(p.x, 0.0, p.z)
 
 func shoot_at(target: Unit) -> void:
@@ -657,7 +685,10 @@ func _update_crouch(delta: float) -> void:
 		return
 	var ptarget: float = 1.0 if (want_prone and not _dead and _move_target == null) else 0.0
 	_prone = move_toward(_prone, ptarget, delta * 2.4)
-	var target: float = 0.0 if _prone > 0.01 else (1.0 if (want_cover and not _dead and _move_target == null) else 0.0)
+	# 掩體區內小幅移動＝蹲行（真人在掩體後不會站起來走）；長距離移動才站起來跑。
+	var short_hop: bool = _move_target != null and global_position.distance_to(_move_target) < CROUCH_WALK_MAX
+	var stay_low: bool = want_cover and not _dead and (_move_target == null or short_hop)
+	var target: float = 0.0 if _prone > 0.01 else (1.0 if stay_low else 0.0)
 	_crouch = move_toward(_crouch, target, delta * 3.2)
 	# ⚠ 這裡只更新混合值，不碰模型位置/旋轉。
 	# 姿勢與貼地一律由 _aim_pose（骨架更新後）負責——兩邊都寫會互相抵銷，
@@ -673,6 +704,7 @@ func _process(delta: float) -> void:
 	# 所以姿勢必須由這裡主動驅動（也不會與任何動畫打架，因為根本沒有）。
 	if _retarget:
 		_on_skeleton_updated()
+	_recoil = maxf(0.0, _recoil - delta * RECOIL_DECAY)
 	_update_crouch(delta)
 	if _dead:
 		_die_fade -= delta
@@ -690,6 +722,10 @@ func _process(delta: float) -> void:
 		if _shoot_timer <= 0.0:
 			_play("shoot", 0.05)
 			_busy_until = now + max(0.5, _clip_len("shoot"))
+			_shots += 1
+			if _shots % SHOTS_PER_MAG == 0:
+				_reload_at = _busy_until          # 這一發打完接著換彈匣
+			_recoil = 1.0
 			shot_fired.emit(global_position + Vector3(0, 1.35, 0),
 					_shoot_target.global_position + Vector3(0, 1.2, 0))
 			_shoot_target = null
@@ -697,12 +733,20 @@ func _process(delta: float) -> void:
 		return
 	if now < _busy_until:
 		return
+	# 換彈：射擊動作播完才接，否則會蓋掉開槍那一下
+	if _reload_at > 0.0 and now >= _reload_at:
+		_reload_at = 0.0
+		if anim_names.has("reload"):
+			_play("reload", 0.12)
+			_busy_until = now + max(0.6, _clip_len("reload"))
+			return
 	if _move_target != null:
 		var d: Vector3 = _move_target - global_position
 		d.y = 0.0
 		if d.length() < 0.15:
 			_move_target = null
 			_play("idle")
+			arrived.emit()
 			return
 		# VC 做法：先轉身面向目標，面向差太大時原地轉身不前進（治「面向一個方向跑」）
 		var target_yaw := atan2(d.x, d.z)
@@ -711,8 +755,11 @@ func _process(delta: float) -> void:
 		if ang > 0.6:
 			_play("idle")        # 還沒轉正：原地轉身
 		else:
-			global_position += d.normalized() * WALK_SPEED * delta
-			_play("run" if anim_names.has("run") else "walk")
+			global_position += d.normalized() * (WALK_SPEED * (0.45 if _crouch > 0.5 else 1.0)) * delta
+			if _crouch > 0.5 and anim_names.has("crouch_walk"):
+				_play("crouch_walk")              # 蹲行：掩體後移動不站起來
+			else:
+				_play("run" if anim_names.has("run") else "walk")
 	elif want_cover and anim_names.has("crouch"):
 		_play("crouch")   # 有真人蹲姿動作（UAL Crouch_Idle 重定向）就直接播，不再用幾何硬湊
 	elif _state == "shoot" or _state == "" or _state == "hit" or _state == "crouch":
@@ -786,15 +833,21 @@ func _aim_pose() -> void:
 		if ankle != Vector3.ZERO:
 			var drop: float = ankle.y - (global_position.y + ANKLE_H)
 			_model.position.y = clampf(_model.position.y - drop, _model_base_y - 1.0, _model_base_y + 0.1)
-	_aiming = (not _dead) and _move_target == null
+	# 移動中改「低姿預備」而不是放掉槍：原本一移動就還原成掛在手上，
+	# 結果是空手跑步動畫＋一把槍飄在手邊，長槍單手拎著跑非常假（2026-07-25 補齊全動作）。
+	# 真實做法＝上半身覆蓋：雙手仍持槍、槍口略朝下前方，腿部照跑步動畫走。
+	_aiming = (not _dead) and not (_state in FREEHAND_STATES)
 	if not _aiming:
-		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
+		_stow_gun(sk)        # 雙手要做別的事：把槍斜背到背上（不然長槍會插進地面）
 		return
 	var si := sk.find_bone("Shoulder.R")
 	if si < 0:
 		return
+	var moving: bool = _move_target != null or (_state in LEFTHAND_FREE)
 	var tgt: Vector3 = global_position + facing_dir() * 8.0 + Vector3.UP * 1.2
-	if aim_point != null:
+	if moving:
+		tgt = global_position + facing_dir() * 5.0 + Vector3.UP * 0.35   # 低姿預備：槍口略朝下
+	elif aim_point != null:
 		tgt = aim_point
 	var right := global_basis.x.normalized()
 	# 0) 蹲姿是真人「低姿潛行」動作：上身前傾 35°、頭朝地面——戰鬥中看不到前方也架不了槍。
@@ -816,6 +869,10 @@ func _aim_pose() -> void:
 	var pocket: Vector3 = (sk.global_transform * sk.get_bone_global_pose(si).origin) \
 			- Vector3.UP * (0.06 + float(PROC_POCKET_DROP.get(cls, 0.0)))
 	var aim: Vector3 = (tgt - pocket).normalized()
+	if _recoil > 0.001:
+		aim = aim.rotated(right, -deg_to_rad(8.0) * _recoil).normalized()   # 槍口上跳
+		pocket -= aim * 0.06 * _recoil                                      # 槍身後退抵肩
+		_rig.add_world_rotation("Chest", right, -deg_to_rad(5.0) * _recoil) # 上身後仰一下
 	if PROC_POCKET_DROP.has(cls):
 		aim = facing_dir()      # 迫砲：砲管自帶仰角，方向只取水平，否則會被拉成平射
 	var up_ref := Vector3.UP
@@ -830,12 +887,30 @@ func _aim_pose() -> void:
 	var down := -Vector3.UP
 	var rightv := global_basis.x.normalized()
 	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.85 + rightv * 0.5).normalized())
-	_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
-	_rig.curl_fingers(".L", 0, 55.0, 35.0)
+	if not (_state in LEFTHAND_FREE):
+		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
+		_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf
 	_crouch_offset()
+
+# 收槍：斜背在背上。修理/佔領/赤手待機時雙手放開，槍若還掛在手腕上會垂直插進地面。
+func _stow_gun(sk: Skeleton3D) -> void:
+	var ci := sk.find_bone("Chest")
+	if ci < 0 or _gun_node == null:
+		return
+	var chest: Vector3 = sk.global_transform * sk.get_bone_global_pose(ci).origin
+	var fwd := facing_dir()
+	var rightv := global_basis.x.normalized()
+	var anchor: Vector3 = chest - fwd * 0.15 + Vector3.UP * 0.02
+	var axis: Vector3 = (Vector3.UP * 0.72 + rightv * 0.62).normalized()   # 槍口朝右上斜掛
+	var z_axis := axis.cross(fwd).normalized()
+	if z_axis.length() < 0.001:
+		return
+	var y_axis := z_axis.cross(axis).normalized()
+	var b := Basis(axis * _gun_len_scale, y_axis * _gun_len_scale, z_axis * _gun_len_scale) * _gun_axis_fix
+	_gun_node.global_transform = Transform3D(b, anchor - b * _gun_grip)
 
 var _in_pose := false          # skeleton_updated 內改骨骼會再觸發信號，需防遞迴
 func _on_skeleton_updated() -> void:

@@ -663,6 +663,9 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
 	node.shot_fired.connect(_on_shot)
+	# 抵達目的地才重算掩體：原本玩家移動後從沒更新過 cover，
+	# 走到沙包後面也不會蹲下、迎擊減傷也算不到（2026-07-25 補齊全動作時發現）。
+	node.arrived.connect(func(): _on_unit_arrived(node))
 	var cb: Dictionary = GameData.class_base.get(cls, {})
 	var chr: Dictionary = GameData.characters.get(cls, {}) if named else {}
 	var hp: int = cb.get("hp", 100)
@@ -1152,6 +1155,17 @@ func _fit_prop(node: Node3D, target_h: float) -> float:
 	return -ab.position.y * k
 
 # 依單位所在位置更新「是否躲掩體」（會擺蹲姿＋受掩體命中修正）
+# 單位走到定點：把邏輯座標對齊實際落點，再重算掩體/姿勢
+func _on_unit_arrived(node) -> void:
+	for u in units:
+		if u["node"] == node:
+			var p := _live_px(u)
+			u["wx"] = p.x
+			u["wy"] = p.y
+			_update_cover_state(u)
+			_refresh_visibility()
+			return
+
 func _update_cover_state(u) -> void:
 	var c := cover_here(u["wx"], u["wy"])
 	u["cover"] = c.get("type", "")
