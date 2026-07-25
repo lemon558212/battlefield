@@ -61,6 +61,8 @@ var _ap_ring: MeshInstance3D = null
 var enemy_cp := 0          # 敵方階段的 CP 池（與我方同公式）
 var _ai_state := ""        # ""＝待派下一個單位；"move"＝移動中；"fire"＝已開火收尾
 var _ai_t := 0.0           # 每個敵方行動的逾時保險，避免卡住整場
+var _ai_why := ""          # 這次行動的決策理由（QA 要驗 AI 有照 GDD 的狀態機走）
+var _ai_target = null
 var budget_left := 0
 var _tracers: Array = []
 var _enemy_queue: Array = []
@@ -434,6 +436,45 @@ func _selftest() -> void:
 				_covers = keep
 				print("[alertchk] 建築擋視線 穿越=%s 繞過=%s %s" % [thru, side_ok,
 						"OK" if (thru and side_ok) else "FAIL"])
+		# I-0) AI 決策狀態機（GDD/01 §6）：直接驗 _ai_plan 的判斷，純函式不受時序干擾
+		var ai_u = null
+		for x in units:
+			if x["alive"] and x["side"] != player_side:
+				ai_u = x
+				break
+		if ai_u != null:
+			var keep_cls: String = ai_u["cls"]
+			var keep_hp: float = ai_u["hp"]
+			var cases := [
+				["rifleman", 1.0, "推進到射程 0.6 倍"],
+				["rifleman", 0.2, "殘血撤退"],
+				["sniper", 1.0, "狙擊手找血最少的"],
+				["mg", 1.0, "機槍兵佔掩體警戒"],
+				["at", 1.0, "火箭兵"],
+			]
+			for c in cases:
+				ai_u["cls"] = c[0]
+				ai_u["hp"] = float(ai_u["maxhp"]) * float(c[1])
+				var pl := _ai_plan(ai_u)
+				print("[aiplanchk] %s hp=%d%% → %s %s" % [c[0], int(float(c[1]) * 100), pl["why"],
+						"OK" if str(pl["why"]).begins_with(str(c[2])) else "FAIL(應為 %s)" % c[2]])
+			ai_u["cls"] = keep_cls
+			ai_u["hp"] = keep_hp
+			# 狙擊手要挑血最少的：把某個我方單位打成殘血，看它會不會被指名
+			var weak = null
+			for x in units:
+				if x["alive"] and x["side"] == player_side:
+					weak = x
+			if weak != null:
+				var keep_w: float = weak["hp"]
+				weak["hp"] = 5.0
+				ai_u["cls"] = "sniper"
+				var pl2 := _ai_plan(ai_u)
+				print("[aiplanchk] 狙擊手指名血最少者 %s %s" % [
+						"是" if pl2["target"] == weak else "否",
+						"OK" if pl2["target"] == weak else "FAIL"])
+				weak["hp"] = keep_w
+				ai_u["cls"] = keep_cls
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -1025,8 +1066,14 @@ func _end_player_turn() -> void:
 	for u in units:
 		if u["alive"] and u["side"] != player_side:
 			_enemy_queue.append(u)
-	# 先動離我方最近的：那才是真的有威脅的單位（也讓玩家的迎擊有事可做）
-	_enemy_queue.sort_custom(func(a, b): return _dist_to_nearest_foe(a) < _dist_to_nearest_foe(b))
+	# 出手順序：先坦克、後步兵（GDD/01 §6），同類再依「離我方最近」排——
+	# 最近的先動才有威脅，玩家的迎擊也才有事做。
+	_enemy_queue.sort_custom(func(a, b):
+		var ta: bool = a["cls"] == "tank"
+		var tb: bool = b["cls"] == "tank"
+		if ta != tb:
+			return ta
+		return _dist_to_nearest_foe(a) < _dist_to_nearest_foe(b))
 	enemy_cp = _enemy_turn_cp()
 	_ai_state = ""
 	_enemy_t = 0.6
@@ -1095,7 +1142,7 @@ func _enemy_step() -> void:
 		if not acting["alive"]:
 			_finish_enemy_action()
 			return
-		var tgt = _nearest_foe(acting)
+		var tgt = _ai_target if (_ai_target != null and _ai_target["alive"]) else _nearest_foe(acting)
 		var moving: bool = acting["node"].is_moving()
 		if _ai_state == "move":
 			var stalled: bool = (not moving) or float(acting["ap"]) <= 0.0
@@ -1118,8 +1165,9 @@ func _enemy_step() -> void:
 			continue
 		if not _begin_action(e):
 			break                      # CP 不夠了
-		var tgt2 = _nearest_foe(e)
-		if tgt2 == null:
+		var plan := _ai_plan(e)
+		var tgt2 = plan["target"]
+		if tgt2 == null and plan["dest"] == null:
 			_finish_enemy_action()
 			continue
 		# 只跟拍「玩家看得見」的敵人：跟著迷霧裡的單位＝整段盯著空草地看（實拍發現）
@@ -1133,21 +1181,127 @@ func _enemy_step() -> void:
 		e["node"].speed_mul = 1.0 if e["node"].visible else 3.0
 		_ai_state = "move"
 		_ai_t = 0.0
-		# 目標點：推進到「射程 0.7 倍」處，並受剩餘 AP 限制（GDD/09：推進到射程內再開火）
+		_ai_why = str(plan["why"])
+		_ai_target = tgt2
+		# 目的地：職責行為指定的點（撤退/佔掩體）優先；否則推進到「射程 × range_k」處。
 		var here: Vector3 = e["node"].global_position
-		var to_t: Vector3 = tgt2["node"].global_position - here
-		to_t.y = 0.0
-		var want: float = float(e["weapon"].get("range", 200)) * 0.7 * WORLD_SCALE
-		var step: float = maxf(to_t.length() - want, 0.0)
+		var goal: Vector3
+		if plan["dest"] != null:
+			goal = plan["dest"]
+		else:
+			var to_t: Vector3 = tgt2["node"].global_position - here
+			to_t.y = 0.0
+			var want: float = float(e["weapon"].get("range", 200)) * float(plan["range_k"]) * WORLD_SCALE
+			goal = here + to_t.normalized() * maxf(to_t.length() - want, 0.0)
+		var move_v: Vector3 = goal - here
+		move_v.y = 0.0
 		var reach: float = _ap_metres(e)
-		if step <= 0.05:
-			_ai_state = "fire"         # 已在射程內：原地開火
+		if move_v.length() <= 0.35:
+			_ai_state = "fire"         # 已到位：原地開火
 			_enemy_t = 0.4
 			return
-		e["node"].move_to(here + to_t.normalized() * minf(step, reach))
+		e["node"].move_to(here + move_v.normalized() * minf(move_v.length(), reach))
 		_enemy_t = 0.3
 		return
 	_end_enemy_turn()
+
+# ---- 敵方 AI 狀態機（GDD/01 §6，禁止改成不可預測的隨機大雜燴）----
+# 每個單位依序評估，取第一個成立者：殘血撤退 → 職責行為 → 無目標推進主堡。
+# 回傳 {"target": 單位或 null, "range_k": 想推進到射程的幾倍, "dest": 指定目的地或 null, "why": 說明}
+func _ai_plan(e) -> Dictionary:
+	var hp_ratio: float = float(e["hp"]) / maxf(float(e["maxhp"]), 1.0)
+	var foes: Array = []
+	for x in units:
+		if x["alive"] and x["side"] != e["side"]:
+			foes.append(x)
+	# 1) 殘血撤退：往自家主堡方向退，並優先躲進掩體
+	if hp_ratio < 0.3:
+		return {"target": _nearest_foe(e), "range_k": 1.0, "dest": _retreat_dest(e), "why": "殘血撤退"}
+	if foes.is_empty():
+		return {"target": null, "range_k": 0.6, "dest": _base_dest(1 - e["side"]), "why": "無目標→推進主堡"}
+	# 2) 職責行為
+	match e["cls"]:
+		"at":
+			var tank = _pick_foe(foes, "tank", Vector2(float(e["wx"]), float(e["wy"])))
+			return {"target": tank if tank != null else _nearest_foe(e), "range_k": 0.6, "dest": null,
+					"why": "火箭兵找坦克" if tank != null else "火箭兵無坦克可打"}
+		"sniper":
+			return {"target": _pick_weakest(foes), "range_k": 0.9, "dest": null, "why": "狙擊手找血最少的"}
+		"mg":
+			# 機槍兵佔掩體警戒：不推進，就近找掩體站定，靠警戒射擊吃人
+			return {"target": _nearest_foe(e), "range_k": 1.0, "dest": _cover_dest(e), "why": "機槍兵佔掩體警戒"}
+		"tank":
+			return {"target": _pick_valuable(foes), "range_k": 0.6, "dest": null, "why": "坦克轟最高價值目標"}
+	return {"target": _nearest_foe(e), "range_k": 0.6, "dest": null, "why": "推進到射程 0.6 倍"}
+
+# 找最近的某兵種目標。⚠ 距離要從「發起者」量起，不是從 foes[0] 量（會挑錯人）。
+func _pick_foe(foes: Array, cls: String, from: Vector2):
+	var best = null
+	var bd := 1e9
+	for x in foes:
+		if x["cls"] != cls:
+			continue
+		var d: float = from.distance_to(Vector2(float(x["wx"]), float(x["wy"])))
+		if d < bd:
+			bd = d
+			best = x
+	return best
+
+func _pick_weakest(foes: Array):
+	var best = null
+	for x in foes:
+		if best == null or float(x["hp"]) < float(best["hp"]):
+			best = x
+	return best
+
+func _pick_valuable(foes: Array):
+	var best = null
+	var bv := -1.0
+	for x in foes:
+		var v: float = float(GameData.class_base.get(x["cls"], {}).get("cost", 50))
+		if v > bv:
+			bv = v
+			best = x
+	return best
+
+# 主堡座標（GDD/01 §7 勝利條件用的同一組資料）
+func _base_dest(side_i: int):
+	for b in map_data.get("bases", []):
+		if int(b.get("side", 0)) == side_i:
+			return _to3d(float(b.get("x", 0)), float(b.get("y", 0)))
+	var z: Dictionary = {}
+	var dz = map_data.get("deploy", [])
+	if dz is Array and dz.size() > side_i:
+		z = dz[side_i]
+	return _to3d(float(z.get("x", 0)) + float(z.get("w", 300)) * 0.5, float(z.get("y", 0)) + float(z.get("h", 200)) * 0.5)
+
+# 撤退點：往自家主堡方向，若沿途有掩體就先躲進掩體
+func _retreat_dest(e):
+	var home = _base_dest(e["side"])
+	var cover = _cover_dest(e)
+	if cover != null and (cover as Vector3).distance_to(home) < e["node"].global_position.distance_to(home):
+		return cover
+	return home
+
+# 就近掩體：站在掩體「背對敵人」那一側，才擋得住（掩體是方向性的）
+func _cover_dest(e):
+	var foe = _nearest_foe(e)
+	var here := Vector2(float(e["wx"]), float(e["wy"]))
+	var best = null
+	var bd := 1e9
+	for c in _covers:
+		if c["type"] == "bush":
+			continue
+		var cp := Vector2(float(c["wx"]), float(c["wy"]))
+		var d: float = here.distance_to(cp)
+		if d < bd and d < 600.0:
+			bd = d
+			var away := Vector2(1, 0)
+			if foe != null:
+				away = (cp - Vector2(float(foe["wx"]), float(foe["wy"]))).normalized()
+			var stand: Vector2 = cp + away * (float(c["r"]) * 0.75)
+			best = _to3d(stand.x, stand.y)
+	return best
 
 func _nearest_foe(u):
 	var tgt = null
