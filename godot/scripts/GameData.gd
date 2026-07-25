@@ -90,9 +90,20 @@ func hit_chance(shooter, target, dist_px: float) -> float:
 		c *= 1.0 - 0.45 * ((ratio - 0.5) / 0.5)
 	return clamp(c, 0.0, 0.99)
 
+# GDD/01 §4 剋制兩條（與 js/combat.js 同一套判斷，不另設倍率表）：
+#   ① 一般槍械打坦克固定 1 傷害（刮漆）
+#   ② 反裝甲武器（antiTank）打步兵傷害 ×0.6
+# 這兩條就是坦克存在的意義：步槍打不動它，但火箭兵能開罐頭。
 func damage(shooter, target) -> int:
 	var w: Dictionary = shooter.weapon
-	var eff: float = w.get("atk", 10)
+	var mult := 1.0
+	var anti: bool = bool(w.get("antiTank", false)) or bool(w.get("arc", false))
+	if target.cls == "tank":
+		if not anti:
+			return 1
+	elif bool(w.get("antiTank", false)):
+		mult = 0.6
+	var eff: float = float(w.get("atk", 10)) * mult
 	var deff: float = GameData.class_base.get(target.cls, {}).get("def", 0)
 	var dmg: float = eff * max(0.1, 1.0 - deff / max(1.0, eff) * 0.5)
 	return int(max(1, round(dmg)))

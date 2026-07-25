@@ -117,6 +117,8 @@ const CROUCH_BACK := 0.05    # 髖部同時後移（少了這個會變成坐椅�
 const STANCE_W := 0.16       # 雙腳站距（半寬）   # 蹲下時身體下沉高度
 const ANKLE_H := 0.08        # 腳踝骨離地高度
 const PRONE_H := 0.26        # 趴姿時髖部離地高度（人趴著髖部大約在這個高度）
+const VEH_SPEED := 4.2       # 履帶車速（比步兵快，但轉向慢）
+const VEH_TURN := 1.8        # 履帶車轉向速率（步兵 12，坦克要笨重）
 const CROUCH_WALK_MAX := 4.0 # 掩體區內移動幾公尺以內用蹲行（再遠就站起來跑）
 const SHOTS_PER_MAG := 3     # 打幾發換一次彈匣
 var _shots := 0
@@ -151,10 +153,19 @@ static func _forward_fix(model: Node) -> float:
 		return -PI / 2.0
 	return 0.0
 
+# 載具（履帶/艦艇/航空）走完全不同的分支：沒有骨架、沒有人形動畫、沒有持槍 IK。
+# 判斷讀 data/class_base.json 的 mobility，不寫死兵種名（鐵律 3）。
+static func is_vehicle_cls(c: String) -> bool:
+	return GameData.class_base.get(c, {}).get("mobility", "foot") in ["tracked", "naval", "air"]
+
 static func spawn(model_path: String, p_cls: String, p_side: int, is_player: bool) -> Unit:
 	var u := Unit.new()
 	u.cls = p_cls
 	u.side = p_side
+	if is_vehicle_cls(p_cls):
+		u._build_vehicle(p_cls, is_player)
+		u._add_ring_and_shadow(is_player, 2.9)   # 環要比車體寬才看得到（車寬 3.1m）
+		return u
 	var packed: PackedScene = null
 	if model_path != "" and ResourceLoader.exists(model_path):
 		packed = load(model_path)
@@ -180,23 +191,26 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 			u._map_anims()
 			u._strip_root_motion()
 		u._attach_weapon(model, p_cls)
-	# 腳下識別環
+	u._add_ring_and_shadow(is_player, 1.0)
+	return u
+
+# 腳下識別環＋接觸陰影（載具用同一套，只是放大）
+func _add_ring_and_shadow(is_player: bool, scale_k: float) -> void:
 	var ring := MeshInstance3D.new()
 	ring.name = "Ring"
 	var tor := TorusMesh.new()
-	tor.inner_radius = 0.62
-	tor.outer_radius = 0.72
+	tor.inner_radius = 0.62 * scale_k
+	tor.outer_radius = 0.72 * scale_k
 	ring.mesh = tor
 	ring.position.y = 0.06
 	var rm := StandardMaterial3D.new()
 	rm.albedo_color = Color(0.36, 0.61, 1.0) if is_player else Color(1.0, 0.36, 0.30)
 	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ring.material_override = rm
-	u.add_child(ring)
-	# 接觸陰影
+	add_child(ring)
 	var sh := MeshInstance3D.new()
 	var qm := QuadMesh.new()
-	qm.size = Vector2(1.4, 1.0)
+	qm.size = Vector2(1.4 * scale_k, 1.0 * scale_k)
 	sh.mesh = qm
 	sh.rotation_degrees.x = -90
 	sh.position.y = 0.04
@@ -205,8 +219,7 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 	shm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	shm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sh.material_override = shm
-	u.add_child(sh)
-	return u
+	add_child(sh)
 
 # 縮放到 1.8m。蒙皮網格的 get_aabb() 不可靠（soldier.glb 曾被量成 41m 高 → 巨人橫跨畫面），
 # 故「有骨架就用骨頭靜止姿勢的實際高度」量測，最可靠；並加安全夾限，寧可不縮放也不爆掉。
@@ -420,6 +433,86 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 		_gun_axis_fix = PROC_AXIS_FIX     # 程式生成的槍口是 +Z，瞄準基底以 +X 為槍口
 		_gun_armed = true
 
+# ---------- 載具：程式生成低多邊形車體（沒有現成模型，風格與場景一致）----------
+# 尺寸照真實主戰坦克比例：車體長 6.2m、寬 3.3m、含砲塔高 2.4m（人 1.8m 當基準尺）。
+# 慣例同步兵：+Z＝正面；砲塔可獨立轉向瞄準。
+var _is_vehicle := false
+var _turret: Node3D = null
+var _barrel_len := 3.6
+
+func _build_vehicle(p_cls: String, is_player: bool) -> void:
+	_is_vehicle = true
+	var root := Node3D.new()
+	root.name = "Vehicle"
+	add_child(root)
+	_model = root
+	_model_base_y = 0.0
+	var body := _mat(Color(0.36, 0.40, 0.30), 0.25, 0.72) if is_player else _mat(Color(0.42, 0.30, 0.26), 0.25, 0.72)
+	var dark := _mat(Color(0.10, 0.10, 0.11), 0.4, 0.6)
+	var steel := _mat(Color(0.22, 0.24, 0.22), 0.6, 0.45)
+	# 車體：下段厚、上段收窄（避免像一塊磚）
+	var hull := _box(3.1, 0.75, 5.6, body); hull.position.y = 0.95; root.add_child(hull)
+	var glacis := _box(2.9, 0.42, 1.9, body); glacis.position = Vector3(0, 1.42, 1.5)
+	glacis.rotation_degrees.x = -18.0; root.add_child(glacis)
+	var deck := _box(2.9, 0.30, 3.4, body); deck.position = Vector3(0, 1.40, -0.7); root.add_child(deck)
+	# 履帶：兩側各一條，加負重輪
+	for sgn in [-1.0, 1.0]:
+		var track := _box(0.50, 0.86, 6.0, dark)
+		track.position = Vector3(sgn * 1.62, 0.55, 0.0)
+		root.add_child(track)
+		# 負重輪要比履帶寬一點才露得出來，否則整條履帶是一塊黑板（實拍發現）
+		for i in 6:
+			var wheel := _cyl(0.34, 0.66, steel)
+			wheel.rotation_degrees.z = 90
+			wheel.position = Vector3(sgn * 1.62, 0.45, -2.2 + i * 0.88)
+			root.add_child(wheel)
+		var idler := _cyl(0.26, 0.68, steel)
+		idler.rotation_degrees.z = 90
+		idler.position = Vector3(sgn * 1.62, 0.86, 2.6)
+		root.add_child(idler)
+	# 砲塔（獨立節點，可轉向）
+	_turret = Node3D.new()
+	_turret.name = "Turret"
+	_turret.position = Vector3(0, 1.58, -0.35)
+	root.add_child(_turret)
+	var tur := _box(2.3, 0.62, 2.7, body); tur.position.y = 0.31; _turret.add_child(tur)
+	var cheek := _box(1.5, 0.44, 1.0, body); cheek.position = Vector3(0, 0.30, 1.5)
+	cheek.rotation_degrees.x = -12.0; _turret.add_child(cheek)
+	var mantlet := _box(0.9, 0.5, 0.5, steel); mantlet.position = Vector3(0, 0.32, 1.9); _turret.add_child(mantlet)
+	var barrel := _cyl(0.11, _barrel_len, dark)
+	barrel.rotation_degrees.x = 90
+	barrel.position = Vector3(0, 0.34, 1.9 + _barrel_len * 0.5)
+	_turret.add_child(barrel)
+	var brake := _cyl(0.17, 0.5, steel)
+	brake.rotation_degrees.x = 90
+	brake.position = Vector3(0, 0.34, 1.9 + _barrel_len - 0.1)
+	_turret.add_child(brake)
+	# 車長機槍（GDD/01 §3：坦克靠車載機槍警戒）
+	var cmg := _box(0.12, 0.12, 0.7, dark); cmg.position = Vector3(0.75, 0.72, 0.9); _turret.add_child(cmg)
+	var hatch := _cyl(0.34, 0.16, steel); hatch.position = Vector3(0.75, 0.66, 0.3); _turret.add_child(hatch)
+	# 側裙板與排氣（剪影辨識度）
+	for sgn2 in [-1.0, 1.0]:
+		var skirt := _box(0.1, 0.5, 4.6, steel)
+		skirt.position = Vector3(sgn2 * 1.7, 1.05, -0.2)
+		root.add_child(skirt)
+	var exhaust := _cyl(0.18, 0.5, dark); exhaust.rotation_degrees.z = 90
+	exhaust.position = Vector3(-1.2, 1.35, -2.6); root.add_child(exhaust)
+	if not is_player:
+		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+
+# 砲塔轉向目標（載具沒有骨架，瞄準就是轉砲塔）
+func _aim_turret(delta: float) -> void:
+	if _turret == null:
+		return
+	var tgt = aim_point
+	if tgt == null:
+		if _turret.rotation.y != 0.0:
+			_turret.rotation.y = lerp_angle(_turret.rotation.y, 0.0, minf(1.0, 2.0 * delta))
+		return
+	var local: Vector3 = global_transform.affine_inverse() * (tgt as Vector3)
+	var want := atan2(local.x, local.z)
+	_turret.rotation.y = lerp_angle(_turret.rotation.y, want, minf(1.0, 3.0 * delta))
+
 func _mat(col: Color, metal: float, rough: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = col
@@ -614,6 +707,12 @@ func move_to(p: Vector3) -> void:
 
 func shoot_at(target: Unit) -> void:
 	if _dead: return
+	if _is_vehicle:
+		_move_target = null
+		_shoot_target = target
+		_shoot_timer = 0.6                     # 砲塔轉過去要時間
+		aim_point = target.global_position + Vector3(0, 1.2, 0)
+		return
 	# 合理化時序：轉身 → 舉槍(aim) → 0.3s 後 shoot 並發曳光
 	_move_target = null
 	_shoot_target = target
@@ -624,12 +723,22 @@ func shoot_at(target: Unit) -> void:
 
 func take_hit() -> void:
 	if _dead: return
+	if _is_vehicle:
+		_tint(_model, Color(1.0, 0.5, 0.2), 0.35)   # 載具沒有受擊動作，用車體閃紅代替
+		return
 	var now := Time.get_ticks_msec() / 1000.0
 	_play("hit", 0.05)
 	_busy_until = now + max(0.4, _clip_len("hit"))
 
 func die() -> void:
 	if _dead: return
+	if _is_vehicle:
+		_dead = true
+		_move_target = null
+		_shoot_target = null
+		_die_fade = 2.0
+		_tint(_model, Color(0.12, 0.12, 0.12), 0.6)  # 燒焦
+		return
 	_dead = true
 	_move_target = null
 	_shoot_target = null
@@ -684,7 +793,7 @@ func _fix_gun_scale() -> void:
 # 蹲姿：Quaternius 動畫組沒有 crouch，故以「壓低身體＋前傾」模擬躲在掩體後。
 # 移動中一律站起（跑步蹲著不合理）。
 func _update_crouch(delta: float) -> void:
-	if _model == null:
+	if _model == null or _is_vehicle:
 		return
 	var ptarget: float = 1.0 if (want_prone and not _dead and _move_target == null) else 0.0
 	_prone = move_toward(_prone, ptarget, delta * 2.4)
@@ -702,6 +811,9 @@ func _update_crouch(delta: float) -> void:
 		_model.rotation.x = 0.0
 
 func _process(delta: float) -> void:
+	if _is_vehicle:
+		_vehicle_process(delta)
+		return
 	_fix_gun_scale()
 	# 重定向模式：模型本身沒有動畫在寫骨骼，skeleton_updated 永遠不會發，
 	# 所以姿勢必須由這裡主動驅動（也不會與任何動畫打架，因為根本沒有）。
@@ -769,6 +881,54 @@ func _process(delta: float) -> void:
 		_play("crouch")   # 有真人蹲姿動作（UAL Crouch_Idle 重定向）就直接播，不再用幾何硬湊
 	elif _state == "shoot" or _state == "" or _state == "hit" or _state == "crouch":
 		_play("idle")
+
+# 載具每幀：沒有動畫狀態機，只有「轉向→前進」與砲塔瞄準。
+func _vehicle_process(delta: float) -> void:
+	_aim_turret(delta)
+	if _dead:
+		_die_fade -= delta
+		if _model:
+			_model.position.y = lerpf(_model.position.y, -0.35, minf(1.0, delta * 1.5))   # 中彈後車體下沉
+			_model.rotation.z = lerpf(_model.rotation.z, 0.12, minf(1.0, delta * 1.2))
+		if _die_fade <= 0.6:
+			_fade(clampf(_die_fade / 0.6, 0.0, 1.0))
+		if _die_fade <= 0.0:
+			queue_free()
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if _shoot_target != null:
+		aim_point = _shoot_target.global_position + Vector3(0, 1.2, 0)
+		_shoot_timer -= delta
+		if _shoot_timer <= 0.0:
+			_busy_until = now + 0.8
+			shot_fired.emit(_muzzle_pos(), _shoot_target.global_position + Vector3(0, 1.2, 0))
+			_recoil = 1.0
+			_shoot_target = null
+			aim_point = null
+		return
+	_recoil = maxf(0.0, _recoil - delta * RECOIL_DECAY)
+	if _turret:
+		_turret.position.z = -0.35 - 0.25 * _recoil          # 火砲後座
+	if now < _busy_until:
+		return
+	if _move_target != null:
+		var d: Vector3 = _move_target - global_position
+		d.y = 0.0
+		if d.length() < 0.25:
+			_move_target = null
+			arrived.emit()
+			return
+		var yaw := atan2(d.x, d.z)
+		rotation.y = lerp_angle(rotation.y, yaw, minf(1.0, VEH_TURN * delta))
+		var ang := absf(wrapf(yaw - rotation.y, -PI, PI))
+		if ang < 0.35:                                        # 履帶車先轉正再前進
+			global_position += d.normalized() * (VEH_SPEED * speed_mul) * delta
+
+# 砲口世界座標（曳光/火光起點）
+func _muzzle_pos() -> Vector3:
+	if _turret == null:
+		return global_position + Vector3(0, 1.6, 0)
+	return _turret.global_transform * Vector3(0, 0.34, 1.9 + _barrel_len)
 
 func _fade(k: float) -> void:
 	for m in _model.find_children("*", "MeshInstance3D", true, false):

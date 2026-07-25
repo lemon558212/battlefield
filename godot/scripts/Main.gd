@@ -475,6 +475,40 @@ func _selftest() -> void:
 						"OK" if pl2["target"] == weak else "FAIL"])
 				weak["hp"] = keep_w
 				ai_u["cls"] = keep_cls
+		# I-1) 坦克（GDD/01 §4 剋制兩條、§1 CP 成本、§3 車載機槍警戒）
+		var rifleman_w := {"weapon": GameData.weapon_of(nation[player_side], "rifleman"), "cls": "rifleman"}
+		var at_w := {"weapon": GameData.weapon_of(nation[player_side], "at"), "cls": "at"}
+		var tank_t := {"weapon": {}, "cls": "tank"}
+		var inf_t := {"weapon": {}, "cls": "rifleman"}
+		var d_rifle_tank: int = GameData.damage(_wrap(rifleman_w), _wrap(tank_t))
+		var d_at_tank: int = GameData.damage(_wrap(at_w), _wrap(tank_t))
+		var d_at_inf: int = GameData.damage(_wrap(at_w), _wrap(inf_t))
+		var d_rifle_inf: int = GameData.damage(_wrap(rifleman_w), _wrap(inf_t))
+		print("[tankchk] 步槍打坦克=%d（應為 1 刮漆） %s" % [d_rifle_tank, "OK" if d_rifle_tank == 1 else "FAIL"])
+		print("[tankchk] 火箭打坦克=%d 步槍打步兵=%d %s" % [d_at_tank, d_rifle_inf,
+				"OK" if d_at_tank > 50 else "FAIL(火箭開不了罐頭)"])
+		print("[tankchk] 火箭打步兵=%d（有 ×0.6 濺傷減半） %s" % [d_at_inf,
+				"OK" if d_at_inf < int(float(at_w["weapon"].get("atk", 180)) * 0.75) else "FAIL"])
+		var t_dummy := {"cls": "tank", "weapon": GameData.weapon_of(nation[player_side], "tank")}
+		print("[tankchk] 坦克下令成本=%d CP %s" % [_order_cost(t_dummy), "OK" if _order_cost(t_dummy) == 2 else "FAIL"])
+		var aw := _alert_weapon(t_dummy)
+		print("[tankchk] 坦克警戒用 %s(atk %d) 而非主砲(atk %d) %s" % [aw.get("type", "?"), int(aw.get("atk", 0)),
+				int(t_dummy["weapon"].get("atk", 0)),
+				"OK" if int(aw.get("atk", 999)) < int(t_dummy["weapon"].get("atk", 0)) else "FAIL"])
+		# 真的生一台上場：載具走的是完全不同的分支，不實際生成等於沒驗
+		var tk = _spawn_unit("tank", player_side, clampf(tu["wx"] + 260.0, 60.0, float(map_data.get("w", 960)) - 60.0),
+				clampf(tu["wy"] + 120.0, 60.0, float(map_data.get("h", 600)) - 60.0), false)
+		_refresh_visibility()
+		var tk_from: Vector3 = tk["node"].global_position
+		cam.set_follow(null)
+		cam.focus = tk_from + Vector3(0, 1.2, 0)
+		cam.dist = 12.0
+		cam.pitch_deg = 24.0
+		tk["node"].move_to(_clamp_to_map(tk_from + Vector3(0, 0, 9.0)))
+		await get_tree().create_timer(2.4).timeout
+		await _snap("res://tank_ingame.png")
+		var tk_moved: float = tk_from.distance_to(tk["node"].global_position)
+		print("[tankchk] 坦克在遊戲內生成並移動 %.1fm %s" % [tk_moved, "OK" if tk_moved > 1.0 else "FAIL"])
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -875,6 +909,15 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	units.append(u)
 	return u
 
+# 把世界座標夾回地圖範圍內：先前沒有這道夾限，單位可以一路走出地圖邊緣、
+# 站在虛空上（坦克驗收時實拍到）。留 1m 邊界避免貼邊卡住。
+func _clamp_to_map(p: Vector3) -> Vector3:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var hx: float = mw * 0.5 * WORLD_SCALE - 1.0
+	var hz: float = mh * 0.5 * WORLD_SCALE - 1.0
+	return Vector3(clampf(p.x, -hx, hx), p.y, clampf(p.z, -hz, hz))
+
 func _to3d(wx: float, wy: float) -> Vector3:
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
@@ -1002,7 +1045,7 @@ func _click(sp: Vector2) -> void:
 	to.y = 0.0
 	if to.length() > reach:
 		hit = here + to.normalized() * reach
-	acting["node"].move_to(hit)
+	acting["node"].move_to(_clamp_to_map(hit))
 	_refresh_visibility()
 
 func _fire(shooter, target) -> void:
@@ -1200,7 +1243,7 @@ func _enemy_step() -> void:
 			_ai_state = "fire"         # 已到位：原地開火
 			_enemy_t = 0.4
 			return
-		e["node"].move_to(here + move_v.normalized() * minf(move_v.length(), reach))
+		e["node"].move_to(_clamp_to_map(here + move_v.normalized() * minf(move_v.length(), reach)))
 		_enemy_t = 0.3
 		return
 	_end_enemy_turn()
@@ -1413,6 +1456,15 @@ func _intercept_tick(delta: float) -> void:
 
 var _alert_shots := 0      # QA 計數：本次迎擊觸發幾次
 
+# 坦克的警戒射擊是「車載機槍」不是主砲（GDD/01 §3）——
+# 拿 220 攻擊的主砲當迎擊會直接把步兵一發清掉，完全不合理。
+func _alert_weapon(u) -> Dictionary:
+	if Unit.is_vehicle_cls(u["cls"]):
+		var mg: Dictionary = GameData.weapons.get("lmg", {}).duplicate(true)
+		mg["type"] = "lmg"
+		return mg
+	return u["weapon"]
+
 func _intercept_fire(shooter, target, dist_px: float) -> void:
 	_alert_shots += 1
 	shooter["node"].shoot_at(target["node"])
@@ -1424,9 +1476,10 @@ func _intercept_fire(shooter, target, dist_px: float) -> void:
 	if not shooter["alive"] or not target["alive"]:
 		return
 	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
-	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px) * (1.0 - cov * 0.6)
+	var sh_w := {"weapon": _alert_weapon(shooter), "cls": shooter["cls"]}
+	var hc: float = GameData.hit_chance(_wrap(sh_w), _wrap(target), dist_px) * (1.0 - cov * 0.6)
 	if hc > randf():
-		var dmg: int = int(round(GameData.damage(_wrap(shooter), _wrap(target)) * ALERT_DMG_K))
+		var dmg: int = int(round(GameData.damage(_wrap(sh_w), _wrap(target)) * ALERT_DMG_K))
 		target["hp"] -= dmg
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
