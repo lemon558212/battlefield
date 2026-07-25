@@ -667,8 +667,11 @@ func _aim_pose() -> void:
 	var b := Basis(aim * _gun_len_scale, y_axis * _gun_len_scale, z_axis * _gun_len_scale)
 	var xf := Transform3D(b, pocket + aim * 0.02 - b * _gun_stock)
 	# 3) 兩手抓上槍（右手握把、左手前護木）＋手指握攏
-	_rig.ik_reach("UpperArm.R", "LowerArm.R", "Wrist.R", xf * _gun_grip)
-	_rig.ik_reach("UpperArm.L", "LowerArm.L", "Wrist.L", xf * _gun_fore)
+	# 肘部極向量：兩肘都朝下外側，這是持槍的自然姿勢；沒有約束會扭成怪解
+	var down := -Vector3.UP
+	var rightv := global_basis.x.normalized()
+	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", "Wrist.R", xf * _gun_grip, (down * 0.85 + rightv * 0.5).normalized())
+	_rig.ik_two_bone("UpperArm.L", "LowerArm.L", "Wrist.L", xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
 	_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏

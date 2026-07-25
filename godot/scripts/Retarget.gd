@@ -85,6 +85,77 @@ func apply() -> void:
 			in_skel = _dst.get_bone_global_pose(dp).affine_inverse() * in_skel
 		_dst.set_bone_pose_position(di, in_skel)
 
+# 解析式雙骨 IK（含極向量約束肘部朝向）。
+# CCD 沒有肘部約束，會收斂到「手臂扭轉一圈」的怪解——蒙皮會塌成一條細長怪物（2026-07-25 實測）。
+# 此版本先把手臂指向目標，再依 pole 指定的方向把肘彎到正確的解。
+func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vector3, pole_world: Vector3) -> bool:
+	var ui := _dst.find_bone(upper)
+	var li := _dst.find_bone(lower)
+	var hi := _dst.find_bone(hand)
+	if ui < 0 or li < 0 or hi < 0:
+		return false
+	var xf := _dst.global_transform
+	var to_skel := xf.affine_inverse()
+	var target: Vector3 = to_skel * target_world
+	var pole: Vector3 = (to_skel.basis * pole_world).normalized()
+
+	var a: Vector3 = _dst.get_bone_global_pose(ui).origin
+	var b: Vector3 = _dst.get_bone_global_pose(li).origin
+	var c: Vector3 = _dst.get_bone_global_pose(hi).origin
+	var l1 := a.distance_to(b)
+	var l2 := b.distance_to(c)
+	if l1 < 0.0001 or l2 < 0.0001:
+		return false
+	var to_t: Vector3 = target - a
+	var d: float = clampf(to_t.length(), absf(l1 - l2) + 0.001, l1 + l2 - 0.001)
+	if to_t.length() < 0.0001:
+		return false
+	var dir := to_t.normalized()
+
+	# 1) 先讓整條手臂指向目標
+	_rotate_bone(ui, Quaternion((c - a).normalized(), dir))
+	b = _dst.get_bone_global_pose(li).origin
+	c = _dst.get_bone_global_pose(hi).origin
+
+	# 2) 依餘弦定理把肘彎到該有的角度，彎曲平面由 pole 決定
+	var want := acos(clampf((l1 * l1 + d * d - l2 * l2) / (2.0 * l1 * d), -1.0, 1.0))
+	var cur := acos(clampf((b - a).normalized().dot(dir), -1.0, 1.0))
+	var axis: Vector3 = dir.cross(b - a)
+	if axis.length() < 0.0001:
+		axis = dir.cross(pole)
+	if axis.length() < 0.0001:
+		axis = dir.cross(Vector3.UP)
+	if axis.length() < 0.0001:
+		return false
+	_rotate_bone(ui, Quaternion(axis.normalized(), want - cur))
+	b = _dst.get_bone_global_pose(li).origin
+
+	# 2.5) 繞手臂軸旋轉，把肘部轉到極向量那一側。
+	# 少了這步，肘會停在數學上任意的一側——外觀就是手臂扭轉一圈、蒙皮塌成細長條。
+	var e_perp: Vector3 = (b - a) - dir * (b - a).dot(dir)
+	var p_perp: Vector3 = pole - dir * pole.dot(dir)
+	if e_perp.length() > 0.0001 and p_perp.length() > 0.0001:
+		e_perp = e_perp.normalized()
+		p_perp = p_perp.normalized()
+		var ang := atan2(e_perp.cross(p_perp).dot(dir), e_perp.dot(p_perp))
+		_rotate_bone(ui, Quaternion(dir, ang))
+		b = _dst.get_bone_global_pose(li).origin
+	c = _dst.get_bone_global_pose(hi).origin
+
+	# 3) 前臂補齊，讓手落在目標
+	if (c - b).length() > 0.0001 and (target - b).length() > 0.0001:
+		_rotate_bone(li, Quaternion((c - b).normalized(), (target - b).normalized()))
+	return true
+
+# 對骨骼疊加一段「骨架空間」的旋轉（換算成該骨相對父骨的 local 姿勢）
+func _rotate_bone(bi: int, q: Quaternion) -> void:
+	var g := _dst.get_bone_global_pose(bi).basis.get_rotation_quaternion()
+	var p := _dst.get_bone_parent(bi)
+	var pq := Quaternion.IDENTITY
+	if p >= 0:
+		pq = _dst.get_bone_global_pose(p).basis.get_rotation_quaternion()
+	_dst.set_bone_pose_rotation(bi, pq.inverse() * (q * g))
+
 # 手臂 IK（CCD 迭代）：把手骨拉到指定世界座標，用於左手扶槍前握把。
 # 免費動作庫只有「手槍」姿勢(雙手併攏)，長槍必須靠 IK 才不會變成單手托著步槍的假動作。
 func ik_reach(upper: String, lower: String, hand: String, target_world: Vector3, iterations: int = 4) -> bool:
