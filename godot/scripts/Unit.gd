@@ -626,6 +626,10 @@ func _update_crouch(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_fix_gun_scale()
+	# 重定向模式：模型本身沒有動畫在寫骨骼，skeleton_updated 永遠不會發，
+	# 所以姿勢必須由這裡主動驅動（也不會與任何動畫打架，因為根本沒有）。
+	if _retarget:
+		_on_skeleton_updated()
 	_update_crouch(delta)
 	if _dead:
 		_die_fade -= delta
@@ -666,7 +670,9 @@ func _process(delta: float) -> void:
 		else:
 			global_position += d.normalized() * WALK_SPEED * delta
 			_play("run" if anim_names.has("run") else "walk")
-	elif _state == "shoot" or _state == "" or _state == "hit":
+	elif want_cover and anim_names.has("crouch"):
+		_play("crouch")   # 有真人蹲姿動作（UAL Crouch_Idle 重定向）就直接播，不再用幾何硬湊
+	elif _state == "shoot" or _state == "" or _state == "hit" or _state == "crouch":
 		_play("idle")
 
 func _fade(k: float) -> void:
@@ -710,7 +716,7 @@ func _aim_pose() -> void:
 	# 蹲姿（2026-07-25 定案）：手寫屈膝 + 依「小腿末端」自動貼地。
 	# 先前判定「三個軸都無效」是誤判——量尺用了 Foot 骨，
 	# 而此骨架的 Foot 父階是 Root、不跟著腿動，量到的永遠是同一個數。
-	if _crouch > 0.001:
+	if _crouch > 0.001 and not anim_names.has("crouch"):
 		_model.position.z = 0.0
 		_model.rotation.x = 0.0
 		var rightax := global_basis.x.normalized()
