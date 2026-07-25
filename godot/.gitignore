@@ -6,3 +6,29 @@ st_*.png
 st_*.png.import
 aniprobe.gd*
 boneprobe.gd*
+
+# --- 2026-07-25 持槍/動作素材線 ---
+# 原始素材壓縮包與解壓目錄（約 1.1GB，不進版控；使用的檔案已複製到 assets/models/）
+*.zip
+assets/kits/
+# 中途評估過但未採用的素材（最終採用 hr_*.fbx + ual_standard.glb）
+assets/models/chars/T_*.png*
+assets/models/chars/ubc_male.*
+assets/models/chars/q_soldier.*
+assets/models/chars/q_swat.*
+assets/models/chars/gdbot*
+# 驗證台輸出與暫存
+q_*.png*
+gt*_*.png*
+fx_*.png*
+rot_*.png*
+gt_run.log
+probe_*.gd*
+*.bak
+assets/models/chars/kk_*
+assets/models/chars/Superhero_*
+assets/models/chars/barbarian_texture.png*
+assets/models/chars/knight_texture.png*
+assets/models/chars/mage_texture.png*
+assets/models/chars/ranger_texture.png*
+assets/models/chars/rogue_texture.png*

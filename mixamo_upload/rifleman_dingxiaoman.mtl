@@ -1,0 +1,6 @@
+newmtl rifleman_dingxiaoman
+Ka 1 1 1
+Kd 1 1 1
+d 1
+illum 2
+map_Kd rifleman_dingxiaoman_diffuse.jpg
