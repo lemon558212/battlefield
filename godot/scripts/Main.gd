@@ -49,7 +49,15 @@ var units: Array = []       # 每個 = Dictionary(單位資料)＋node
 var selected = null
 var turn := 1
 var cp := 0
-var cp_max := 5
+var cp_max := 6            # GDD/01 §1：基礎 6 + 存活坦克數，上限 10
+# ---- 行動模式（GDD/01 §1-2）----
+const CP_CAP := 10
+const CP_BASE := 6
+const PX_PER_AP := 3.0     # 1 AP = 3px
+const AP_DECAY := 0.7      # 同一單位第 N 次下令：AP 上限 = 滿 AP × 0.7^(N-1)
+var acting = null          # 目前在行動模式的單位（null＝指令模式）
+var _act_last := Vector3.ZERO   # 上一幀位置，用來扣 AP
+var _ap_ring: MeshInstance3D = null
 var budget_left := 0
 var _tracers: Array = []
 var _enemy_queue: Array = []
@@ -92,6 +100,7 @@ func _ready() -> void:
 	ui.deploy_pick.connect(_on_deploy_pick)
 	ui.deploy_go.connect(_start_battle)
 	ui.end_turn.connect(_end_player_turn)
+	ui.end_action.connect(_end_action)
 	ui.back_menu.connect(_open_menu)
 	_open_menu()
 	if "e2e" in OS.get_cmdline_user_args():
@@ -257,6 +266,50 @@ func _selftest() -> void:
 	await get_tree().create_timer(1.2).timeout
 	var moved: float = p_before.distance_to(pu["node"].global_position)
 	print("[movechk] 點地面後位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	# ---- 行動模式 AP/CP（GDD/01 §1-2）----
+	# 上面那次點擊本身就是「下令」，所以這裡先驗它扣了 CP、也給了 AP
+	var cp0: int = cp
+	print("[apchk] 下令扣 CP：本回合上限=%d 現在=%d %s" % [_turn_cp(), cp,
+			"OK" if cp == _turn_cp() - 1 else "FAIL"])
+	print("[apchk] 進入行動模式 acting=%s AP=%.0f/%.0f %s" % [
+			"有" if acting != null else "無", float(acting["ap"]) if acting else -1.0,
+			float(acting["ap_max"]) if acting else -1.0,
+			"OK" if acting != null and acting["ap"] > 0.0 else "FAIL"])
+	cam.dist = 14.0
+	cam.pitch_deg = 40.0
+	await get_tree().create_timer(0.5).timeout
+	await _snap("res://ap_mode.png")     # AP 條與行動範圍圈要看得到
+	# 走到 AP 歸零：一次點很遠的地方，應只走到 AP 允許的最遠處
+	var ap_before: float = acting["ap"]
+	var reach_m: float = _ap_metres(acting)
+	var far := _to3d(pu["wx"] + 900.0, pu["wy"])
+	var q_before: Vector3 = pu["node"].global_position
+	_send_click(cam.unproject_position(far + Vector3(0, 0.02, 0)))
+	await get_tree().create_timer(reach_m / 3.0 + 1.5).timeout
+	var run_m: float = q_before.distance_to(pu["node"].global_position)
+	print("[apchk] AP 上限內移動：可走 %.1fm 實走 %.1fm 剩餘 AP=%.0f %s" % [
+			reach_m, run_m, float(acting["ap"]),
+			"OK" if absf(run_m - reach_m) < 1.2 and acting["ap"] < 1.0 else "FAIL"])
+	# AP 歸零後仍可原地開火一次，第二次要被擋
+	var foe = null
+	for x in units:
+		if x["alive"] and x["side"] != player_side:
+			foe = x
+			break
+	if foe != null:
+		_fire(acting, foe)
+		await get_tree().create_timer(0.6).timeout
+		print("[apchk] 每次行動只能開火一次 fired=%s %s" % [acting["fired"],
+				"OK" if bool(acting["fired"]) else "FAIL"])
+	# 同一單位再次下令：AP 上限應降為 0.7 倍
+	var full_ap: float = float(GameData.class_base.get(pu["cls"], {}).get("ap", 150))
+	_end_action()
+	_begin_action(pu)
+	print("[apchk] 重複下令 AP 上限 %.0f→%.0f（應為 0.7 倍） %s" % [full_ap, float(pu["ap_max"]),
+			"OK" if absf(float(pu["ap_max"]) - full_ap * 0.7) < 1.0 else "FAIL"])
+	_end_action()
+	print("[apchk] 結束行動 acting=%s %s" % ["無" if acting == null else "有", "OK" if acting == null else "FAIL"])
+	cp = cp0
 	# ---- Phase2 掩體系統驗證 ----
 	var sb := {}
 	for c in _covers:
@@ -358,8 +411,8 @@ func _selftest() -> void:
 					"OK" if eu["hp"] < hp0 else "（全部落空，機率問題不算 FAIL）"])
 			# 狙擊手沒有警戒能力：連計時器都不該被建立（GDD §3 明列無警戒兵種）
 			var sn = _deployed[0]
-			print("[alertchk] 狙擊手(%s)不參與警戒 %s" % [sn["cls"],
-					"OK" if not sn.has("_alert_t") else "FAIL(被算進警戒了)"])
+			print("[alertchk] 狙擊手(%s,alert=%s)不參與警戒 %s" % [sn["cls"], _can_alert(sn["cls"]),
+					"OK" if (not sn.has("_alert_t") and not _can_alert(sn["cls"])) else "FAIL(被算進警戒了)"])
 			eu["node"].stop()
 			# 建築擋視線（GDD/01 §3 要求視線無阻擋、§5 建築完全阻擋）：隔離只留一棟才驗得準
 			var bl := {}
@@ -586,6 +639,73 @@ func _try_place(wx: float, wy: float) -> void:
 	if _pending_named:
 		_pending_cls = ""    # 具名放完清除（每場一次）
 
+# 我方階段的 CP：基礎 6 + 存活坦克數（上限 10）。GDD/01 §1。
+func _turn_cp() -> int:
+	var tanks := 0
+	for u in units:
+		if u["alive"] and u["side"] == player_side and u["cls"] == "tank":
+			tanks += 1
+	return mini(CP_BASE + tanks, CP_CAP)
+
+# 下令成本：坦克 2 CP，其餘 1 CP
+func _order_cost(u) -> int:
+	return 2 if u["cls"] == "tank" else 1
+
+# 進入行動模式：扣 CP、依下令次數遞減 AP 上限
+func _begin_action(u) -> bool:
+	var cost := _order_cost(u)
+	if cp < cost or not u["alive"]:
+		return false
+	if acting != null and acting != u:
+		_end_action()
+	cp -= cost
+	u["orders"] = int(u.get("orders", 0)) + 1
+	var full: float = float(GameData.class_base.get(u["cls"], {}).get("ap", 150))
+	u["ap"] = full * pow(AP_DECAY, u["orders"] - 1)
+	u["ap_max"] = u["ap"]
+	u["fired"] = false
+	acting = u
+	_act_last = u["node"].global_position
+	ui.update_hud(turn, "player", cp)
+	ui.show_ap(u["ap"], u["ap_max"])
+	_update_ap_ring()
+	return true
+
+# 結束行動：單位進入警戒狀態（GDD/01 §2 最後一條）
+func _end_action() -> void:
+	if acting == null:
+		return
+	acting["node"].stop()
+	_update_cover_state(acting)
+	acting = null
+	ui.hide_ap()
+	if is_instance_valid(_ap_ring):
+		_ap_ring.visible = false
+
+# 剩餘 AP 還能走幾公尺
+func _ap_metres(u) -> float:
+	return float(u.get("ap", 0.0)) * PX_PER_AP * WORLD_SCALE
+
+# 行動範圍圈：VC 用 AP 條，這裡再加一圈地面指示，玩家才知道還能走多遠
+func _update_ap_ring() -> void:
+	if acting == null:
+		return
+	if not is_instance_valid(_ap_ring):
+		_ap_ring = MeshInstance3D.new()
+		_ap_ring.mesh = TorusMesh.new()
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(1.0, 0.85, 0.35, 0.55)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_ap_ring.material_override = m
+		add_child(_ap_ring)
+	var r: float = maxf(_ap_metres(acting), 0.05)
+	var tm := _ap_ring.mesh as TorusMesh
+	tm.inner_radius = maxf(r - 0.12, 0.02)
+	tm.outer_radius = r
+	_ap_ring.global_position = acting["node"].global_position + Vector3(0, 0.05, 0)
+	_ap_ring.visible = true
+
 func _count_cls(s: int, cls: String) -> int:
 	var n := 0
 	for u in units:
@@ -634,7 +754,7 @@ func _start_battle() -> void:
 		return
 	st = St.CMD
 	turn = 1
-	cp = cp_max
+	cp = _turn_cp()
 	if is_instance_valid(_zone_mesh):
 		_zone_mesh.visible = false        # 開戰後收起部署藍框
 	ui.show_hud()
@@ -675,6 +795,7 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 		"weapon": GameData.weapon_of(nation[side_i], cls),
 		"named": named, "char_name": chr.get("name", ""),
 		"acted": false, "cover": "",
+		"orders": 0, "ap": 0.0, "ap_max": float(cb.get("ap", 150)), "fired": false,
 	}
 	node.set_meta("u", u)
 	units.append(u)
@@ -769,6 +890,10 @@ func _click(sp: Vector2) -> void:
 		if best["side"] == player_side:
 			selected = best
 			cam.set_follow(best["node"])
+			# 點自己人＝下令進入行動模式（花 1 CP，坦克 2 CP）。GDD/01 §1
+			if acting != best:
+				if not _begin_action(best):
+					ui.flash_msg("CP 不足，無法下令", Color(1.0, 0.7, 0.4))
 			var chr: Dictionary = GameData.characters.get(best["cls"], {})
 			var cv: String = best.get("cover", "")
 			var cov_txt := ""
@@ -777,11 +902,13 @@ func _click(sp: Vector2) -> void:
 				"building": cov_txt = "　🛡 建築掩體 (命中-45%)"
 			ui.show_charcard(best["cls"], ("★" + best["char_name"]) if best["named"] else GameData.class_base.get(best["cls"], {}).get("zh", best["cls"]),
 					chr.get("trait", {}).get("desc", "") + cov_txt, int(best["hp"]), int(best["maxhp"]))
-		elif selected != null and cp > 0 and not selected["acted"]:
-			_fire(selected, best)
+		elif acting != null and not bool(acting.get("fired", false)):
+			_fire(acting, best)          # 每次行動只能開火一次（GDD/01 §2）
+		elif acting != null:
+			ui.flash_msg("這次行動已經開過火了", Color(1.0, 0.7, 0.4))
 		return
-	# 點地移動
-	if selected == null or cp <= 0 or selected["acted"]:
+	# 點地移動：只有行動模式中的單位能動，且距離受剩餘 AP 限制
+	if acting == null:
 		return
 	var from := cam.project_ray_origin(sp)
 	var dir := cam.project_ray_normal(sp)
@@ -791,19 +918,23 @@ func _click(sp: Vector2) -> void:
 	if t <= 0:
 		return
 	var hit := from + dir * t
-	selected["node"].move_to(hit)
-	# 反算回遊戲座標
-	var mw: float = map_data.get("w", 960)
-	var mh: float = map_data.get("h", 600)
-	selected["wx"] = hit.x / WORLD_SCALE + mw * 0.5
-	selected["wy"] = hit.z / WORLD_SCALE + mh * 0.5
+	var reach: float = _ap_metres(acting)
+	if reach < 0.05:
+		ui.flash_msg("AP 用盡，只能原地開火或結束行動", Color(1.0, 0.7, 0.4))
+		return
+	# 超出 AP 的點：走到能走的最遠處（而不是不理玩家或直接走完）
+	var here: Vector3 = acting["node"].global_position
+	var to := hit - here
+	to.y = 0.0
+	if to.length() > reach:
+		hit = here + to.normalized() * reach
+	acting["node"].move_to(hit)
 	_refresh_visibility()
 
 func _fire(shooter, target) -> void:
 	var dist_px := Vector2(target["wx"] - shooter["wx"], target["wy"] - shooter["wy"]).length()
 	shooter["node"].shoot_at(target["node"])
-	shooter["acted"] = true
-	cp = max(0, cp - 1)
+	shooter["fired"] = true      # 每次行動只能開火一次；CP 在下令時就扣過了（GDD/01 §1-2）
 	ui.update_hud(turn, "player" if st == St.CMD else "enemy", cp)
 	await get_tree().create_timer(0.32).timeout
 	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
@@ -853,8 +984,10 @@ func _end_player_turn() -> void:
 	if st != St.CMD:
 		return
 	st = St.ENEMY
+	_end_action()
 	for u in units:
 		u["acted"] = false
+		u["orders"] = 0
 	_enemy_queue = []
 	for u in units:
 		if u["alive"] and u["side"] != player_side:
@@ -869,12 +1002,34 @@ func _process(delta: float) -> void:
 			tr["m"].queue_free()
 			tr["l"].queue_free()
 			_tracers.erase(tr)
+	_action_tick(delta)
 	_intercept_tick(delta)
 	if st == St.ENEMY:
 		_enemy_t -= delta
 		if _enemy_t <= 0:
 			_enemy_step()
 			_enemy_t = 1.1
+
+# 行動模式每幀：依實際移動距離扣 AP，歸零就停下（GDD/01 §2：不可殘留走不了的尾數）
+func _action_tick(_delta: float) -> void:
+	if acting == null or st != St.CMD:
+		return
+	if not is_instance_valid(acting["node"]) or not acting["alive"]:
+		_end_action()
+		return
+	var pos: Vector3 = acting["node"].global_position
+	var moved: float = Vector2(pos.x - _act_last.x, pos.z - _act_last.z).length()
+	_act_last = pos
+	if moved > 0.0:
+		acting["ap"] = maxf(0.0, float(acting["ap"]) - moved / (PX_PER_AP * WORLD_SCALE))
+		var p := _live_px(acting)
+		acting["wx"] = p.x
+		acting["wy"] = p.y
+		if acting["ap"] <= 0.0:
+			acting["node"].stop()
+			ui.flash_msg("AP 用盡", Color(1.0, 0.8, 0.4))
+		ui.show_ap(acting["ap"], acting["ap_max"])
+		_update_ap_ring()
 
 func _enemy_step() -> void:
 	if _enemy_queue.is_empty():
@@ -884,9 +1039,10 @@ func _enemy_step() -> void:
 			_win(1 - player_side, "防守方撐過 30 回合")
 			return
 		st = St.CMD
-		cp = cp_max
+		cp = _turn_cp()
 		for u in units:
 			u["acted"] = false
+			u["orders"] = 0
 		ui.update_hud(turn, "player", cp)
 		return
 	var e = _enemy_queue.pop_front()
@@ -916,9 +1072,10 @@ func _enemy_step() -> void:
 
 # ---------- 警戒射擊（GDD/01 §3：本作靈魂，不可閹割） ----------
 # 敵單位「移動中」會被我方警戒單位自動射擊；傷害減半、不消耗 CP、不算該單位已行動。
-# 兵種名單照 GDD/01 §3 逐字對齊（步兵/突擊兵/機槍兵；坦克尚未實作）——
-# 想加特種兵之類的要先改 GDD 取得共識，不可先改碼（專案鐵律 1）。
-const ALERT_CLS := ["rifleman", "assault", "mg"]   # 狙擊/迫砲/火箭/工兵/特種無警戒
+# 誰有警戒能力＝讀 data/class_base.json 的 alert 欄位（專案鐵律 3：數值只准放 data/）。
+# 原本寫死成常數陣列，與資料重複且會不同步——資料裡 specops/tank/sam 都是 true。
+func _can_alert(cls: String) -> bool:
+	return bool(GameData.class_base.get(cls, {}).get("alert", false))
 const ALERT_GAP := {"mg": 0.25}     # 機槍兵間隔減半——這就是機槍兵存在的意義（GDD §3）
 const ALERT_GAP_DEFAULT := 0.5
 const ALERT_RANGE_K := 0.8          # 警戒射程＝武器射程 ×0.8
@@ -965,7 +1122,7 @@ func _intercept_tick(delta: float) -> void:
 		movers.append([m, mp])
 	# 2) 每個警戒單位各自計時（節流要跟「有沒有目標」無關，否則會被存成一次爆發）
 	for u in units:
-		if not u["alive"] or not (u["cls"] in ALERT_CLS) or not is_instance_valid(u["node"]):
+		if not u["alive"] or not _can_alert(u["cls"]) or not is_instance_valid(u["node"]):
 			continue
 		u["_alert_t"] = float(u.get("_alert_t", 0.0)) + delta
 		var gap: float = float(ALERT_GAP.get(u["cls"], ALERT_GAP_DEFAULT))

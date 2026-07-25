@@ -486,6 +486,52 @@ func update_budget(left: int, msg := "") -> void:
 			(h as Label).text = msg
 
 # ---------- 戰鬥 HUD ----------
+# ---- 行動模式 AP 條（GDD/01 §2）----
+# 玩家要看得到「還能走多遠」，不然移動變成盲猜。數字＋長條，兩種都給。
+signal end_action
+var _ap_box: Control = null
+
+func show_ap(cur: float, mx: float) -> void:
+	if _ap_box == null or not is_instance_valid(_ap_box):
+		var box := Control.new()
+		box.name = "ApBox"
+		var bg := _panel(Color(0, 0, 0, 0.72))
+		bg.name = "Bg"
+		bg.size = Vector2(300, 56)
+		box.add_child(bg)
+		var l := _label("AP", 16, GOLD)
+		l.name = "ApLbl"
+		l.position = Vector2(10, 4)
+		box.add_child(l)
+		var bar_bg := _panel(Color(0.25, 0.25, 0.28, 0.9))
+		bar_bg.name = "BarBg"
+		bar_bg.position = Vector2(10, 30)
+		bar_bg.size = Vector2(280, 14)
+		box.add_child(bar_bg)
+		var bar := _panel(Color(1.0, 0.82, 0.35, 0.95))
+		bar.name = "Bar"
+		bar.position = Vector2(10, 30)
+		bar.size = Vector2(280, 14)
+		box.add_child(bar)
+		root.add_child(box)
+		_ap_box = box
+	var vp := get_viewport().get_visible_rect().size
+	_ap_box.position = Vector2(vp.x - 320, vp.y - 76)
+	var k: float = 0.0 if mx <= 0.001 else clampf(cur / mx, 0.0, 1.0)
+	(_ap_box.find_child("ApLbl", false, false) as Label).text = "AP %d / %d" % [int(cur), int(mx)]
+	(_ap_box.find_child("Bar", false, false) as ColorRect).size = Vector2(280.0 * k, 14)
+	var eb := root.find_child("EndActBtn", true, false)
+	if eb:
+		eb.visible = true
+
+func hide_ap() -> void:
+	if is_instance_valid(_ap_box):
+		_ap_box.queue_free()
+	_ap_box = null
+	var eb := root.find_child("EndActBtn", true, false)
+	if eb:
+		eb.visible = false
+
 func show_hud() -> void:
 	_clear()
 	var head := _mk_banner("PLAYER PHASE", "第 1 回合", "")
@@ -498,6 +544,15 @@ func show_hud() -> void:
 	et.position = Vector2(20, get_viewport().get_visible_rect().size.y - 70)
 	et.pressed.connect(func(): end_turn.emit())
 	root.add_child(et)
+	# 放右下角 AP 條正上方：左下角被角色卡佔滿，擺那裡會被蓋住（實拍發現）
+	var ea := _btn("結束行動", 16)
+	ea.name = "EndActBtn"
+	ea.custom_minimum_size = Vector2(300, 44)
+	ea.position = Vector2(get_viewport().get_visible_rect().size.x - 320,
+			get_viewport().get_visible_rect().size.y - 132)
+	ea.visible = false
+	ea.pressed.connect(func(): end_action.emit())
+	root.add_child(ea)
 
 func update_hud(turn: int, phase: String, cp: int) -> void:
 	var head := root.find_child("HudBanner", true, false)
