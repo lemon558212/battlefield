@@ -329,6 +329,19 @@ func _selftest() -> void:
 		u3.want_prone = false
 		await get_tree().create_timer(1.2).timeout
 		print("[pronechk] 解除後起身=%.2f %s" % [u3._prone, "OK" if u3._prone < 0.1 else "FAIL"])
+		# H) 受擊與陣亡：換骨架後這兩支動作也全部改走重定向，不驗等於沒換完
+		#    （判斷用頭部高度：站著約 1.5m，倒地應明顯下降）
+		var head_up: float = u3._rig.bone_pos("Head").y - u3.global_position.y
+		u3.take_hit()
+		await get_tree().create_timer(0.2).timeout    # 受擊動作很短，太晚量會量到已回 idle
+		await _snap("res://close_hit.png")
+		print("[anichk] 受擊動作 state=%s %s" % [u3._state, "OK" if u3._state == "hit" else "FAIL"])
+		u3.die()
+		await get_tree().create_timer(1.8).timeout    # 等倒地動作播完，不然量到半途
+		var head_dn: float = u3._rig.bone_pos("Head").y - u3.global_position.y
+		await _snap("res://close_death.png")
+		print("[anichk] 陣亡倒地 頭高 %.2f→%.2f %s" % [
+			head_up, head_dn, "OK" if head_dn < head_up * 0.6 else "FAIL(沒倒下)"])
 		# 效能：每單位每幀都在做重定向＋雙手 IK＋手指，換骨架後必須實測
 		var t0 := Time.get_ticks_usec()
 		for i in 60:
