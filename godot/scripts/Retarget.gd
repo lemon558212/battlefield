@@ -259,3 +259,33 @@ func blend_pose(pose: Dictionary, weight: float, with_hips: bool = true) -> void
 		var hi := _dst.find_bone(hb)
 		if hi >= 0:
 			_dst.set_bone_pose_position(hi, _dst.get_bone_pose_position(hi).lerp(pose["hips"], w))
+
+# 以 rest 為基準，對骨骼施加一段固定角度（手寫姿勢用）。
+# 重定向在某些骨架會扭壞，手寫姿勢則完全可控——蹲/趴這種靜態姿勢用這個最穩。
+func bend_bone(bone: String, axis: int, degrees: float, weight: float = 1.0) -> void:
+	var bi := _dst.find_bone(bone)
+	if bi < 0 or weight <= 0.001:
+		return
+	var ax := Vector3.RIGHT
+	if axis == 1:
+		ax = Vector3.UP
+	elif axis == 2:
+		ax = Vector3.BACK
+	var rest := _dst.get_bone_rest(bi).basis.get_rotation_quaternion()
+	var want := rest * Quaternion(ax, deg_to_rad(degrees))
+	_dst.set_bone_pose_rotation(bi, _dst.get_bone_pose_rotation(bi).slerp(want, clampf(weight, 0.0, 1.0)))
+
+# 姿勢擺完後量「最低的腳骨」離地多少，回傳需要補的高度（正值＝要往上抬）。
+# 治「蹲下時腳陷進地面」：不靠猜的固定位移，直接量出來。
+func ground_offset(foot_bones: Array) -> float:
+	if _dst == null:
+		return 0.0
+	var lo := INF
+	for b in foot_bones:
+		var bi := _dst.find_bone(b)
+		if bi < 0:
+			continue
+		lo = minf(lo, (_dst.global_transform * _dst.get_bone_global_pose(bi).origin).y)
+	if lo == INF:
+		return 0.0
+	return -lo

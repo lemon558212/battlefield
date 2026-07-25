@@ -90,7 +90,10 @@ const UAL_ANIMS := "res://assets/models/anims/ual_standard.glb"
 const USE_RETARGET_CROUCH := false
 static var _crouch_pose := {}   # 全體共用：蹲姿只需算一次，不必每個單位都揹一份動畫來源
 static var _crouch_busy := false
+const LEG_AXIS := 0      # 這具骨架的膝蓋彎曲軸（三軸掃描驗得）
 var _gun_pos := Vector3.ZERO
+var want_prone := false        # 趴姿：全身伏地出槍（狙擊/壓制用）
+var _prone := 0.0
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
 var _model_base_y := 0.0
 var _crouch := 0.0             # 0=站 1=蹲（平滑過渡）
@@ -577,14 +580,16 @@ func _fix_gun_scale() -> void:
 func _update_crouch(delta: float) -> void:
 	if _model == null:
 		return
-	var target: float = 1.0 if (want_cover and not _dead and _move_target == null) else 0.0
+	var ptarget: float = 1.0 if (want_prone and not _dead and _move_target == null) else 0.0
+	_prone = move_toward(_prone, ptarget, delta * 2.4)
+	var target: float = 0.0 if _prone > 0.01 else (1.0 if (want_cover and not _dead and _move_target == null) else 0.0)
 	_crouch = move_toward(_crouch, target, delta * 3.2)
-	# 有真蹲姿（UAL Crouch_Idle 重定向）就不再壓低模型——那是沒有蹲姿動畫時的權宜做法
-	if not USE_RETARGET_CROUCH or _crouch_pose.is_empty():
-		_model.position.y = _model_base_y - 0.42 * _crouch
+	# ⚠ 這裡只更新混合值，不碰模型位置/旋轉。
+	# 姿勢與貼地一律由 _aim_pose（骨架更新後）負責——兩邊都寫會互相抵銷，
+	# 症狀是「蹲下去又被推回來」，看起來像只把腳塞進地裡（2026-07-25 實測）。
+	if _rig == null:
 		_model.rotation.x = 0.13 * _crouch
-	else:
-		_model.position.y = _model_base_y - 0.30 * _crouch
+		_model.position.y = _model_base_y - 0.42 * _crouch   # 無骨架工具的模型：沿用舊權宜做法
 		_model.rotation.x = 0.0
 
 func _process(delta: float) -> void:
@@ -656,6 +661,24 @@ func _aim_pose() -> void:
 	var sk := sks[0] as Skeleton3D
 	if USE_RETARGET_CROUCH and not _crouch_pose.is_empty() and _crouch > 0.001:
 		_rig.blend_pose(_crouch_pose, _crouch, false)   # 先蹲，IK 再疊上去；髖位移交給模型下壓
+	# 趴姿：把身體前傾 90° 伏地、腿打直，槍與雙手沿用既有瞄準邏輯（那段走世界座標，不受身體姿態影響）
+	if _prone > 0.001:
+		_model.rotation.x = lerpf(0.0, PI * 0.5, _prone)
+		_rig.bend_bone("UpperLeg.L", LEG_AXIS, -12.0, _prone)
+		_rig.bend_bone("UpperLeg.R", LEG_AXIS, -12.0, _prone)
+		_rig.bend_bone("LowerLeg.L", LEG_AXIS, 8.0, _prone)
+		_rig.bend_bone("LowerLeg.R", LEG_AXIS, 8.0, _prone)
+		_rig.bend_bone("Abdomen", LEG_AXIS, -18.0, _prone)   # 上身抬起才看得到前方
+		_rig.bend_bone("Torso", LEG_AXIS, -14.0, _prone)
+	# 手寫蹲姿：重定向在這具骨架會扭壞，改用可控的固定角度（軸 0 為膝蓋彎曲軸，掃描驗得）
+	if _crouch > 0.001:
+		_rig.bend_bone("UpperLeg.L", LEG_AXIS, -48.0, _crouch)
+		_rig.bend_bone("UpperLeg.R", LEG_AXIS, -48.0, _crouch)
+		_rig.bend_bone("LowerLeg.L", LEG_AXIS, 82.0, _crouch)
+		_rig.bend_bone("LowerLeg.R", LEG_AXIS, 82.0, _crouch)
+		_rig.bend_bone("Foot.L", LEG_AXIS, -30.0, _crouch)
+		_rig.bend_bone("Foot.R", LEG_AXIS, -30.0, _crouch)
+		_rig.bend_bone("Abdomen", LEG_AXIS, 12.0, _crouch)
 	_aiming = (not _dead) and _move_target == null
 	if not _aiming:
 		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
@@ -692,6 +715,7 @@ func _aim_pose() -> void:
 	_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf
+	_ground_model()
 
 var _in_pose := false          # skeleton_updated 內改骨骼會再觸發信號，需防遞迴
 func _on_skeleton_updated() -> void:
@@ -739,3 +763,20 @@ func _ready() -> void:
 	if USE_RETARGET_CROUCH and _crouch_pose.is_empty() and not _crouch_busy:
 		_crouch_busy = true
 		_capture_crouch()
+
+# 自動貼地：姿勢擺完後量「最低的腳骨」離地多少，把模型補到剛好踩在地面。
+# 舊做法是蹲下時固定把模型往下壓 0.42m，腳會陷進地裡；用量的就不會。
+func _ground_model() -> void:
+	if _model == null or _rig == null:
+		return
+	if _crouch <= 0.001 and _prone <= 0.001:
+		_model.position.y = _model_base_y
+		_model.rotation.x = 0.0
+		return
+	if _prone <= 0.001:
+		_model.rotation.x = 0.0
+	var bones := ["Foot.L", "Foot.R"]
+	if _prone > 0.5:
+		bones = ["Hips", "Chest", "Foot.L", "Foot.R"]   # 趴著時最低點是軀幹不是腳
+	var off: float = _rig.ground_offset(bones) + (0.16 * _prone)   # 身體厚度，不讓人埋進地裡
+	_model.position.y = clampf(_model.position.y + off, _model_base_y - 1.2, _model_base_y + 0.2)
