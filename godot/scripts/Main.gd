@@ -74,9 +74,12 @@ var _covers: Array = []
 
 const GROUND_SHADER := """
 shader_type spatial;
-uniform vec3 grass_a = vec3(0.34, 0.45, 0.24);
-uniform vec3 grass_b = vec3(0.47, 0.57, 0.31);
-uniform vec3 dirt    = vec3(0.44, 0.39, 0.28);
+// ⚠ 一定要標 source_color：否則這些值會被當成「線性空間」直接用，
+// 輸出轉回 sRGB 後整片地面會亮一大截、綠色被洗成薄荷色。
+// 這就是 GDD/10 五大事故裡的「sRGB 洗白」，換 Forward+ 時原地重演一次（2026-07-26）。
+uniform vec3 grass_a : source_color = vec3(0.34, 0.45, 0.24);
+uniform vec3 grass_b : source_color = vec3(0.47, 0.57, 0.31);
+uniform vec3 dirt    : source_color = vec3(0.44, 0.39, 0.28);
 varying vec3 wp;
 void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -287,10 +290,28 @@ func _selftest() -> void:
 	# 走到 AP 歸零：一次點很遠的地方，應只走到 AP 允許的最遠處
 	var ap_before: float = acting["ap"]
 	var reach_m: float = _ap_metres(acting)
-	var far := _to3d(pu["wx"] + 900.0, pu["wy"])
+	# 目標點要往「地圖中心」方向拉：往外拉會被 _clamp_to_map 夾住，
+	# 走不到 AP 允許的距離而誤判成 FAIL（2026-07-26 加了邊界夾限後踩到）。
+	var mw2: float = map_data.get("w", 960)
+	var mh2: float = map_data.get("h", 600)
+	var to_mid := Vector2(mw2 * 0.5 - pu["wx"], mh2 * 0.5 - pu["wy"])
+	if to_mid.length() < 1.0:
+		to_mid = Vector2(1, 0)
+	to_mid = to_mid.normalized() * 900.0
+	var far := _to3d(pu["wx"] + to_mid.x, pu["wy"] + to_mid.y)
+	# 鏡頭要先拉遠：45m 外的點在近距離鏡頭下根本不在畫面上，
+	# unproject 出來的螢幕座標點不到那裡，會走一小段就停（誤判成 AP 邏輯壞掉）。
+	cam.dist = 60.0
+	cam.pitch_deg = 62.0
+	await get_tree().create_timer(0.4).timeout
 	var q_before: Vector3 = pu["node"].global_position
 	_send_click(cam.unproject_position(far + Vector3(0, 0.02, 0)))
-	await get_tree().create_timer(reach_m / 3.0 + 1.5).timeout
+	# 等到「真的停下來」而不是等固定秒數：蹲行只有 0.45 倍速，
+	# 固定秒數會在單位剛好站在掩體旁時誤判成 FAIL（2026-07-26 踩到）。
+	var wg := 0
+	while pu["node"].is_moving() and wg < 200:
+		await get_tree().create_timer(0.1).timeout
+		wg += 1
 	var run_m: float = q_before.distance_to(pu["node"].global_position)
 	print("[apchk] AP 上限內移動：可走 %.1fm 實走 %.1fm 剩餘 AP=%.0f %s" % [
 			reach_m, run_m, float(acting["ap"]),
@@ -621,26 +642,31 @@ func _selftest() -> void:
 func _build_static() -> void:
 	# 太陽：暖色、柔邊陰影、角度更斜（拉長影子＝立體感）
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-42, 128, 0)
-	sun.light_color = Color(1.0, 0.95, 0.86)
-	sun.light_energy = 1.15
+	sun.rotation_degrees = Vector3(-46, 128, 0)
+	sun.light_color = Color(1.0, 0.94, 0.84)
+	sun.light_energy = 1.0
 	sun.shadow_enabled = true
-	sun.shadow_blur = 1.4
-	sun.directional_shadow_max_distance = 80.0
+	sun.shadow_blur = 1.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_max_distance = 90.0
+	sun.directional_shadow_split_1 = 0.06
+	sun.directional_shadow_split_2 = 0.16
+	sun.directional_shadow_split_3 = 0.42
+	sun.shadow_normal_bias = 1.2
 	add_child(sun)
 	# 補光：從反方向打冷色弱光，避免暗面全黑（治「黑色邊」的觀感）
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-28, -50, 0)
 	fill.light_color = Color(0.72, 0.80, 0.95)
-	fill.light_energy = 0.35
+	fill.light_energy = 0.16     # Forward+ 的天空環境光比 compat 強很多，補光要跟著收
 	fill.shadow_enabled = false
 	add_child(fill)
 
 	var e := Environment.new()
 	# 程序天空（漸層＋太陽）取代死板純色背景
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.38, 0.55, 0.82)
-	sky_mat.sky_horizon_color = Color(0.78, 0.84, 0.88)
+	sky_mat.sky_top_color = Color(0.26, 0.45, 0.78)
+	sky_mat.sky_horizon_color = Color(0.68, 0.79, 0.88)
 	sky_mat.ground_bottom_color = Color(0.40, 0.44, 0.38)
 	sky_mat.ground_horizon_color = Color(0.72, 0.78, 0.80)
 	sky_mat.sun_angle_max = 12.0
@@ -649,27 +675,34 @@ func _build_static() -> void:
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.9
+	# ⚠ 2026-07-26 換 Forward+ 後整個場景被洗白（GDD/10 五大事故的「sRGB 洗白」重演）：
+	#   compat 時代調的 0.9 環境光在 Forward+ 是過曝的。天空環境光要大幅收斂。
+	e.ambient_light_energy = 0.32
 	# 環境光遮蔽：物件接地處自然變暗，最有效的「不假」來源
 	e.ssao_enabled = true
-	e.ssao_radius = 1.6
-	e.ssao_intensity = 2.2
-	e.ssao_power = 1.6
+	e.ssao_radius = 1.2
+	e.ssao_intensity = 2.6
+	e.ssao_power = 1.8
+	e.ssao_light_affect = 0.15
 	# 遠景霧氣：拉出空間深度
 	e.fog_enabled = true
-	e.fog_light_color = Color(0.70, 0.77, 0.84)
-	e.fog_density = 0.0035
-	e.fog_sky_affect = 0.08
+	e.fog_light_color = Color(0.58, 0.66, 0.74)
+	e.fog_density = 0.0022
+	e.fog_sky_affect = 0.0        # 霧吃到天空會把整片天壓成灰色（實拍發現）
+	e.fog_aerial_perspective = 0.25
+	# 高度霧：低窪處積霧，戰場才有空氣感（也讓遠處的兵不再像貼紙）
+	e.fog_height = 1.5
+	e.fog_height_density = 0.06
 	# 色調映射＋微光暈：去除死白、增加層次
 	e.tonemap_mode = Environment.TONE_MAPPER_ACES
-	e.tonemap_exposure = 0.98
-	e.tonemap_white = 6.0
+	e.tonemap_exposure = 0.92
+	e.tonemap_white = 4.0
 	e.glow_enabled = true
 	e.glow_intensity = 0.12
 	e.glow_bloom = 0.08
 	e.adjustment_enabled = true
-	e.adjustment_saturation = 1.12
-	e.adjustment_contrast = 1.06
+	e.adjustment_saturation = 1.16
+	e.adjustment_contrast = 1.10
 	var we := WorldEnvironment.new()
 	we.environment = e
 	add_child(we)
