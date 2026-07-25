@@ -128,6 +128,54 @@ func flash_msg(txt: String, col := Color(1, 1, 1)) -> void:
 	_flash.modulate.a = 1.0
 	_flash_t = 1.4
 
+# ---------- 射擊面板（GDD/13：命中與傷害預測、部位選擇）----------
+# 玩家在按下開火前就該知道「打得中嗎、打得痛嗎」，這是戰棋最基本的資訊揭露。
+var _fire_box: Control = null
+
+func show_fire_panel(opts: Array, on_pick: Callable) -> void:
+	hide_fire_panel()
+	var box := Control.new()
+	box.name = "FireBox"
+	var h: int = 56 + opts.size() * 54 + 42   # 底部要留「取消」的位置，否則按鈕會凸出面板外（實拍發現）
+	var bg := _panel(Color(0.04, 0.05, 0.07, 0.92))
+	bg.size = Vector2(330, h)
+	box.add_child(bg)
+	var bar := ColorRect.new()
+	bar.color = GOLD
+	bar.size = Vector2(330, 3)
+	box.add_child(bar)
+	var t := _label("選擇瞄準部位", 17, GOLD)
+	t.position = Vector2(14, 12)
+	box.add_child(t)
+	var y := 46
+	for o in opts:
+		var b := _btn("%s　命中 %d%%　傷害 %d" % [o["zh"], int(round(float(o["hit"]) * 100.0)), int(o["dmg"])], 16)
+		b.custom_minimum_size = Vector2(302, 44)
+		b.size = Vector2(302, 44)
+		b.position = Vector2(14, y)
+		var part: String = o["part"]
+		b.pressed.connect(func(): on_pick.call(part))
+		box.add_child(b)
+		y += 54
+	var c := _btn("取消", 14)
+	c.custom_minimum_size = Vector2(302, 30)
+	c.size = Vector2(302, 30)
+	c.position = Vector2(14, y - 4)
+	c.pressed.connect(func(): on_pick.call(""))
+	box.add_child(c)
+	var vp := get_viewport().get_visible_rect().size
+	box.position = Vector2(vp.x * 0.5 - 165, vp.y * 0.5 - h * 0.5)
+	root.add_child(box)
+	_fire_box = box
+
+func hide_fire_panel() -> void:
+	if is_instance_valid(_fire_box):
+		_fire_box.queue_free()
+	_fire_box = null
+
+func fire_panel_open() -> bool:
+	return is_instance_valid(_fire_box)
+
 # ---------- 主選單 ----------
 func show_menu(has_save: bool) -> void:
 	_clear()

@@ -80,7 +80,12 @@ func weapon_of(nation_id: String, cls: String) -> Dictionary:
 	base["shots"] = base.get("shots", 1) + mods.get("shots", 0)
 	return base
 
-func hit_chance(shooter, target, dist_px: float) -> float:
+# 部位係數（GDD/01 §4）：命中率與傷害各一套。
+# 散熱器＝坦克尾部，要繞到背後才打得到——這是坦克戰的核心操作。
+const PART_ACC := {"body": 1.0, "head": 0.55, "radiator": 0.75}
+const PART_DMG := {"body": 1.0, "head": 2.0, "radiator": 3.0}
+
+func hit_chance(shooter, target, dist_px: float, part := "body") -> float:
 	var w: Dictionary = shooter.weapon
 	if dist_px > w.get("range", 200):
 		return 0.0
@@ -88,22 +93,23 @@ func hit_chance(shooter, target, dist_px: float) -> float:
 	var ratio: float = dist_px / max(1.0, w.get("range", 200))
 	if ratio > 0.5:
 		c *= 1.0 - 0.45 * ((ratio - 0.5) / 0.5)
+	c *= float(PART_ACC.get(part, 1.0))
 	return clamp(c, 0.0, 0.99)
 
 # GDD/01 §4 剋制兩條（與 js/combat.js 同一套判斷，不另設倍率表）：
 #   ① 一般槍械打坦克固定 1 傷害（刮漆）
 #   ② 反裝甲武器（antiTank）打步兵傷害 ×0.6
 # 這兩條就是坦克存在的意義：步槍打不動它，但火箭兵能開罐頭。
-func damage(shooter, target) -> int:
+func damage(shooter, target, part := "body") -> int:
 	var w: Dictionary = shooter.weapon
 	var mult := 1.0
 	var anti: bool = bool(w.get("antiTank", false)) or bool(w.get("arc", false))
 	if target.cls == "tank":
 		if not anti:
-			return 1
+			return 1                      # 刮漆：連散熱器也一樣，槍械就是打不穿
 	elif bool(w.get("antiTank", false)):
 		mult = 0.6
 	var eff: float = float(w.get("atk", 10)) * mult
 	var deff: float = GameData.class_base.get(target.cls, {}).get("def", 0)
-	var dmg: float = eff * max(0.1, 1.0 - deff / max(1.0, eff) * 0.5)
+	var dmg: float = eff * float(PART_DMG.get(part, 1.0)) * max(0.1, 1.0 - deff / max(1.0, eff) * 0.5)
 	return int(max(1, round(dmg)))

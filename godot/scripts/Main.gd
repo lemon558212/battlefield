@@ -509,6 +509,67 @@ func _selftest() -> void:
 		await _snap("res://tank_ingame.png")
 		var tk_moved: float = tk_from.distance_to(tk["node"].global_position)
 		print("[tankchk] 坦克在遊戲內生成並移動 %.1fm %s" % [tk_moved, "OK" if tk_moved > 1.0 else "FAIL"])
+		# I-2) 部位命中（GDD/01 §4）＋射擊預測面板（GDD/13）
+		var sh2 := {"weapon": GameData.weapon_of(nation[player_side], "sniper"), "cls": "sniper"}
+		var inf2 := {"weapon": {}, "cls": "rifleman"}
+		var hb: float = GameData.hit_chance(_wrap(sh2), _wrap(inf2), 100.0, "body")
+		var hh: float = GameData.hit_chance(_wrap(sh2), _wrap(inf2), 100.0, "head")
+		var db: int = GameData.damage(_wrap(sh2), _wrap(inf2), "body")
+		var dh: int = GameData.damage(_wrap(sh2), _wrap(inf2), "head")
+		print("[partchk] 頭部命中 %.0f%%→%.0f%%（應為 0.55 倍） %s" % [hb * 100, hh * 100,
+				"OK" if absf(hh - hb * 0.55) < 0.02 else "FAIL"])
+		# 允許 ±1：傷害是最後才四捨五入，2 倍後的尾數本來就會差一點
+		print("[partchk] 頭部傷害 %d→%d（應為 2 倍） %s" % [db, dh, "OK" if absi(dh - db * 2) <= 1 else "FAIL"])
+		var atw := {"weapon": GameData.weapon_of(nation[player_side], "at"), "cls": "at"}
+		var tk2 := {"weapon": {}, "cls": "tank"}
+		var dbody: int = GameData.damage(_wrap(atw), _wrap(tk2), "body")
+		var drad: int = GameData.damage(_wrap(atw), _wrap(tk2), "radiator")
+		print("[partchk] 散熱器傷害 %d→%d（應為 3 倍） %s" % [dbody, drad, "OK" if drad == dbody * 3 else "FAIL"])
+		# 幾何：散熱器只有繞到坦克背後才可選
+		tk["node"].rotation.y = 0.0                      # 坦克面向 +Z
+		var front_sh := {"node": tk["node"], "cls": "at", "wx": 0.0, "wy": 0.0}
+		var probe := Node3D.new()
+		add_child(probe)
+		var fake := {"node": probe, "cls": "at"}
+		probe.global_position = tk["node"].global_position + Vector3(0, 0, 6)   # 車頭方向
+		var parts_front: int = _aim_parts(fake, tk).size()
+		probe.global_position = tk["node"].global_position - Vector3(0, 0, 6)   # 車尾方向
+		var parts_back: int = _aim_parts(fake, tk).size()
+		probe.queue_free()
+		print("[partchk] 正面可選部位=%d 背面=%d %s" % [parts_front, parts_back,
+				"OK" if parts_front == 1 and parts_back == 2 else "FAIL(散熱器判定不對)"])
+		# 真實操作路徑：行動模式中點敵人 → 應跳出射擊面板 → 點部位才開火
+		var foe2 = null
+		for x in units:
+			if x["alive"] and x["side"] != player_side:
+				foe2 = x
+				break
+		if foe2 != null:
+			foe2["node"].global_position = tu["node"].global_position + Vector3(3, 0, 0)
+			foe2["wx"] = _live_px(foe2).x
+			foe2["wy"] = _live_px(foe2).y
+			foe2["node"].visible = true
+			_end_action()
+			cp = 6
+			_begin_action(tu)
+			cam.set_follow(null)
+			cam.focus = tu["node"].global_position + Vector3(0, 1.0, 0)
+			cam.dist = 8.0
+			await get_tree().create_timer(0.4).timeout
+			_send_click(cam.unproject_position(foe2["node"].global_position + Vector3(0, 1.0, 0)))
+			await get_tree().create_timer(0.35).timeout
+			print("[partchk] 點敵人跳出射擊面板 %s" % ("OK" if ui.fire_panel_open() else "FAIL"))
+			await _snap("res://fire_panel.png")
+			var pb := _find_btn("頭部")
+			if pb != null:
+				_send_click(pb.get_global_rect().get_center())
+				await get_tree().create_timer(0.6).timeout
+				print("[partchk] 點部位後真的開火 fired=%s 面板已關=%s %s" % [
+						bool(tu.get("fired", false)), not ui.fire_panel_open(),
+						"OK" if bool(tu.get("fired", false)) and not ui.fire_panel_open() else "FAIL"])
+			else:
+				print("[partchk] FAIL 面板上找不到頭部選項")
+			_end_action()
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -781,6 +842,8 @@ func _begin_action(u) -> bool:
 
 # 結束行動：單位進入警戒狀態（GDD/01 §2 最後一條）
 func _end_action() -> void:
+	if ui != null:
+		ui.hide_fire_panel()
 	if acting == null:
 		return
 	acting["node"].stop()
@@ -1020,7 +1083,17 @@ func _click(sp: Vector2) -> void:
 			ui.show_charcard(best["cls"], ("★" + best["char_name"]) if best["named"] else GameData.class_base.get(best["cls"], {}).get("zh", best["cls"]),
 					chr.get("trait", {}).get("desc", "") + cov_txt, int(best["hp"]), int(best["maxhp"]))
 		elif acting != null and not bool(acting.get("fired", false)):
-			_fire(acting, best)          # 每次行動只能開火一次（GDD/01 §2）
+			# 先給預測再開火（GDD/13）：玩家要看得到命中率與傷害，還能選部位
+			var sh = acting
+			var tg = best
+			var dpx := Vector2(tg["wx"] - sh["wx"], tg["wy"] - sh["wy"]).length()
+			if dpx > float(sh["weapon"].get("range", 200)):
+				ui.flash_msg("超出射程", Color(1.0, 0.7, 0.4))
+				return
+			ui.show_fire_panel(_fire_preview(sh, tg), func(part):
+				ui.hide_fire_panel()
+				if part != "" and acting == sh and not bool(sh.get("fired", false)):
+					_fire(sh, tg, part))
 		elif acting != null:
 			ui.flash_msg("這次行動已經開過火了", Color(1.0, 0.7, 0.4))
 		return
@@ -1048,7 +1121,8 @@ func _click(sp: Vector2) -> void:
 	acting["node"].move_to(_clamp_to_map(hit))
 	_refresh_visibility()
 
-func _fire(shooter, target) -> void:
+# 開火（part＝瞄準部位，GDD/01 §4）。AI 與迎擊一律 body（不瞄部位）。
+func _fire(shooter, target, part := "body") -> void:
 	var dist_px := Vector2(target["wx"] - shooter["wx"], target["wy"] - shooter["wy"]).length()
 	shooter["node"].shoot_at(target["node"])
 	shooter["fired"] = true      # 每次行動只能開火一次；CP 在下令時就扣過了（GDD/01 §1-2）
@@ -1056,9 +1130,11 @@ func _fire(shooter, target) -> void:
 	await get_tree().create_timer(0.32).timeout
 	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
 	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
-	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px) * (1.0 - cov * 0.6)
+	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, part) * (1.0 - cov * 0.6)
 	if hc > randf():
-		target["hp"] -= GameData.damage(_wrap(shooter), _wrap(target))
+		target["hp"] -= GameData.damage(_wrap(shooter), _wrap(target), part)
+		if part != "body":
+			ui.flash_msg("命中%s！" % ("頭部" if part == "head" else "散熱器"), Color(1.0, 0.9, 0.4))
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
 			target["node"].die()          # 淡出傾倒後自我移除
@@ -1066,6 +1142,31 @@ func _fire(shooter, target) -> void:
 			target["node"].take_hit()     # 受擊：立繪換 hurt 表情＋紅閃
 	_refresh_visibility()
 	_check_end()
+
+# 可瞄準的部位（GDD/01 §4）：軀幹永遠可選；步兵可瞄頭；
+# 坦克散熱器在尾部，射手必須位於車尾 ±60° 扇形內才打得到——繞背後才是坦克戰的解法。
+func _aim_parts(shooter, target) -> Array:
+	var out := [{"part": "body", "zh": "軀幹" if target["cls"] != "tank" else "車體"}]
+	if target["cls"] == "tank":
+		var facing: Vector3 = target["node"].facing_dir()
+		var to_shooter: Vector3 = shooter["node"].global_position - target["node"].global_position
+		to_shooter.y = 0.0
+		if to_shooter.length() > 0.01 and facing.dot(to_shooter.normalized()) < -0.5:
+			out.append({"part": "radiator", "zh": "散熱器(尾部)"})
+	else:
+		out.append({"part": "head", "zh": "頭部"})
+	return out
+
+# 射擊預覽：把命中率與預期傷害算給玩家看（GDD/13：命中傷害預測介面）
+func _fire_preview(shooter, target) -> Array:
+	var dist_px := Vector2(target["wx"] - shooter["wx"], target["wy"] - shooter["wy"]).length()
+	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
+	var out := []
+	for p in _aim_parts(shooter, target):
+		var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, p["part"]) * (1.0 - cov * 0.6)
+		var dm: int = GameData.damage(_wrap(shooter), _wrap(target), p["part"])
+		out.append({"part": p["part"], "zh": p["zh"], "hit": hc, "dmg": dm})
+	return out
 
 # GameData 公式吃 .weapon/.cls，包一層
 func _wrap(u: Dictionary):
