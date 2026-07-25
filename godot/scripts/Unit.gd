@@ -104,6 +104,7 @@ const CROUCH_DEPTH := 0.14   # 蹲下時髖部下沉
 const CROUCH_BACK := 0.05    # 髖部同時後移（少了這個會變成坐椅子）
 const STANCE_W := 0.16       # 雙腳站距（半寬）   # 蹲下時身體下沉高度
 const ANKLE_H := 0.08        # 腳踝骨離地高度
+const PRONE_H := 0.26        # 趴姿時髖部離地高度（人趴著髖部大約在這個高度）
 const LEG_AXIS := 0      # 這具骨架的膝蓋彎曲軸（三軸掃描驗得）
 var _gun_pos := Vector3.ZERO
 var want_prone := false        # 趴姿：全身伏地出槍（狙擊/壓制用）
@@ -737,15 +738,28 @@ func _aim_pose() -> void:
 	var sk := sks[0] as Skeleton3D
 	if USE_RETARGET_CROUCH and not _crouch_pose.is_empty() and _crouch > 0.001:
 		_rig.blend_pose(_crouch_pose, _crouch, false)   # 先蹲，IK 再疊上去；髖位移交給模型下壓
-	# 趴姿：把身體前傾 90° 伏地、腿打直，槍與雙手沿用既有瞄準邏輯（那段走世界座標，不受身體姿態影響）
+	# 趴姿（2026-07-25 重做）：UAL 動作庫沒有 prone，只能程式化。
+	# ⚠ 不可用「把整個模型 rotation.x 轉 90°」——模型節點另有正面軸校正，
+	#   轉出來的軸不對，而且腳會翹到天上。改成骨骼層：髖部與雙腿一起繞髖關節前倒，
+	#   再把整個人降到地面高度。腿必須一起 orbit，因為它們掛在 Root 不跟髖部走。
 	if _prone > 0.001:
-		_model.rotation.x = lerpf(0.0, PI * 0.5, _prone)
-		_rig.bend_bone("UpperLeg.L", LEG_AXIS, -12.0, _prone)
-		_rig.bend_bone("UpperLeg.R", LEG_AXIS, -12.0, _prone)
-		_rig.bend_bone("LowerLeg.L", LEG_AXIS, 8.0, _prone)
-		_rig.bend_bone("LowerLeg.R", LEG_AXIS, 8.0, _prone)
-		_rig.bend_bone("Abdomen", LEG_AXIS, -18.0, _prone)   # 上身抬起才看得到前方
-		_rig.bend_bone("Torso", LEG_AXIS, -14.0, _prone)
+		var fwd := facing_dir()
+		var rgt := global_basis.x.normalized()
+		var hips: Vector3 = _rig.bone_pos("Hips")
+		# 軀幹：脊椎方向指向前上方（臥射是上身微抬、以雙肘撐地，不是整個人壓平）
+		_rig.point_bone("Hips", "Abdomen", (fwd * 0.92 + Vector3.UP * 0.39).normalized(), _prone)
+		# 腿：平放在身後、略微朝下。腿掛在 Root，必須自己搬到髖部位置再擺方向。
+		for sd in ["L", "R"]:
+			var sgn: float = -1.0 if sd == "L" else 1.0
+			_rig.place_bone("UpperLeg." + sd, hips + rgt * sgn * 0.09 - fwd * 0.02, _prone)
+			_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, (-fwd * 0.97 - Vector3.UP * 0.24).normalized(), _prone)
+			_rig.point_bone("LowerLeg." + sd, "Foot." + sd, (-fwd * 0.99 - Vector3.UP * 0.14).normalized(), _prone)
+		# 貼地：量髖部離地多少，整個模型降下去（只有這裡寫高度，避免兩處互相抵銷）
+		# ⚠ 要用「相對目前位置再修正」的收斂寫法：寫成 base - (量到的高度) 會左右震盪
+		#   （量到的高度本身就含上一幀的修正量），畫面上就是趴著上下抖。
+		var hip_y: float = _rig.bone_pos("Hips").y - global_position.y
+		_model.position.y = clampf(_model.position.y - (hip_y - PRONE_H) * _prone,
+				_model_base_y - 1.2, _model_base_y + 0.1)
 	# 蹲姿（換法 2026-07-25）：不再猜骨頭該繞哪個軸轉——那條路三個軸實測都失敗。
 	# 改用「壓低身體 → 用 IK 把雙腳釘回地面」，膝蓋就會被幾何關係自然頂彎。
 	# 這是真實遊戲做無動畫蹲姿的標準手法，且沿用已驗證可用的雙骨 IK（手臂誤差僅 6cm）。

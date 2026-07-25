@@ -44,9 +44,10 @@ func _run() -> void:
 		u.global_position = Vector3.ZERO
 		u.rotation.y = 0.0
 		# 站姿與蹲姿都要拍：只拍蹲姿會漏掉「站著時被改壞」（姿勢兩態互相牽動過好幾次）
-		for stance in ["stand", "crouch"]:
+		for stance in ["stand", "crouch", "prone"]:
 			u.want_cover = (stance == "crouch")
-			for i in (30 if stance == "stand" else 60):
+			u.want_prone = (stance == "prone")
+			for i in (30 if stance == "stand" else 80):
 				await get_tree().process_frame
 			for shot in [["front", Vector3(0, 1.15, 2.8)], ["side", Vector3(2.8, 1.15, 0.0)], ["q", Vector3(2.0, 1.5, 2.0)]]:
 				_cam.position = shot[1]
@@ -54,8 +55,24 @@ func _run() -> void:
 				await get_tree().process_frame
 				await RenderingServer.frame_post_draw
 				get_viewport().get_texture().get_image().save_png("res://u_%s_%s_%s.png" % [cls, stance, shot[0]])
+			_dump(u, cls, stance)
 			print("[u] shot ", cls, " ", stance)
 		u.queue_free()
 		await get_tree().process_frame
 	print("[u] DONE")
 	get_tree().quit(0)
+
+# 姿勢數據：只看圖會被透視騙（趴姿「腿翹起來」到底翹幾度，量了才知道）
+func _dump(u: Unit, cls: String, stance: String) -> void:
+	var sks := u.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk := sks[0] as Skeleton3D
+	var p := {}
+	for b in ["Hips", "Chest", "Head", "UpperLeg.L", "LowerLeg.L", "Foot.L"]:
+		var i := sk.find_bone(b)
+		p[b] = (sk.global_transform * sk.get_bone_global_pose(i).origin) if i >= 0 else Vector3.ZERO
+	var thigh: Vector3 = p["LowerLeg.L"] - p["UpperLeg.L"]
+	print("[dump] %s/%s 髖y=%.2f 胸y=%.2f 頭y=%.2f 膝y=%.2f 腳y=%.2f 大腿仰角=%.0f°" % [
+		cls, stance, p["Hips"].y, p["Chest"].y, p["Head"].y, p["LowerLeg.L"].y, p["Foot.L"].y,
+		rad_to_deg(asin(clampf(thigh.normalized().y, -1.0, 1.0)))])

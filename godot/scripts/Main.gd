@@ -305,6 +305,7 @@ func _selftest() -> void:
 		u3.stop()
 		u3.global_position = _to3d(tu["wx"] + 300.0, tu["wy"] + 300.0)
 		u3.want_cover = false
+		u3.want_prone = false
 		cam.focus = u3.global_position + Vector3(0, 1.0, 0)
 		cam.dist = 3.2
 		cam.pitch_deg = 12.0
@@ -313,6 +314,21 @@ func _selftest() -> void:
 		u3.want_cover = true
 		await get_tree().create_timer(1.0).timeout
 		await _snap("res://close_crouch.png")
+		# G) 臥射：狙擊手在開闊地（無掩體）應自動趴下
+		u3.want_cover = false
+		tu["wx"] += 900.0
+		tu["wy"] += 900.0
+		u3.global_position = _to3d(tu["wx"], tu["wy"])
+		cam.focus = u3.global_position + Vector3(0, 0.5, 0)
+		_update_cover_state(tu)
+		print("[pronechk] 兵種=%s 掩體=%s want_prone=%s %s" % [
+			tu.get("cls", "?"), tu.get("cover", ""), u3.want_prone, "OK" if u3.want_prone else "FAIL"])
+		await get_tree().create_timer(1.4).timeout
+		print("[pronechk] 趴姿混合值=%.2f %s" % [u3._prone, "OK" if u3._prone > 0.9 else "FAIL"])
+		await _snap("res://close_prone.png")
+		u3.want_prone = false
+		await get_tree().create_timer(1.2).timeout
+		print("[pronechk] 解除後起身=%.2f %s" % [u3._prone, "OK" if u3._prone < 0.1 else "FAIL"])
 		# 效能：每單位每幀都在做重定向＋雙手 IK＋手指，換骨架後必須實測
 		var t0 := Time.get_ticks_usec()
 		for i in 60:
@@ -977,6 +993,9 @@ func _update_cover_state(u) -> void:
 	u["cover"] = c.get("type", "")
 	if is_instance_valid(u["node"]):
 		u["node"].want_cover = not c.is_empty()
+		# 狙擊手在無掩體的開闊地會臥射：這是真實狙擊手的標準做法（穩定＋降低被發現）。
+		# 有掩體時優先蹲在掩體後，趴著反而看不到目標。
+		u["node"].want_prone = c.is_empty() and u.get("cls", "") == "sniper"
 
 # 掩體查詢：目標在 (wx,wy)、射手在 (fx,fy)，回傳遮蔽值 0~1。
 # 方向性：掩體必須位於「目標朝射手」那一側 ±75 度內才有效（背後的沙包擋不了正面來的子彈）。

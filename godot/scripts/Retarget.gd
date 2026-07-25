@@ -225,6 +225,65 @@ func add_world_rotation(bone: String, axis_world: Vector3, angle: float) -> void
 		pq = _dst.get_bone_global_pose(dp).basis.get_rotation_quaternion()
 	_dst.set_bone_pose_rotation(bi, pq.inverse() * target_skel)
 
+# 讓「骨頭→子骨」的方向對準指定的世界方向（絕對式，不是疊加）。
+# ⚠ 疊加式（add_world_rotation）擺靜態姿勢很脆弱：同一幀被呼叫兩次角度就翻倍，
+#   實測趴姿的腿轉了 108° 而不是指定的 82°，人就變成腳朝天（2026-07-25）。
+#   絕對式重複套用結果不變，姿勢用這個。
+func point_bone(bone: String, child: String, dir_world: Vector3, weight: float = 1.0) -> void:
+	var bi := _dst.find_bone(bone)
+	var ci := _dst.find_bone(child)
+	if bi < 0 or ci < 0 or weight <= 0.001:
+		return
+	var to_skel := _dst.global_transform.affine_inverse().basis
+	var dir: Vector3 = (to_skel * dir_world).normalized()
+	var a: Vector3 = _dst.get_bone_global_pose(bi).origin
+	var b: Vector3 = _dst.get_bone_global_pose(ci).origin
+	var cur: Vector3 = (b - a).normalized()
+	if cur.length() < 0.0001 or dir.length() < 0.0001:
+		return
+	var q := Quaternion(cur, dir)
+	if weight < 0.999:
+		q = Quaternion.IDENTITY.slerp(q, clampf(weight, 0.0, 1.0))
+	_rotate_bone(bi, q)
+
+# 把骨頭放到指定的世界座標（絕對式）。掛在 Root 的腿要跟著髖部走就靠這個。
+func place_bone(bone: String, pos_world: Vector3, weight: float = 1.0) -> void:
+	var bi := _dst.find_bone(bone)
+	if bi < 0 or weight <= 0.001:
+		return
+	var cur_w: Vector3 = _dst.global_transform * _dst.get_bone_global_pose(bi).origin
+	var want: Vector3 = cur_w.lerp(pos_world, clampf(weight, 0.0, 1.0))
+	var in_skel: Vector3 = _dst.global_transform.affine_inverse() * want
+	var dp := _dst.get_bone_parent(bi)
+	if dp >= 0:
+		in_skel = _dst.get_bone_global_pose(dp).affine_inverse() * in_skel
+	_dst.set_bone_pose_position(bi, in_skel)
+
+# 讀骨頭的世界座標（擺完姿勢要量貼地高度用）
+func bone_pos(bone: String) -> Vector3:
+	var bi := _dst.find_bone(bone)
+	if bi < 0:
+		return Vector3.ZERO
+	return _dst.global_transform * _dst.get_bone_global_pose(bi).origin
+
+# 繞著某個世界座標的樞紐旋轉骨骼：朝向與位置一起轉。
+# 趴姿需要這個——hr_ 骨架的大腿掛在 Root，只轉髖部的話腿會留在原地站著，
+# 人就變成「上半身趴下、腿還立正」。
+func orbit_bone(bone: String, axis_world: Vector3, angle: float, pivot_world: Vector3) -> void:
+	var bi := _dst.find_bone(bone)
+	if bi < 0 or is_zero_approx(angle):
+		return
+	var q := Quaternion(axis_world.normalized(), angle)
+	# 位置：先換到世界座標繞樞紐轉，再換回相對父骨的 local
+	var w: Vector3 = _dst.global_transform * _dst.get_bone_global_pose(bi).origin
+	var moved: Vector3 = pivot_world + q * (w - pivot_world)
+	var in_skel: Vector3 = _dst.global_transform.affine_inverse() * moved
+	var dp := _dst.get_bone_parent(bi)
+	if dp >= 0:
+		in_skel = _dst.get_bone_global_pose(dp).affine_inverse() * in_skel
+	_dst.set_bone_pose_position(bi, in_skel)
+	add_world_rotation(bone, axis_world, angle)
+
 # 手指彎曲成握持狀。免費動作庫的手是張開的，不彎手指就會像「手掌貼著槍」而非握住。
 const FINGERS := ["Index", "Middle", "Ring", "Pinky"]
 
