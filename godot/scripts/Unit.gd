@@ -572,6 +572,10 @@ func stop() -> void:
 	_move_target = null
 	_shoot_target = null
 
+# 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
+func is_moving() -> bool:
+	return _move_target != null and not _dead
+
 func move_to(p: Vector3) -> void:
 	if _dead: return
 	_shoot_target = null

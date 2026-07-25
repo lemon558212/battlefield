@@ -329,7 +329,56 @@ func _selftest() -> void:
 		u3.want_prone = false
 		await get_tree().create_timer(1.2).timeout
 		print("[pronechk] 解除後起身=%.2f %s" % [u3._prone, "OK" if u3._prone < 0.1 else "FAIL"])
-		# H) 受擊與陣亡：換骨架後這兩支動作也全部改走重定向，不驗等於沒換完
+		# H) 警戒射擊（GDD/01 §3）：敵人在我方步槍兵面前移動 → 應被自動迎擊
+		var alert_u = null   # 具警戒能力的我方單位（步槍兵）
+		var eu = null        # 敵方單位
+		for x in units:
+			if x["alive"] and x["side"] == player_side and x["cls"] == "rifleman" and alert_u == null:
+				alert_u = x
+			if x["alive"] and x["side"] != player_side and eu == null:
+				eu = x
+		if alert_u == null or eu == null:
+			print("[alertchk] SKIP 場上缺步槍兵或敵軍")
+		else:
+			var rng: float = float(alert_u["weapon"].get("range", 200)) * ALERT_RANGE_K
+			eu["wx"] = alert_u["wx"] + rng * 0.5
+			eu["wy"] = alert_u["wy"]
+			eu["node"].global_position = _to3d(eu["wx"], eu["wy"])
+			eu["node"].visible = true
+			var hp0: float = eu["hp"]
+			_alert_shots = 0
+			eu["node"].move_to(_to3d(eu["wx"], eu["wy"] + 400.0))   # 橫越我方正面
+			cam.focus = alert_u["node"].global_position + Vector3(0, 1.0, 0)
+			cam.dist = 9.0
+			cam.pitch_deg = 28.0
+			await get_tree().create_timer(1.6).timeout
+			await _snap("res://close_alert.png")
+			print("[alertchk] 敵人移動遭迎擊 次數=%d %s" % [_alert_shots, "OK" if _alert_shots > 0 else "FAIL"])
+			print("[alertchk] 迎擊有扣血 %.0f→%.0f %s" % [hp0, eu["hp"],
+					"OK" if eu["hp"] < hp0 else "（全部落空，機率問題不算 FAIL）"])
+			# 狙擊手沒有警戒能力：連計時器都不該被建立（GDD §3 明列無警戒兵種）
+			var sn = _deployed[0]
+			print("[alertchk] 狙擊手(%s)不參與警戒 %s" % [sn["cls"],
+					"OK" if not sn.has("_alert_t") else "FAIL(被算進警戒了)"])
+			eu["node"].stop()
+			# 建築擋視線（GDD/01 §3 要求視線無阻擋、§5 建築完全阻擋）：隔離只留一棟才驗得準
+			var bl := {}
+			for c in _covers:
+				if c["type"] == "building":
+					bl = c
+					break
+			if bl.is_empty():
+				print("[alertchk] SKIP 場上沒有建築掩體")
+			else:
+				var keep := _covers
+				_covers = [bl]
+				var bp := Vector2(bl["wx"], bl["wy"])
+				var thru: bool = not _los_clear(bp - Vector2(bl["r"] + 60.0, 0), bp + Vector2(bl["r"] + 60.0, 0))
+				var side_ok: bool = _los_clear(bp + Vector2(-100.0, bl["r"] + 60.0), bp + Vector2(100.0, bl["r"] + 60.0))
+				_covers = keep
+				print("[alertchk] 建築擋視線 穿越=%s 繞過=%s %s" % [thru, side_ok,
+						"OK" if (thru and side_ok) else "FAIL"])
+		# I) 受擊與陣亡：換骨架後這兩支動作也全部改走重定向，不驗等於沒換完
 		#    （判斷用頭部高度：站著約 1.5m，倒地應明顯下降）
 		var head_up: float = u3._rig.bone_pos("Head").y - u3.global_position.y
 		u3.take_hit()
@@ -817,6 +866,7 @@ func _process(delta: float) -> void:
 			tr["m"].queue_free()
 			tr["l"].queue_free()
 			_tracers.erase(tr)
+	_intercept_tick(delta)
 	if st == St.ENEMY:
 		_enemy_t -= delta
 		if _enemy_t <= 0:
@@ -860,6 +910,107 @@ func _enemy_step() -> void:
 		e["node"].move_to(_to3d(e["wx"], e["wy"]))
 		_update_cover_state(e)
 		_refresh_visibility()
+
+# ---------- 警戒射擊（GDD/01 §3：本作靈魂，不可閹割） ----------
+# 敵單位「移動中」會被我方警戒單位自動射擊；傷害減半、不消耗 CP、不算該單位已行動。
+# 兵種名單照 GDD/01 §3 逐字對齊（步兵/突擊兵/機槍兵；坦克尚未實作）——
+# 想加特種兵之類的要先改 GDD 取得共識，不可先改碼（專案鐵律 1）。
+const ALERT_CLS := ["rifleman", "assault", "mg"]   # 狙擊/迫砲/火箭/工兵/特種無警戒
+const ALERT_GAP := {"mg": 0.25}     # 機槍兵間隔減半——這就是機槍兵存在的意義（GDD §3）
+const ALERT_GAP_DEFAULT := 0.5
+const ALERT_RANGE_K := 0.8          # 警戒射程＝武器射程 ×0.8
+const ALERT_DMG_K := 0.5
+
+# 單位「當下」的遊戲座標：wx/wy 在下令當下就跳到終點，迎擊要用畫面上真實的位置。
+func _live_px(u) -> Vector2:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p: Vector3 = u["node"].global_position
+	return Vector2(p.x / WORLD_SCALE + mw * 0.5, p.z / WORLD_SCALE + mh * 0.5)
+
+func _in_bush(p: Vector2) -> bool:
+	for c in _covers:
+		if c["type"] == "bush" and Vector2(c["wx"] - p.x, c["wy"] - p.y).length() <= c["r"]:
+			return true
+	return false
+
+# 視線是否無阻擋（GDD/01 §3 要求、§5「建築/岩石完全阻擋視線」）：
+# 線段對圓的最短距離判定，只有 building 類掩體擋線。
+func _los_clear(a: Vector2, b: Vector2) -> bool:
+	for c in _covers:
+		if c["type"] != "building":
+			continue
+		var p := Vector2(c["wx"], c["wy"])
+		var ab := b - a
+		var l2: float = ab.length_squared()
+		var t: float = 0.0 if l2 < 0.0001 else clampf((p - a).dot(ab) / l2, 0.0, 1.0)
+		if a.lerp(b, t).distance_to(p) <= float(c["r"]):
+			return false
+	return true
+
+func _intercept_tick(delta: float) -> void:
+	if st != St.CMD and st != St.ENEMY:
+		return
+	# 1) 誰在移動：躲在草叢裡移動的不觸發警戒（GDD §3 隱蔽）
+	var movers: Array = []
+	for m in units:
+		if not m["alive"] or not is_instance_valid(m["node"]) or not m["node"].is_moving():
+			continue
+		var mp := _live_px(m)
+		if _in_bush(mp):
+			continue
+		movers.append([m, mp])
+	# 2) 每個警戒單位各自計時（節流要跟「有沒有目標」無關，否則會被存成一次爆發）
+	for u in units:
+		if not u["alive"] or not (u["cls"] in ALERT_CLS) or not is_instance_valid(u["node"]):
+			continue
+		u["_alert_t"] = float(u.get("_alert_t", 0.0)) + delta
+		var gap: float = float(ALERT_GAP.get(u["cls"], ALERT_GAP_DEFAULT))
+		if u["_alert_t"] < gap:
+			continue
+		if u["node"].is_moving():
+			continue                      # 自己在移動中不算警戒狀態（行動結束才進入警戒）
+		var up := _live_px(u)
+		var rng: float = float(u["weapon"].get("range", 200)) * ALERT_RANGE_K
+		var best = null
+		var bd := 1e9
+		for pair in movers:
+			var m = pair[0]
+			if m["side"] == u["side"]:
+				continue
+			var d: float = up.distance_to(pair[1])
+			if d <= rng and d < bd and _los_clear(up, pair[1]):
+				bd = d
+				best = m
+		if best == null:
+			continue
+		u["_alert_t"] = 0.0
+		_intercept_fire(u, best, bd)
+
+var _alert_shots := 0      # QA 計數：本次迎擊觸發幾次
+
+func _intercept_fire(shooter, target, dist_px: float) -> void:
+	_alert_shots += 1
+	shooter["node"].shoot_at(target["node"])
+	if shooter["side"] == player_side:
+		ui.flash_msg("⚠ 迎擊射擊", Color(0.55, 0.85, 1.0))
+	else:
+		ui.flash_msg("⚠ 遭到迎擊！", Color(1.0, 0.5, 0.4))
+	await get_tree().create_timer(0.32).timeout
+	if not shooter["alive"] or not target["alive"]:
+		return
+	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
+	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px) * (1.0 - cov * 0.6)
+	if hc > randf():
+		var dmg: int = int(round(GameData.damage(_wrap(shooter), _wrap(target)) * ALERT_DMG_K))
+		target["hp"] -= dmg
+		if target["hp"] <= 0 and target["alive"]:
+			target["alive"] = false
+			target["node"].die()
+		elif target["alive"]:
+			target["node"].take_hit()
+	_refresh_visibility()
+	_check_end()
 
 # ---------- 勝敗 ----------
 func _check_end() -> void:

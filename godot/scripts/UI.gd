@@ -108,6 +108,26 @@ func _btn(txt: String, size := 20) -> Button:
 	b.custom_minimum_size = Vector2(260, 52)
 	return b
 
+# 戰場快訊：迎擊這種「玩家沒下令卻發生的事」一定要有字說明，否則只看到血條莫名其妙掉。
+# 同一則訊息連續觸發時只更新既有標籤（機槍兵 0.25 秒一發，會洗版）。
+var _flash: Label = null
+var _flash_t := 0.0
+
+func flash_msg(txt: String, col := Color(1, 1, 1)) -> void:
+	if _flash == null or not is_instance_valid(_flash):
+		_flash = _label(txt, 26, col)
+		_flash.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_flash.add_theme_constant_override("outline_size", 6)
+		_flash.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+		root.add_child(_flash)
+	_flash.text = txt
+	_flash.add_theme_color_override("font_color", col)
+	var vw: float = get_viewport().get_visible_rect().size.x
+	_flash.size.x = vw
+	_flash.position = Vector2(0, 110)
+	_flash.modulate.a = 1.0
+	_flash_t = 1.4
+
 # ---------- 主選單 ----------
 func show_menu(has_save: bool) -> void:
 	_clear()
@@ -342,6 +362,13 @@ func _render_dlg(d: Dictionary, active_side: String) -> void:
 	_typing = true
 
 func _process(delta: float) -> void:
+	if _flash_t > 0.0 and is_instance_valid(_flash):
+		_flash_t -= delta
+		if _flash_t < 0.5:
+			_flash.modulate.a = clampf(_flash_t / 0.5, 0.0, 1.0)
+		if _flash_t <= 0.0:
+			_flash.queue_free()
+			_flash = null
 	if _typing:
 		_type_accum += delta
 		while _type_accum >= 0.016 and _type_k < _type_full.length():
