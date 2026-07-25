@@ -679,20 +679,23 @@ func _aim_pose() -> void:
 	# 這是真實遊戲做無動畫蹲姿的標準手法，且沿用已驗證可用的雙骨 IK（手臂誤差僅 6cm）。
 	# ⚠ 除錯提醒：在 skeleton_updated 內「當幀讀回」骨骼位置會拿到舊值，
 	#   看起來像 IK 沒作用，其實畫面是對的——要看渲染結果，不要信同幀讀數。
-	# 蹲姿（2026-07-25 保守版）：屈膝 IK 幾何試了多種組合，
-	# 都會變成「坐在看不見的椅子上」或小腿被拉平——使用者兩次都一眼看出來。
-	# 故先退成「微幅低身 + 上身前傾」：幅度小、不出戲，等真蹲姿做出來再換掉。
-	# 真正的解法應該是讓 UAL 的 Crouch_Idle 重定向成功（那是真人 mocap），而非手算幾何。
+	# 蹲姿（2026-07-25 定案）：手寫屈膝 + 依「小腿末端」自動貼地。
+	# 先前判定「三個軸都無效」是誤判——量尺用了 Foot 骨，
+	# 而此骨架的 Foot 父階是 Root、不跟著腿動，量到的永遠是同一個數。
 	if _crouch > 0.001:
-		_model.position.y = _model_base_y - CROUCH_DEPTH * _crouch
 		_model.position.z = 0.0
 		_model.rotation.x = 0.0
 		var rightax := global_basis.x.normalized()
-		_rig.add_world_rotation("Abdomen", rightax, deg_to_rad(16.0) * _crouch)
-		_rig.add_world_rotation("Torso", rightax, deg_to_rad(8.0) * _crouch)
+		_rig.add_world_rotation("Abdomen", rightax, deg_to_rad(20.0) * _crouch)   # 上身前傾，去掉坐姿感
+		_rig.add_world_rotation("Torso", rightax, deg_to_rad(10.0) * _crouch)
 		for sd in ["L", "R"]:
-			_rig.bend_bone("UpperLeg." + sd, LEG_AXIS, 16.0, _crouch)
-			_rig.bend_bone("LowerLeg." + sd, LEG_AXIS, -22.0, _crouch)
+			_rig.bend_bone("UpperLeg." + sd, LEG_AXIS, 18.0, _crouch)
+			_rig.bend_bone("LowerLeg." + sd, LEG_AXIS, -26.0, _crouch)
+		# 自動貼地：用小腿末端當腳踝，把身體降到剛好踩地（不再猜固定位移）
+		var ankle: Vector3 = _rig.leg_end("LowerLeg.L", "Foot.L")
+		if ankle != Vector3.ZERO:
+			var drop: float = ankle.y - (global_position.y + ANKLE_H)
+			_model.position.y = clampf(_model.position.y - drop, _model_base_y - 1.0, _model_base_y + 0.1)
 	_aiming = (not _dead) and _move_target == null
 	if not _aiming:
 		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上

@@ -41,7 +41,7 @@ func setup(src: Skeleton3D, dst: Skeleton3D) -> int:
 		var di := dst.find_bone(dname)
 		if di < 0 and ALT.has(dname):
 			di = dst.find_bone(ALT[dname])
-		if si >= 0 and di >= 0:
+		if si >= 0 and di >= 0 and _parent_ok(src, dst, si, di):
 			_pairs.append([si, di])
 			if s == "pelvis":
 				_hips = [si, di]
@@ -292,3 +292,32 @@ func ground_offset(foot_bones: Array) -> float:
 	if lo == INF:
 		return 0.0
 	return -lo
+
+# 算出「小腿末端（腳踝）」的世界位置。
+# ⚠ 不可直接讀腳骨：此類 Quaternius 骨架的 Foot 骨父階是 Root（不是 LowerLeg），
+#   腳骨不跟著腿動，拿它量高度或當 IK 末端都會得到垃圾數據（2026-07-25 血淚）。
+#   改用「rest 空間裡小腿骨→腳骨的向量」換算，與骨架命名/軸向慣例無關。
+func leg_end(lower: String, foot: String) -> Vector3:
+	var li := _dst.find_bone(lower)
+	var fi := _dst.find_bone(foot)
+	if li < 0 or fi < 0:
+		return Vector3.ZERO
+	var shin_local: Vector3 = _dst.get_bone_global_rest(li).affine_inverse() * _dst.get_bone_global_rest(fi).origin
+	return _dst.global_transform * (_dst.get_bone_global_pose(li) * shin_local)
+
+# 父子關係健檢：只有「兩邊的父骨也互相對應」的骨頭才納入重定向。
+# 血淚來源：遊戲內這具 Quaternius 骨架的 Foot 骨父階是 Root（不是 LowerLeg），
+# 把腿鏈的旋轉寫到它身上等於在身體根部亂轉——這就是先前重定向把整個人扭壞的真因。
+func _parent_ok(src: Skeleton3D, dst: Skeleton3D, si: int, di: int) -> bool:
+	var sp := src.get_bone_parent(si)
+	if sp < 0:
+		return true
+	var dp := dst.get_bone_parent(di)
+	if dp < 0:
+		return false
+	# 只擋真正病態的情形：目標骨掛在骨架根部，而來源骨其實在肢體鏈中間。
+	# 中間多一節（如 UpperLeg 掛在 Body 而非 Hips）無妨，旋轉仍相對於穩定的父骨。
+	var dpn := dst.get_bone_name(dp)
+	if dpn == "Root" and src.get_bone_name(sp) != "root":
+		return false
+	return true
