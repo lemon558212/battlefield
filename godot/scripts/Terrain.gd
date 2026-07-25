@@ -42,6 +42,7 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 	_grass_zones = map.get("bushes", [])
 	_build_mesh()
 	_build_grass()
+	_build_backdrop()
 
 # --- 值雜訊（value noise）：正弦疊加會產生規則的斜條紋，遠鏡頭一眼看破（實拍）。
 # 這裡用固定 hash 的雙線性內插雜訊，結果自然且可重現（同一張圖每次都一樣）。
@@ -110,6 +111,17 @@ func slope_at(px: float, py: float) -> float:
 	var hx: float = height_at(px + d, py) - height_at(px - d, py)
 	var hz: float = height_at(px, py + d) - height_at(px, py - d)
 	return Vector2(hx, hz).length() / (2.0 * d * ws)
+
+# 地形移動成本（GDD/14 §3-4）：上坡 ×1.5、彈坑/溝底 ×2。
+# AP 是「距離換算」的，成本倍率直接乘在扣除量上。
+func move_cost(px: float, py: float) -> float:
+	var c := 1.0
+	if slope_at(px, py) > 0.35:
+		c = 1.5
+	for cr in _craters:
+		if Vector2(px - float(cr.get("x", 0)), py - float(cr.get("y", 0))).length() < float(cr.get("r", 36)):
+			return 2.0
+	return c
 
 # 這個點是不是在壕溝裡（半身掩體判定）
 func in_trench(px: float, py: float) -> bool:
@@ -260,6 +272,42 @@ func _build_grass() -> void:
 	mmi.name = "Grass"
 	mmi.multimesh = mm
 	add_child(mmi)
+
+# 遠景山脈剪影：戰場外圍一圈低多邊形山，讓地圖不再像一塊有邊界的積木。
+# 不投影、不受霧影響太多，純粹當背板（GDD/14 §0a：質感來自光影與空間層次）。
+func _build_backdrop() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 424242
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var radius: float = maxf(mw, mh) * ws * 1.5 + 120.0
+	var n := 46
+	for i in n:
+		var a: float = TAU * float(i) / float(n) + rng.randf_range(-0.03, 0.03)
+		var d: float = radius * rng.randf_range(0.85, 1.25)
+		var hgt: float = rng.randf_range(28.0, 74.0)
+		var wdt: float = rng.randf_range(60.0, 130.0)
+		var c: Vector3 = Vector3(cos(a) * d, -4.0, sin(a) * d)
+		var side := Vector3(-sin(a), 0, cos(a)) * wdt * 0.5
+		var top := c + Vector3(0, hgt, 0) + side * rng.randf_range(-0.25, 0.25)
+		var col := Color(0.30, 0.36, 0.42).lerp(Color(0.42, 0.48, 0.54), rng.randf())
+		for v in [c - side, c + side, top]:
+			st.set_color(col.srgb_to_linear())
+			st.add_vertex(v)
+		for v in [c + side, c - side, top]:      # 背面也畫，繞圈時哪一側都看得到
+			st.set_color(col.srgb_to_linear())
+			st.add_vertex(v)
+	st.generate_normals()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED   # 剪影不需要打光，也省效能
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	st.set_material(mat)
+	var mi := MeshInstance3D.new()
+	mi.name = "Backdrop"
+	mi.mesh = st.commit()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
 
 # 一叢草：三片交叉的窄面片，低多邊形風格下比一堆方塊自然，也只有 6 個三角形
 func _tuft_mesh() -> ArrayMesh:

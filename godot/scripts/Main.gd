@@ -182,10 +182,9 @@ func _e2e() -> void:
 	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
 	await get_tree().create_timer(0.25).timeout
 	print("[e2e]   選取=", "OK" if selected != null else "FAIL(點不到兵)")
+	print("[e2e]   第三人稱=%s" % ("OK" if cam.is_tps() else "FAIL(沒進第三人稱)"))
 	var before: Vector3 = pu["node"].global_position
-	var dest := _to3d(pu["wx"] + 150.0, pu["wy"] + 100.0)
-	_send_click(cam.unproject_position(dest + Vector3(0, 0.02, 0)))
-	await get_tree().create_timer(1.5).timeout
+	await _hold_key(KEY_W, 1.5)
 	var moved: float = before.distance_to(pu["node"].global_position)
 	print("[e2e]   位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
 	await _snap("res://e2e_battle.png")
@@ -200,6 +199,22 @@ func _send_click(pos: Vector2) -> void:
 		ev.pressed = pressed
 		ev.position = pos
 		get_viewport().push_input(ev)
+
+# 合成按鍵：第三人稱是用 WASD 走，測試也必須走同一條路
+# （Input.parse_input_event 會更新 Input.is_key_pressed 的內部狀態，push_input 不會）
+func _hold_key(code: Key, secs: float) -> void:
+	var down := InputEventKey.new()
+	down.keycode = code
+	down.physical_keycode = code
+	down.pressed = true
+	Input.parse_input_event(down)
+	await get_tree().create_timer(secs).timeout
+	var up := InputEventKey.new()
+	up.keycode = code
+	up.physical_keycode = code
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
 
 func _snap(p: String) -> void:
 	await RenderingServer.frame_post_draw
@@ -271,13 +286,11 @@ func _selftest() -> void:
 	_send_click(sp_unit)
 	await get_tree().create_timer(0.25).timeout
 	print("[movechk] 合成點擊選取 selected=", "OK" if selected != null else "FAIL(點擊被吃掉/選不到兵)")
+	print("[movechk] 點兵後進入第三人稱 %s" % ("OK" if cam.is_tps() else "FAIL"))
 	var p_before: Vector3 = pu["node"].global_position
-	var ground := _to3d(pu["wx"] + 150.0, pu["wy"] + 100.0)
-	var sp_ground: Vector2 = cam.unproject_position(ground + Vector3(0, 0.02, 0))
-	_send_click(sp_ground)
-	await get_tree().create_timer(1.2).timeout
+	await _hold_key(KEY_W, 1.2)
 	var moved: float = p_before.distance_to(pu["node"].global_position)
-	print("[movechk] 點地面後位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	print("[movechk] 第三人稱前進位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
 	# ---- 行動模式 AP/CP（GDD/01 §1-2）----
 	# 上面那次點擊本身就是「下令」，所以這裡先驗它扣了 CP、也給了 AP
 	var cp0: int = cp
@@ -294,28 +307,17 @@ func _selftest() -> void:
 	# 走到 AP 歸零：一次點很遠的地方，應只走到 AP 允許的最遠處
 	var ap_before: float = acting["ap"]
 	var reach_m: float = _ap_metres(acting)
-	# 目標點要往「地圖中心」方向拉：往外拉會被 _clamp_to_map 夾住，
-	# 走不到 AP 允許的距離而誤判成 FAIL（2026-07-26 加了邊界夾限後踩到）。
-	var mw2: float = map_data.get("w", 960)
-	var mh2: float = map_data.get("h", 600)
-	var to_mid := Vector2(mw2 * 0.5 - pu["wx"], mh2 * 0.5 - pu["wy"])
-	if to_mid.length() < 1.0:
-		to_mid = Vector2(1, 0)
-	to_mid = to_mid.normalized() * 900.0
-	var far := _to3d(pu["wx"] + to_mid.x, pu["wy"] + to_mid.y)
-	# 鏡頭要先拉遠：45m 外的點在近距離鏡頭下根本不在畫面上，
-	# unproject 出來的螢幕座標點不到那裡，會走一小段就停（誤判成 AP 邏輯壞掉）。
-	cam.dist = 60.0
-	cam.pitch_deg = 62.0
+	# ⚠ 先把第三人稱視角轉向地圖中心再往前走。
+	#   單位常常就站在地圖邊緣，朝外走會被 _clamp_to_map 夾住原地踏步，
+	#   看起來像「AP 沒扣、人不動」，其實是撞牆（2026-07-26 花了三輪才查出來）。
+	var mid: Vector3 = _to3d(map_data.get("w", 960) * 0.5, map_data.get("h", 600) * 0.5)
+	var to_mid: Vector3 = mid - pu["node"].global_position
+	cam.tps_yaw = rad_to_deg(atan2(to_mid.x, to_mid.z))
 	await get_tree().create_timer(0.4).timeout
 	var q_before: Vector3 = pu["node"].global_position
-	_send_click(cam.unproject_position(far + Vector3(0, 0.02, 0)))
-	# 等到「真的停下來」而不是等固定秒數：蹲行只有 0.45 倍速，
-	# 固定秒數會在單位剛好站在掩體旁時誤判成 FAIL（2026-07-26 踩到）。
-	var wg := 0
-	while pu["node"].is_moving() and wg < 200:
-		await get_tree().create_timer(0.1).timeout
-		wg += 1
+	# 按住前進直到 AP 見底。時間要照「最慢的情況」抓：站在掩體旁會自動蹲行，
+	# 速度只有 1.35m/s 而不是 3m/s，用 3m/s 抓時間會提早放手（實測 9.6/12.4m）。
+	await _hold_key(KEY_W, reach_m / 1.2 + 2.0)
 	var run_m: float = q_before.distance_to(pu["node"].global_position)
 	print("[apchk] AP 上限內移動：可走 %.1fm 實走 %.1fm 剩餘 AP=%.0f %s" % [
 			reach_m, run_m, float(acting["ap"]),
@@ -921,12 +923,20 @@ func _begin_action(u) -> bool:
 		ui.update_hud(turn, "player", cp)
 		ui.show_ap(u["ap"], u["ap_max"])
 		_update_ap_ring()
+		# 下令＝進入第三人稱操控（GDD/07）：鏡頭滑到角色背後、滑鼠鎖定成自由視角
+		cam.set_tps(u["node"])
+		ui.show_crosshair(true)
+		_capture_mouse(true)
 	return true
 
 # 結束行動：單位進入警戒狀態（GDD/01 §2 最後一條）
 func _end_action() -> void:
 	if ui != null:
 		ui.hide_fire_panel()
+		ui.show_crosshair(false)
+	if cam != null:
+		cam.clear_tps()
+	_capture_mouse(false)
 	if acting == null:
 		return
 	acting["node"].stop()
@@ -1090,9 +1100,12 @@ func _refresh_visibility() -> void:
 			if p["side"] != player_side or not p["alive"]:
 				continue
 			var sight := SIGHT
-			for c in _covers:                       # 躲樹叢＝隱蔽，被發現距離砍半
+			for c in _covers:
 				if c["type"] == "bush" and Vector2(c["wx"] - u["wx"], c["wy"] - u["wy"]).length() <= c["r"]:
-					sight = SIGHT * 0.5
+					# 草叢隱蔽（GDD/01 §5a）：蹲伏且尚未開火才真的藏得住（發現距離砍到 0.3）；
+					# 站著或開過火只砍一半——草叢不是隱形斗篷。
+					var hiding: bool = is_instance_valid(u["node"]) and u["node"]._crouch > 0.5 							and not bool(u.get("fired", false))
+					sight = SIGHT * (0.3 if hiding else 0.5)
 					break
 			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() <= sight:
 				vis = true
@@ -1102,6 +1115,35 @@ func _refresh_visibility() -> void:
 
 # ---------- 輸入 ----------
 func _unhandled_input(event: InputEvent) -> void:
+	# 第三人稱：Esc 結束行動（同時放開滑鼠），左鍵對準心開火
+	if cam != null and cam.is_tps():
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_end_action()
+			return
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			if ui.fire_panel_open():
+				return
+			var tgt = _tps_target()
+			if tgt == null:
+				ui.flash_msg("準心沒有對到敵人", Color(1.0, 0.8, 0.5))
+				return
+			if acting == null or bool(acting.get("fired", false)):
+				ui.flash_msg("這次行動已經開過火了", Color(1.0, 0.7, 0.4))
+				return
+			var dpx := Vector2(tgt["wx"] - acting["wx"], tgt["wy"] - acting["wy"]).length()
+			if dpx > float(acting["weapon"].get("range", 200)):
+				ui.flash_msg("超出射程", Color(1.0, 0.7, 0.4))
+				return
+			var sh2 = acting
+			_capture_mouse(false)          # 選部位要用游標
+			ui.show_fire_panel(_fire_preview(sh2, tgt), func(part):
+				ui.hide_fire_panel()
+				if part != "" and acting == sh2 and not bool(sh2.get("fired", false)):
+					_fire(sh2, tgt, part)
+				if cam.is_tps():
+					_capture_mouse(true))
+			return
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if st == St.CMD:
 			_click(event.position)
@@ -1336,6 +1378,7 @@ func _process(delta: float) -> void:
 			tr["m"].queue_free()
 			tr["l"].queue_free()
 			_tracers.erase(tr)
+	_tps_control(delta)
 	_action_tick(delta)
 	_intercept_tick(delta)
 	if st == St.ENEMY:
@@ -1344,6 +1387,64 @@ func _process(delta: float) -> void:
 		if _enemy_t <= 0:
 			_enemy_step()
 			_enemy_t = 0.25
+
+# 滑鼠鎖定：第三人稱要自由轉視角就得鎖游標；但一開面板/回指令模式就要放開，否則點不到 UI。
+func _capture_mouse(on: bool) -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
+
+# 第三人稱操控（GDD/07）：WASD 相對鏡頭移動、準心決定瞄準方向。
+# AP 照樣由 _action_tick 依「實際位移」扣，兩種操作方式共用同一套經濟。
+func _tps_control(delta: float) -> void:
+	if acting == null or st != St.CMD or not cam.is_tps():
+		return
+	var node = acting["node"]
+	if not is_instance_valid(node) or not acting["alive"]:
+		return
+	# 準心方向：角色永遠瞄向你看的地方
+	var fwd: Vector3 = cam.tps_forward()
+	node.aim_point = node.global_position + Vector3(0, 1.4, 0) + fwd * 20.0
+	if ui.fire_panel_open():
+		return                      # 面板開著時不要一邊走一邊選部位
+	var ix := 0.0
+	var iz := 0.0
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		iz += 1.0
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		iz -= 1.0
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		ix -= 1.0
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		ix += 1.0
+	if ix == 0.0 and iz == 0.0:
+		return
+	if float(acting["ap"]) <= 0.0:
+		return
+	var flat := Vector3(fwd.x, 0, fwd.z).normalized()
+	var right := Vector3(flat.z, 0, -flat.x)
+	var dir: Vector3 = (flat * iz + right * ix).normalized()
+	var before: Vector3 = node.global_position
+	node.move_dir(dir, delta)
+	# 邊界與 AP 上限：走到夾限外就把人推回來（AP 由 _action_tick 依實際位移扣）
+	var clamped: Vector3 = _clamp_to_map(node.global_position)
+	node.global_position = Vector3(clamped.x, node.global_position.y, clamped.z)
+	if before.distance_to(node.global_position) < 0.0001:
+		return
+
+# 第三人稱下開火：取準心最接近的敵人
+func _tps_target():
+	var vp := get_viewport().get_visible_rect().size
+	var center := vp * 0.5
+	var best = null
+	var bd := 1e9
+	for u in units:
+		if not u["alive"] or u["side"] == player_side or not u["node"].visible:
+			continue
+		var sp: Vector2 = cam.unproject_position(u["node"].global_position + Vector3(0, 1.1, 0))
+		var d: float = sp.distance_to(center)
+		if d < 140.0 and d < bd:
+			bd = d
+			best = u
+	return best
 
 # 行動模式每幀：依實際移動距離扣 AP，歸零就停下（GDD/01 §2：不可殘留走不了的尾數）
 # 敵我共用同一套扣法——AI 若不吃 AP，玩家受限而敵人不受，那才是真的不公平。
@@ -1358,7 +1459,11 @@ func _action_tick(_delta: float) -> void:
 	var moved: float = Vector2(pos.x - _act_last.x, pos.z - _act_last.z).length()
 	_act_last = pos
 	if moved > 0.0:
-		acting["ap"] = maxf(0.0, float(acting["ap"]) - moved / (PX_PER_AP * WORLD_SCALE))
+		# 地形成本（GDD/14 §3-4）：上坡 ×1.5、彈坑 ×2——同樣的距離，難走的地形就是吃更多 AP
+		var tcost := 1.0
+		if terrain != null:
+			tcost = terrain.move_cost(float(acting["wx"]), float(acting["wy"]))
+		acting["ap"] = maxf(0.0, float(acting["ap"]) - moved / (PX_PER_AP * WORLD_SCALE) * tcost)
 		var p := _live_px(acting)
 		acting["wx"] = p.x
 		acting["wy"] = p.y

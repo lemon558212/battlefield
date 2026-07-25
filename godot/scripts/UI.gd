@@ -128,6 +128,39 @@ func flash_msg(txt: String, col := Color(1, 1, 1)) -> void:
 	_flash.modulate.a = 1.0
 	_flash_t = 1.4
 
+# ---------- 準心（第三人稱行動模式）----------
+var _cross: Control = null
+
+func show_crosshair(on: bool) -> void:
+	if not on:
+		if is_instance_valid(_cross):
+			_cross.queue_free()
+		_cross = null
+		return
+	if is_instance_valid(_cross):
+		return
+	var c := Control.new()
+	c.name = "Crosshair"
+	var vp := get_viewport().get_visible_rect().size
+	c.position = vp * 0.5
+	for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		var bar := ColorRect.new()
+		bar.color = Color(1, 1, 1, 0.85)
+		if absf(d.x) > 0.0:
+			bar.size = Vector2(9, 2)
+			bar.position = Vector2(d.x * 7.0 - (0.0 if d.x > 0 else 9.0), -1)
+		else:
+			bar.size = Vector2(2, 9)
+			bar.position = Vector2(-1, d.y * 7.0 - (0.0 if d.y > 0 else 9.0))
+		c.add_child(bar)
+	var dot := ColorRect.new()
+	dot.color = Color(1, 0.85, 0.35, 0.9)
+	dot.size = Vector2(3, 3)
+	dot.position = Vector2(-1.5, -1.5)
+	c.add_child(dot)
+	root.add_child(c)
+	_cross = c
+
 # ---------- 射擊面板（GDD/13：命中與傷害預測、部位選擇）----------
 # 玩家在按下開火前就該知道「打得中嗎、打得痛嗎」，這是戰棋最基本的資訊揭露。
 var _fire_box: Control = null

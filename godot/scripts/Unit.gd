@@ -709,7 +709,26 @@ func _stick_to_ground(delta: float) -> void:
 
 # 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
 func is_moving() -> bool:
-	return _move_target != null and not _dead
+	return (_move_target != null or _dir_moving) and not _dead
+
+# 第三人稱直接操控（GDD/07）：每幀給一個世界方向就走，不設目的地。
+# 與點擊移動共用同一套 AP 扣除（Main._action_tick 量的是「實際位移」，兩種都吃得到）。
+var _dir_moving := false
+func move_dir(dir: Vector3, delta: float) -> void:
+	if _dead or dir.length() < 0.01:
+		return
+	_move_target = null
+	_shoot_target = null
+	_busy_until = 0.0
+	_dir_moving = true
+	var d := Vector3(dir.x, 0, dir.z).normalized()
+	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), minf(1.0, TURN_SPEED * 0.6 * delta))
+	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul)
+	global_position += d * spd * delta
+	if _crouch > 0.5 and anim_names.has("crouch_walk"):
+		_play("crouch_walk")
+	else:
+		_play("run" if anim_names.has("run") else "walk")
 
 func move_to(p: Vector3) -> void:
 	if _dead: return
@@ -858,6 +877,9 @@ func _process(delta: float) -> void:
 					_shoot_target.global_position + Vector3(0, 1.2, 0))
 			_shoot_target = null
 			aim_point = null
+		return
+	if _dir_moving:
+		_dir_moving = false          # 由 Main 每幀重新設定；沒設就代表玩家鬆開了方向鍵
 		return
 	if now < _busy_until:
 		return
