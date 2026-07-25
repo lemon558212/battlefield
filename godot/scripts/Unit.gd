@@ -90,6 +90,8 @@ const UAL_ANIMS := "res://assets/models/anims/ual_standard.glb"
 const USE_RETARGET_CROUCH := false
 static var _crouch_pose := {}   # 全體共用：蹲姿只需算一次，不必每個單位都揹一份動畫來源
 static var _crouch_busy := false
+const CROUCH_DEPTH := 0.34   # 蹲下時身體下沉高度
+const ANKLE_H := 0.08        # 腳踝骨離地高度
 const LEG_AXIS := 0      # 這具骨架的膝蓋彎曲軸（三軸掃描驗得）
 var _gun_pos := Vector3.ZERO
 var want_prone := false        # 趴姿：全身伏地出槍（狙擊/壓制用）
@@ -670,9 +672,22 @@ func _aim_pose() -> void:
 		_rig.bend_bone("LowerLeg.R", LEG_AXIS, 8.0, _prone)
 		_rig.bend_bone("Abdomen", LEG_AXIS, -18.0, _prone)   # 上身抬起才看得到前方
 		_rig.bend_bone("Torso", LEG_AXIS, -14.0, _prone)
-	# ⚠ 手寫蹲姿暫時停用：三個候選軸實測都無法真正屈膝
-	#   （站姿腿跨距 0.93，軸0=0.928 等同沒彎、軸1/2=0.872 只縮 6cm，應縮到約 0.59）。
-	#   原因未明，待查；先不套用，避免留下半成品姿勢。
+	# 蹲姿（換法 2026-07-25）：不再猜骨頭該繞哪個軸轉——那條路三個軸實測都失敗。
+	# 改用「壓低身體 → 用 IK 把雙腳釘回地面」，膝蓋就會被幾何關係自然頂彎。
+	# 這是真實遊戲做無動畫蹲姿的標準手法，且沿用已驗證可用的雙骨 IK（手臂誤差僅 6cm）。
+	# ⚠ 除錯提醒：在 skeleton_updated 內「當幀讀回」骨骼位置會拿到舊值，
+	#   看起來像 IK 沒作用，其實畫面是對的——要看渲染結果，不要信同幀讀數。
+	if _crouch > 0.001:
+		_model.position.y = _model_base_y - CROUCH_DEPTH * _crouch
+		_model.rotation.x = 0.0
+		var fwd := facing_dir()   # 膝蓋朝正前方彎
+		for sd in ["L", "R"]:
+			var fb := sk.find_bone("Foot." + sd)
+			if fb < 0:
+				continue
+			var fw: Vector3 = sk.global_transform * sk.get_bone_global_pose(fb).origin
+			var tgt := Vector3(fw.x, global_position.y + ANKLE_H, fw.z)
+			_rig.ik_two_bone("UpperLeg." + sd, "LowerLeg." + sd, "Foot." + sd, tgt, fwd)
 	_aiming = (not _dead) and _move_target == null
 	if not _aiming:
 		_gun_node.transform = _gun_carry_xf      # 攜行：還原成掛在手上
@@ -762,5 +777,6 @@ func _ready() -> void:
 func _crouch_offset() -> void:
 	if _model == null:
 		return
-	_model.position.y = _model_base_y - 0.22 * _crouch
-	_model.rotation.x = 0.10 * _crouch
+	if _crouch <= 0.001 and _prone <= 0.001:
+		_model.position.y = _model_base_y
+		_model.rotation.x = 0.0
