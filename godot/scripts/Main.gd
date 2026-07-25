@@ -4,27 +4,30 @@ extends Node3D
 
 enum St { MENU, STORY, BRIEF, DIALOGUE, DEPLOY, CMD, ENEMY, END }
 
+# 2026-07-25 換骨架體系：全面改用 Quaternius Humanoid Rig（hr_*.fbx）。
+# 舊的 *.glb 骨架 Foot 骨掛在 Root、腿不成鏈，做不出蹲姿也接不了真人動作重定向；
+# hr_ 骨架階層正確，動作全部由 UAL 真人 mocap 庫即時重定向（Unit._make_anim_source）。
 const CLASS_MODEL := {
-	"rifleman": "res://assets/models/chars/rifleman.glb", "sniper": "res://assets/models/chars/sniper.glb",
-	"mg": "res://assets/models/chars/mg.glb", "assault": "res://assets/models/chars/assault.glb",
-	"at": "res://assets/models/chars/at.glb", "mortar": "res://assets/models/chars/mortar.glb",
-	"engineer": "res://assets/models/chars/engineer.glb", "specops": "res://assets/models/chars/specops.glb",
-	"sam": "res://assets/models/chars/sam.glb",
+	"rifleman": "res://assets/models/chars/hr_m_Soldier.fbx", "sniper": "res://assets/models/chars/hr_w_Swat.fbx",
+	"mg": "res://assets/models/chars/hr_m_Soldier.fbx", "assault": "res://assets/models/chars/hr_m_Soldier.fbx",
+	"at": "res://assets/models/chars/hr_m_Soldier.fbx", "mortar": "res://assets/models/chars/hr_m_Soldier.fbx",
+	"engineer": "res://assets/models/chars/hr_m_Worker.fbx", "specops": "res://assets/models/chars/hr_m_SciFi.fbx",
+	"sam": "res://assets/models/chars/hr_m_Soldier.fbx",
 }
 # 2026-07-24 使用者裁定：放棄「立繪轉 3D」(tripo 綁骨爛/正面軸坑多)，改用內建 Quaternius 兵種模型，
 # 再依各角色立繪配色「換裝」(data/char_look.json + Unit._apply_look)。骨架乾淨、動畫原生正確、零校正。
 # 我方英雄基底：內建模型多為平民，僅 soldier(女性SWAT)/specops(黑色戰術)像軍人，
 # 故依「立繪氣質」挑最接近者當基底，再以 char_look.json 換裝上色（2026-07-24 實拍對照表挑選）。
 const HERO_MODEL := {
-	"sniper":   "res://assets/models/chars/soldier.glb",    # 韓沐霜：唯一女性模型(馬尾)
-	"rifleman": "res://assets/models/chars/specops.glb",    # 丁小滿：黑色戰術裝
-	"engineer": "res://assets/models/chars/engineer.glb",   # 白老師：工兵/工人裝正合適
-	"mg":       "res://assets/models/chars/rifleman.glb",   # 雷諾：大鬍子老兵感
-	"assault":  "res://assets/models/chars/assault.glb",    # 艾拉：衝勁造型
-	"at":       "res://assets/models/chars/at.glb",         # 巴頓
-	"mortar":   "res://assets/models/chars/mortar.glb",     # 賽琳：俐落西裝
-	"specops":  "res://assets/models/chars/specops.glb",    # 影山：黑色戰術
-	"sam":      "res://assets/models/chars/sam.glb",        # 汀娜：裝甲
+	"sniper":   "res://assets/models/chars/hr_w_Swat.fbx",       # 韓沐霜：女性戰術裝
+	"rifleman": "res://assets/models/chars/hr_m_SciFi.fbx",      # 丁小滿：黑色戰術裝
+	"engineer": "res://assets/models/chars/hr_m_Worker.fbx",     # 白老師：工兵/工人裝正合適
+	"mg":       "res://assets/models/chars/hr_m_Soldier.fbx",    # 雷諾：制服老兵感
+	"assault":  "res://assets/models/chars/hr_w_Swat.fbx",       # 艾拉：突擊，戰術裝
+	"at":       "res://assets/models/chars/hr_m_Adventurer.fbx", # 巴頓
+	"mortar":   "res://assets/models/chars/hr_w_Casual.fbx",     # 賽琳：俐落便裝
+	"specops":  "res://assets/models/chars/hr_m_SciFi.fbx",      # 影山：黑色戰術
+	"sam":      "res://assets/models/chars/hr_w_Spacesuit.fbx",  # 汀娜：裝甲
 }
 const CLASS_TINT := {
 	"rifleman": Color(0.55, 0.75, 0.45), "sniper": Color(0.35, 0.45, 0.6), "mg": Color(0.7, 0.5, 0.3),
@@ -296,6 +299,27 @@ func _selftest() -> void:
 		tu["node"].move_to(_to3d(tu["wx"] + 400.0, tu["wy"]))
 		await get_tree().create_timer(0.5).timeout
 		print("[coverchk] 移動中站起 crouch=%.2f %s" % [tu["node"]._crouch, "OK" if tu["node"]._crouch < 0.5 else "FAIL"])
+		# F) 近拍：把兵移到空地、鏡頭壓低到人身高，站姿/蹲姿各拍一張。
+		#    戰術鏡頭離很遠，姿勢好壞在戰場俯瞰圖上根本看不出來——不近拍就等於沒驗。
+		var u3: Unit = tu["node"]
+		u3.stop()
+		u3.global_position = _to3d(tu["wx"] + 300.0, tu["wy"] + 300.0)
+		u3.want_cover = false
+		cam.focus = u3.global_position + Vector3(0, 1.0, 0)
+		cam.dist = 3.2
+		cam.pitch_deg = 12.0
+		await get_tree().create_timer(0.9).timeout
+		await _snap("res://close_stand.png")
+		u3.want_cover = true
+		await get_tree().create_timer(1.0).timeout
+		await _snap("res://close_crouch.png")
+		# 效能：每單位每幀都在做重定向＋雙手 IK＋手指，換骨架後必須實測
+		var t0 := Time.get_ticks_usec()
+		for i in 60:
+			await get_tree().process_frame
+		var ms: float = (Time.get_ticks_usec() - t0) / 60000.0
+		print("[perf] units=%d 平均幀時=%.1fms (%.0f FPS) %s" % [
+			units.size(), ms, 1000.0 / maxf(ms, 0.001), "OK" if ms < 22.0 else "慢"])
 	print("[selftest] DONE units=", units.size())
 	get_tree().quit(0)
 

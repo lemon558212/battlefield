@@ -242,7 +242,7 @@ func _merged_aabb(node: Node) -> AABB:
 
 # 換裝：用內建 3D 模型 + 依角色立繪配色重新上色（data/char_look.json）。
 # 模型材質具名(Hair/Skin/Eye/Eyebrows/各衣著色)，依名稱分部位套色；皮膚與眼睛不動。
-const _KEEP := ["skin", "eye", "eyebrow", "moustache", "teeth", "mouth"]
+const _KEEP := ["skin", "eye", "eyebrow", "moustache", "teeth", "mouth", "visor"]
 func _apply_look(model: Node, p_cls: String) -> void:
 	var look: Dictionary = GameData.char_look.get(p_cls, {})
 	if look.is_empty():
@@ -279,8 +279,15 @@ func _apply_look(model: Node, p_cls: String) -> void:
 					target = c_acc
 				else:
 					target = c_coat
+			# 保留原模型的明暗層次：直接刷單一色會把「深色戰術裝＋更深的護具」壓成一團黑，
+			# 遠看就是一個剪影（hr_w_Swat 換上韓沐霜配色時整個人變黑，2026-07-25 實拍）。
+			# 作法＝取角色的色相、乘回原材質的相對亮度。
+			var t_lum: float = maxf(target.get_luminance(), 0.06)
+			var shade: float = clampf(src.get_luminance() / t_lum, 0.6, 1.7)
+			var toned := Color(clampf(target.r * shade, 0.0, 1.0), clampf(target.g * shade, 0.0, 1.0),
+					clampf(target.b * shade, 0.0, 1.0), target.a)
 			var dup := (base as StandardMaterial3D).duplicate()
-			dup.albedo_color = src.lerp(target, 0.82)
+			dup.albedo_color = src.lerp(toned, 0.8)
 			mi.set_surface_override_material(si, dup)
 
 func _tint(model: Node, tint: Color, strength: float) -> void:
