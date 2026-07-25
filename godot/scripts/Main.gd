@@ -71,6 +71,10 @@ var _zone_mesh: MeshInstance3D = null
 # 掩體登記表（GDD/13 Phase2）：每筆＝{wx,wy,r,val,type}，座標為遊戲 px。
 # val＝遮蔽強度 0~1；sandbag 硬掩體、building 全掩體、bush 只給隱蔽(降敵視野)不擋彈。
 var _covers: Array = []
+# 新腳本的 class_name 要等編輯器掃描過才註冊得到，直接用會 Parse Error（2026-07-26 踩到）。
+# 用 preload 引用最保險，不依賴 .godot 的類別快取。
+const TERRAIN := preload("res://scripts/Terrain.gd")
+var terrain = null                     # 地形高度真相（GDD/14）
 
 const GROUND_SHADER := """
 shader_type spatial;
@@ -591,6 +595,52 @@ func _selftest() -> void:
 			else:
 				print("[partchk] FAIL 面板上找不到頭部選項")
 			_end_action()
+		# I-3) 地形（GDD/14 §1）：壕溝深度、丘陵高度、單位是否真的貼著地形
+		if terrain != null:
+			var trs = map_data.get("trenches", [])
+			if trs.is_empty():
+				print("[terrainchk] SKIP 這張圖沒有壕溝資料")
+			else:
+				var tp = trs[0]["pts"][0]
+				var tx: float = float(tp[0])
+				var ty: float = float(tp[1])
+				var h_in: float = terrain.height_at(tx, ty)
+				var h_out: float = terrain.height_at(tx + float(trs[0].get("w", 44)) * 2.4, ty)
+				print("[terrainchk] 壕溝內 %.2fm vs 溝外 %.2fm（應低於 1m 以上） %s" % [h_in, h_out,
+						"OK" if h_out - h_in > 1.0 else "FAIL"])
+				print("[terrainchk] 壕溝登記為掩體 %s" % ("OK" if terrain.in_trench(tx, ty) else "FAIL"))
+				# 把兵放進壕溝：貼地邏輯應該把他降下去
+				var su = _deployed[0]
+				su["node"].stop()
+				su["node"].global_position = _to3d(tx, ty)
+				su["wx"] = tx
+				su["wy"] = ty
+				_update_cover_state(su)
+				await get_tree().create_timer(0.8).timeout
+				var uy: float = su["node"].global_position.y
+				print("[terrainchk] 單位在溝內高度 %.2fm（應貼著溝底 %.2fm） %s" % [uy, h_in,
+						"OK" if absf(uy - h_in) < 0.25 else "FAIL(沒貼地)"])
+				print("[terrainchk] 溝內自動取得掩體 cover=%s %s" % [su.get("cover", ""),
+						"OK" if su.get("cover", "") != "" else "FAIL"])
+				cam.set_follow(null)
+				cam.focus = su["node"].global_position
+				cam.dist = 14.0
+				cam.pitch_deg = 18.0
+				await get_tree().create_timer(0.5).timeout
+				await _snap("res://terrain_trench.png")
+			var hills = map_data.get("hills", [])
+			if hills.is_empty():
+				print("[terrainchk] 這張圖(%s)沒有 hills 資料，只有基礎起伏" % map_data.get("id", "?"))
+			else:
+				var hill_top: float = terrain.height_at(float(hills[0].get("x", 0)), float(hills[0].get("y", 0)))
+				print("[terrainchk] 丘陵頂端高度 %.2fm %s" % [hill_top, "OK" if hill_top > 1.5 else "FAIL(太平)"])
+			# 全景：地形起伏一定要用遠鏡頭看才判斷得出來
+			cam.set_follow(null)
+			cam.focus = _to3d(map_data.get("w", 960) * 0.5, map_data.get("h", 600) * 0.5)
+			cam.dist = 78.0
+			cam.pitch_deg = 34.0
+			await get_tree().create_timer(0.6).timeout
+			await _snap("res://terrain_overview.png")
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -687,9 +737,9 @@ func _build_static() -> void:
 	# 遠景霧氣：拉出空間深度
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.58, 0.66, 0.74)
-	e.fog_density = 0.0022
+	e.fog_density = 0.0013
 	e.fog_sky_affect = 0.0        # 霧吃到天空會把整片天壓成灰色（實拍發現）
-	e.fog_aerial_perspective = 0.25
+	e.fog_aerial_perspective = 0.12
 	# 高度霧：低窪處積霧，戰場才有空氣感（也讓遠處的兵不再像貼紙）
 	e.fog_height = 1.5
 	e.fog_height_density = 0.06
@@ -1014,10 +1064,14 @@ func _clamp_to_map(p: Vector3) -> Vector3:
 	var hz: float = mh * 0.5 * WORLD_SCALE - 1.0
 	return Vector3(clampf(p.x, -hx, hx), p.y, clampf(p.z, -hz, hz))
 
+# 遊戲 px → 3D 世界座標。y 一律取地形高度：地面不再是 y=0（GDD/14 §1）。
 func _to3d(wx: float, wy: float) -> Vector3:
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
-	return Vector3((wx - mw * 0.5) * WORLD_SCALE, 0, (wy - mh * 0.5) * WORLD_SCALE)
+	var y := 0.0
+	if terrain != null:
+		y = terrain.height_at(wx, wy)
+	return Vector3((wx - mw * 0.5) * WORLD_SCALE, y, (wy - mh * 0.5) * WORLD_SCALE)
 
 func _count_side(s: int) -> int:
 	var n := 0
@@ -1141,6 +1195,11 @@ func _click(sp: Vector2) -> void:
 	if t <= 0:
 		return
 	var hit := from + dir * t
+	if terrain != null:
+		var gy: float = terrain.height_at_world(hit)
+		if absf(dir.y) > 0.0001:
+			hit = from + dir * ((gy - from.y) / dir.y)     # 依地形高度重新求交
+			hit.y = terrain.height_at_world(hit)
 	var reach: float = _ap_metres(acting)
 	if reach < 0.05:
 		ui.flash_msg("AP 用盡，只能原地開火或結束行動", Color(1.0, 0.7, 0.4))
@@ -1659,19 +1718,24 @@ func _build_ground() -> void:
 	_covers = []
 	var mw: float = map_data.get("w", 960) * WORLD_SCALE
 	var mh: float = map_data.get("h", 600) * WORLD_SCALE
-	# 地面：用 shader 做草地色斑＋土痕，取代單一死綠平面
-	var ground := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(mw * 2.2, mh * 2.2)
-	pm.subdivide_width = 24
-	pm.subdivide_depth = 24
-	ground.mesh = pm
-	var sh := Shader.new()
-	sh.code = GROUND_SHADER
-	var sm := ShaderMaterial.new()
-	sm.shader = sh
-	ground.material_override = sm
-	world.add_child(ground)
+	# 地形（GDD/14 §1）：高度場網格取代平面——丘陵、壕溝、彈坑都在這裡長出來
+	terrain = TERRAIN.new()
+	world.add_child(terrain)
+	terrain.build(map_data, WORLD_SCALE)
+	Unit.ground_sampler = func(p: Vector3) -> float: return terrain.height_at_world(p)
+	# 地表顏色改走頂點色（見 Terrain._ground_color），材質只要最單純的一顆
+	var sm := StandardMaterial3D.new()
+	sm.vertex_color_use_as_albedo = true
+	sm.roughness = 0.97
+	sm.specular = 0.05
+	terrain.set_material(sm)
+	for c in terrain.trench_covers():
+		_covers.append(c)          # 壕溝＝半身掩體
+	# 地圖上的草叢區＝隱蔽（GDD/01 §5a）。先前只有散佈的樹被登記成 bush，
+	# maps.json 裡的 bushes 從來沒進掩體表，等於草叢畫了但沒有效果。
+	for bz in map_data.get("bushes", []):
+		_covers.append({"wx": float(bz.get("x", 0)), "wy": float(bz.get("y", 0)),
+				"r": float(bz.get("r", 60)), "val": 0.30, "type": "bush"})
 
 	# 建築：依實際 AABB 自動縮放到合理樓高（治「放大2.5倍變黑色巨牆」）
 	var solids = map_data.get("solids", [])
@@ -1869,7 +1933,14 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		# 邊緣多、中央少（不擋戰場）
 		var ang := rng.randf() * TAU
 		var r: float = rng.randf_range(0.55, 1.05)
-		t.position = Vector3(cos(ang) * mw * r, dy, sin(ang) * mh * r)
+		var tx: float = cos(ang) * mw * r
+		var tz: float = sin(ang) * mh * r
+		var gwp: float = map_data.get("w", 960)
+		var ghp: float = map_data.get("h", 600)
+		var ty := 0.0
+		if terrain != null:
+			ty = terrain.height_at(tx / WORLD_SCALE + gwp * 0.5, tz / WORLD_SCALE + ghp * 0.5)
+		t.position = Vector3(tx, ty + dy, tz)
 		t.rotation.y = rng.randf() * TAU
 		# 樹叢＝隱蔽（降低被發現距離），不擋子彈
 		var gw: float = map_data.get("w", 960)

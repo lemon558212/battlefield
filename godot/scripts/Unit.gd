@@ -6,6 +6,9 @@ class_name Unit
 extends Node3D
 
 signal shot_fired(from_pos: Vector3, to_pos: Vector3)
+# 地形取樣器（由 Main 在建好地形後注入）：所有單位一律貼著地形站，
+# 地面不再是 y=0，否則走上丘陵會埋進土裡、走進壕溝會浮在空中（GDD/14 §1）。
+static var ground_sampler: Callable = Callable()
 # 抵達目的地：Main 要靠這個重算掩體狀態，否則玩家移動到掩體後不會自動蹲下
 signal arrived
 
@@ -695,6 +698,15 @@ func stop() -> void:
 	_move_target = null
 	_shoot_target = null
 
+# 貼地：每幀把腳底對齊地形高度。用 lerp 收斂而不是硬設，走上斜坡才不會一格一格跳。
+func _stick_to_ground(delta: float) -> void:
+	if not ground_sampler.is_valid():
+		return
+	var gy: float = ground_sampler.call(global_position)
+	if absf(global_position.y - gy) < 0.001:
+		return
+	global_position.y = lerpf(global_position.y, gy, clampf(delta * 12.0, 0.0, 1.0))
+
 # 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
 func is_moving() -> bool:
 	return _move_target != null and not _dead
@@ -811,6 +823,7 @@ func _update_crouch(delta: float) -> void:
 		_model.rotation.x = 0.0
 
 func _process(delta: float) -> void:
+	_stick_to_ground(delta)
 	if _is_vehicle:
 		_vehicle_process(delta)
 		return
