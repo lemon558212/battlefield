@@ -64,6 +64,9 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	# 樓梯（兩層以上）
 	if floors > 1:
 		_stairs(half, fm)
+	# 室內陳設（GDD/14 §2）：空殼房子進去只有四面牆，既沒有可看的東西，
+	# 也沒有室內掩體可用——進建築的戰術價值只剩「牆擋子彈」。
+	_furnish(half, im, fm)
 	# 室內照明：牆一圍起來就是全黑，玩家看不到自己在哪。
 	# 每層放一盞低強度暖光當「窗外漫射進來的光」，成本很低。
 	var lamp := OmniLight3D.new()
@@ -88,6 +91,65 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 		slopeb.position = Vector3(0, top + 0.62, sgn * sizez * 0.26)
 		slopeb.rotation.x = sgn * deg_to_rad(22.0)
 		roof.add_child(slopeb)
+
+# 室內陳設：桌、櫃、床、木箱、翻倒的桌子。
+# 低桌與木箱＝室內掩體（登記進 covers 由 Main 讀），高櫃擋視線。
+# ⚠ 一律走 _emit_box 合併批次：一間房十來個家具，各自一個節點就是十幾次 draw call。
+var furniture: Array = []      # [{lx, lz, r, val}]，局部座標，Main 轉成掩體登記
+func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(absf(rect.position.x) * 17.0 + absf(rect.position.y) * 7.0) + 91
+	for f in floors:
+		var y0: float = float(f) * FLOOR_H
+		# 靠牆的高櫃：擋視線、也讓空牆面有東西
+		for k in 2:
+			var wall_i: int = rng.randi() % 4
+			var along: float = rng.randf_range(-0.55, 0.55)
+			var lx := 0.0
+			var lz := 0.0
+			var rot := 0.0
+			match wall_i:
+				0: lx = -half.x + 0.35; lz = half.y * along; rot = PI * 0.5
+				1: lx = half.x - 0.35; lz = half.y * along; rot = PI * 0.5
+				2: lx = half.x * along; lz = -half.y + 0.35
+				_: lx = half.x * along; lz = half.y - 0.35
+			var hgt: float = rng.randf_range(1.5, 2.0)
+			_emit_box("inner", im, Vector3(1.0, hgt, 0.45),
+					Transform3D(Basis(Vector3.UP, rot), Vector3(lx, y0 + hgt * 0.5, lz)))
+		# 桌子（桌面＋四腳）＋兩張椅子
+		var tx: float = rng.randf_range(-half.x * 0.4, half.x * 0.4)
+		var tz: float = rng.randf_range(-half.y * 0.4, half.y * 0.4)
+		_emit_box("floor", fm, Vector3(1.5, 0.09, 0.85),
+				Transform3D(Basis(), Vector3(tx, y0 + 0.74, tz)))
+		for sx in [-0.65, 0.65]:
+			for sz in [-0.34, 0.34]:
+				_emit_box("floor", fm, Vector3(0.09, 0.74, 0.09),
+						Transform3D(Basis(), Vector3(tx + sx, y0 + 0.37, tz + sz)))
+		for sx2 in [-1.0, 1.0]:
+			_emit_box("floor", fm, Vector3(0.42, 0.06, 0.42),
+					Transform3D(Basis(), Vector3(tx + sx2, y0 + 0.45, tz)))
+			_emit_box("floor", fm, Vector3(0.42, 0.5, 0.07),
+					Transform3D(Basis(), Vector3(tx + sx2 * 1.18, y0 + 0.7, tz)))
+		furniture.append({"lx": tx, "lz": tz, "r": 1.1, "val": 0.35})
+		# 木箱堆＝真正好用的室內掩體（半身高，可以蹲在後面）
+		for k2 in 3:
+			var bx: float = rng.randf_range(-half.x * 0.75, half.x * 0.75)
+			var bz: float = rng.randf_range(-half.y * 0.75, half.y * 0.75)
+			var bs: float = rng.randf_range(0.5, 0.75)
+			_emit_box("floor", fm, Vector3(bs, bs, bs),
+					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(bx, y0 + bs * 0.5, bz)))
+			if rng.randf() < 0.5:      # 疊第二層
+				_emit_box("floor", fm, Vector3(bs * 0.8, bs * 0.8, bs * 0.8),
+						Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+						Vector3(bx + 0.1, y0 + bs + bs * 0.4, bz - 0.08)))
+			if f == 0:
+				furniture.append({"lx": bx, "lz": bz, "r": 0.9, "val": 0.5})
+		# 翻倒的桌子：被打過的房子不會桌椅整齊
+		var ox: float = rng.randf_range(-half.x * 0.6, half.x * 0.6)
+		var oz: float = rng.randf_range(-half.y * 0.6, half.y * 0.6)
+		_emit_box("floor", fm, Vector3(1.4, 0.08, 0.8),
+				Transform3D(Basis(Vector3.FORWARD, deg_to_rad(84.0)).rotated(Vector3.UP, rng.randf() * TAU),
+				Vector3(ox, y0 + 0.42, oz)))
 
 # 一面牆：把門窗缺口扣掉後，剩下的實心段才建幾何、才登記進 walls
 func _side(a: Vector2, b: Vector2, mat: StandardMaterial3D, is_door: bool) -> void:

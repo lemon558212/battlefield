@@ -42,13 +42,12 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 		if pts.size() >= 2:
 			_trenches.append({"pts": pts, "hw": float(t.get("w", 44)) * 0.5})
 	_grass_zones = map.get("bushes", [])
-	# 建築佔地不長草：草叢區與建築重疊時，草會直接長在室內地板上（實拍到室內一片草）。
 	_no_grass = []
-	for sd in map.get("solids", []):
-		_no_grass.append(Rect2(float(sd.get("x", 0)), float(sd.get("y", 0)),
-				float(sd.get("w", 60)), float(sd.get("h", 60))).grow(1.0 / ws))
 	_build_mesh()
-	_build_grass()
+	# ⚠ 草不在這裡生成：建築的實際佔地要等 Building 建完才知道
+	#   （Building.rect 有「最小 120px」的規則，比 maps.json 的原始尺寸大），
+	#   用原始尺寸當禁草區會漏掉一圈，實拍就是室內地板上長草。
+	#   由 Main 在建好建築後呼叫 build_grass()。
 	_build_backdrop()
 
 # --- 值雜訊（value noise）：正弦疊加會產生規則的斜條紋，遠鏡頭一眼看破（實拍）。
@@ -246,6 +245,13 @@ func _ground_color(v: Vector3) -> Color:
 	# ⚠ 頂點色會被當成「線性空間」直接用，不轉換就會整片洗白——
 	#   跟地表 shader 那次是同一個坑（GDD/10「sRGB 洗白」，2026-07-26 第二次踩到）。
 	return c.srgb_to_linear()
+
+# 由 Main 在建築建好後呼叫：no_rects＝建築的實際佔地（禁草區）
+func build_grass(no_rects: Array) -> void:
+	_no_grass = []
+	for r in no_rects:
+		_no_grass.append((r as Rect2).grow(1.2 / ws))
+	_build_grass()
 
 # ---------- 草（MultiMesh，一次繪製）----------
 # 兩層：全地圖鋪一層稀疏矮草（先前只有 bushes 區有草，其餘地面光禿禿），

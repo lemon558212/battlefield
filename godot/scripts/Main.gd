@@ -2532,6 +2532,13 @@ func _build_ground() -> void:
 			bd.build(sdef, WORLD_SCALE, map_data.get("w", 960), map_data.get("h", 600),
 					gy, 2 if i % 2 == 0 else 1)
 			_buildings.append(bd)
+			# 室內家具進掩體表：進建築的戰術價值不能只有「牆擋子彈」，
+			# 屋裡要有東西可以蹲（木箱半身高＝硬掩體，桌子只算部分遮蔽）。
+			for fu in bd.furniture:
+				var fp: Vector2 = bd._local_to_px(Vector2(float(fu["lx"]), float(fu["lz"])))
+				_covers.append({"wx": fp.x, "wy": fp.y,
+						"r": float(fu["r"]) / WORLD_SCALE, "val": float(fu["val"]),
+						"type": "furniture"})
 			# 掩體：建築本體仍登記一個圓（貼著外牆＝硬掩體），視線改吃牆線段
 			_covers.append({"wx": cx, "wy": cy,
 					"r": maxf(float(sdef.get("w", 60)), float(sdef.get("h", 60))) * 0.85 + 30.0,
@@ -2550,6 +2557,12 @@ func _build_ground() -> void:
 
 	# 中景物件（GDD/14）：道路、路障、拒馬、圍籬、電線桿、瓦礫。
 	# 第三人稱一站進戰場，眼睛高度沒東西可看就會覺得空——這層補的就是那個。
+	# 草要等建築建好才鋪（禁草區得用建築的實際佔地，見 Terrain.build 的註解）
+	if terrain != null:
+		var no_rects: Array = []
+		for bdg in _buildings:
+			no_rects.append(bdg.rect)
+		terrain.build_grass(no_rects)
 	var props = PROPS.new()
 	world.add_child(props)
 	props.build(map_data, WORLD_SCALE, terrain)
