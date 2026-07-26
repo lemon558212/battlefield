@@ -61,6 +61,8 @@ var _ap_ring: MeshInstance3D = null
 var enemy_cp := 0          # 敵方階段的 CP 池（與我方同公式）
 var _ai_state := ""        # ""＝待派下一個單位；"move"＝移動中；"fire"＝已開火收尾
 var _ai_t := 0.0           # 每個敵方行動的逾時保險，避免卡住整場
+var _ai_last := Vector3.ZERO   # 上次取樣的位置（停滯偵測用）
+var _ai_stall := 0.0           # 已經原地不動多久
 var _ai_why := ""          # 這次行動的決策理由（QA 要驗 AI 有照 GDD 的狀態機走）
 var _ai_target = null
 var budget_left := 0
@@ -835,6 +837,30 @@ func _selftest() -> void:
 			soltk["node"].queue_free()
 			units.erase(soltk)
 			_buildings = keep_bld2
+		# I-4c) AI 繞開實體障礙（AI09 [navchk]）：直接驗純函式，不受敵方階段時序干擾
+		if _blockers.is_empty():
+			print("[navchk] SKIP 這張圖沒有中景障礙")
+		else:
+			var nseg = null
+			for bk3 in _blockers:
+				if bk3["t"] == "seg" and (nseg == null or float(bk3["hl"]) > float(nseg["hl"])):
+					nseg = bk3
+			if nseg == null:
+				print("[navchk] SKIP 沒有線段型障礙")
+			else:
+				var keep_b4 := _buildings
+				_buildings = []
+				var nf: Vector3 = _to3d(nseg["m"].x, nseg["m"].y + 5.0 / WORLD_SCALE)
+				var ng: Vector3 = _to3d(nseg["m"].x, nseg["m"].y - 5.0 / WORLD_SCALE)
+				var straight: bool = _path_clear(nf, ng, BODY_R)
+				var alt: Vector3 = _avoid_goal(nf, ng, BODY_R)
+				var alt_ok: bool = _path_clear(nf, alt, BODY_R)
+				var turned: bool = alt.distance_to(ng) > 0.5
+				_buildings = keep_b4
+				print("[navchk] 穿過障礙的直線可行=%s（應為 false） %s" % [straight,
+						"OK" if not straight else "FAIL(障礙沒擋住路徑判定)"])
+				print("[navchk] 繞路後換了方向=%s、新路徑可行=%s %s" % [turned, alt_ok,
+						"OK(會繞開)" if (turned and alt_ok) else "FAIL(繞不出去)"])
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -1770,7 +1796,15 @@ func _enemy_step() -> void:
 		var tgt = _ai_target if (_ai_target != null and _ai_target["alive"]) else _nearest_foe(acting)
 		var moving: bool = acting["node"].is_moving()
 		if _ai_state == "move":
-			var stalled: bool = (not moving) or float(acting["ap"]) <= 0.0
+			# 真停滯偵測：單位以為自己在走（is_moving 仍為 true），但每幀被實體推回原地。
+			# 沒有這一條就只能等 AP 用盡或 12 秒逾時，畫面上是敵人貼著柵欄抽搐。
+			var now_p: Vector3 = acting["node"].global_position
+			if now_p.distance_to(_ai_last) < 0.06:
+				_ai_stall += _enemy_t
+			else:
+				_ai_stall = 0.0
+			_ai_last = now_p
+			var stalled: bool = (not moving) or float(acting["ap"]) <= 0.0 or _ai_stall > 1.2
 			if stalled or _ai_t > 12.0:
 				_ai_state = "fire"
 				if tgt != null and not bool(acting.get("fired", false)):
@@ -1825,7 +1859,13 @@ func _enemy_step() -> void:
 			_ai_state = "fire"         # 已到位：原地開火
 			_enemy_t = 0.4
 			return
-		e["node"].move_to(_clamp_to_map(here + move_v.normalized() * minf(move_v.length(), reach)))
+		var step_goal: Vector3 = here + move_v.normalized() * minf(move_v.length(), reach)
+		# 繞開實體障礙（AI09）：直線撞柵欄就換個角度走，別貼著磨到 AP 用盡
+		step_goal = _avoid_goal(here, step_goal,
+				VEHICLE_R if Unit.is_vehicle_cls(e["cls"]) else BODY_R)
+		_ai_last = e["node"].global_position
+		_ai_stall = 0.0
+		e["node"].move_to(_clamp_to_map(step_goal))
 		_enemy_t = 0.3
 		return
 	_end_enemy_turn()
@@ -2098,6 +2138,43 @@ func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 		if dv < need_v:
 			p = vp + (away_v / dv if dv > 0.0001 else Vector2.RIGHT) * need_v
 	return Vector3((p.x - mw * 0.5) * WORLD_SCALE, pos.y, (p.y - mh * 0.5) * WORLD_SCALE)
+
+# 路徑是否走得通（AI09 尋路）：沿線每 0.6m 取樣，只要有一點會被實體推開就算不通。
+# 為什麼要有這個：AI 是直線推進，戰場變成實體之後，一道柵欄就能讓它貼著磨到
+# AP 用盡或 12 秒逾時——玩家看到的是「敵人在原地抽搐」，不是戰術。
+func _path_clear(from_p: Vector3, to_p: Vector3, radius: float) -> bool:
+	var d: Vector3 = to_p - from_p
+	d.y = 0.0
+	var total: float = d.length()
+	if total < 0.01:
+		return true
+	var steps: int = maxi(2, int(total / 0.6))
+	for i in range(1, steps + 1):
+		var q: Vector3 = from_p + d * (float(i) / float(steps))
+		var fixed: Vector3 = _resolve_solids(q, radius, null)
+		if Vector2(fixed.x - q.x, fixed.z - q.z).length() > 0.02:
+			return false
+	return true
+
+# 繞開障礙：直線不通就把前進方向左右各偏一點試，取第一條通的。
+# 這不是完整 A*——戰場障礙稀疏，偏轉試探已經夠用，而且每次下令只算一次。
+# 全部不通就回傳「往原方向走到撞上為止」，交給停滯偵測收尾。
+func _avoid_goal(from_p: Vector3, goal: Vector3, radius: float) -> Vector3:
+	if _path_clear(from_p, goal, radius):
+		return goal
+	var d: Vector3 = goal - from_p
+	d.y = 0.0
+	var dist: float = d.length()
+	if dist < 0.01:
+		return goal
+	var base: float = atan2(d.z, d.x)
+	for deg in [20.0, -20.0, 40.0, -40.0, 62.0, -62.0, 85.0, -85.0]:
+		var a: float = base + deg_to_rad(deg)
+		# 繞路要繞得夠遠才過得去，但不能超過原本想走的距離太多
+		var way: Vector3 = from_p + Vector3(cos(a), 0, sin(a)) * dist
+		if _path_clear(from_p, way, radius):
+			return way
+	return goal
 
 func _intercept_tick(delta: float) -> void:
 	if st != St.CMD and st != St.ENEMY:
