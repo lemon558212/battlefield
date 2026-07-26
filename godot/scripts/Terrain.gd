@@ -23,6 +23,7 @@ var _hills: Array = []
 var _craters: Array = []
 var _trenches: Array = []         # 每筆 {pts:[Vector2(px)], hw:半寬(px)}
 var _grass_zones: Array = []
+var _no_grass: Array[Rect2] = []      # 建築佔地（室內不長草）
 
 # ---------- 建置 ----------
 func build(map_data: Dictionary, world_scale: float) -> void:
@@ -40,6 +41,11 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 		if pts.size() >= 2:
 			_trenches.append({"pts": pts, "hw": float(t.get("w", 44)) * 0.5})
 	_grass_zones = map.get("bushes", [])
+	# 建築佔地不長草：草叢區與建築重疊時，草會直接長在室內地板上（實拍到室內一片草）。
+	_no_grass = []
+	for sd in map.get("solids", []):
+		_no_grass.append(Rect2(float(sd.get("x", 0)), float(sd.get("y", 0)),
+				float(sd.get("w", 60)), float(sd.get("h", 60))).grow(1.0 / ws))
 	_build_mesh()
 	_build_grass()
 	_build_backdrop()
@@ -256,6 +262,13 @@ func _build_grass() -> void:
 			var d: float = sqrt(rng.randf()) * r
 			var px: float = cx + cos(a) * d
 			var py: float = cy + sin(a) * d
+			var indoors := false
+			for nz in _no_grass:
+				if nz.has_point(Vector2(px, py)):
+					indoors = true
+					break
+			if indoors:
+				continue
 			var pos := Vector3((px - mw * 0.5) * ws, height_at(px, py) - 0.05, (py - mh * 0.5) * ws)
 			var b := Basis().rotated(Vector3.UP, rng.randf() * TAU).scaled(
 					Vector3.ONE * rng.randf_range(0.8, 1.35))

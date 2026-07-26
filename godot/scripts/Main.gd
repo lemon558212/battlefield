@@ -890,6 +890,86 @@ func _selftest() -> void:
 					"OK(沒被牆擠到臉上)" if cdist > 1.5 else "FAIL(鏡頭被壓到後腦杓)"])
 			await _snap("res://cam_wall.png")
 			_end_action()
+		# I-4e) 匍匐前進（GDD/07 [crawlchk]）：趴著移動不可以是「趴著跑」——
+		#      播跑步動畫會讓腿在跑、手臂在擺而軀幹壓平，畫面上就是自由式游泳。
+		#      ⚠ 選點一定要避開建築：先前隨手取地圖中央，結果人被放進屋裡（實拍到室內草地）。
+		var cru = _deployed[0]
+		if not is_instance_valid(cru["node"]) or cru["node"]._rig == null:
+			print("[crawlchk] SKIP 這個單位沒有骨架工具")
+		else:
+			cru["node"].stop()
+			_end_action()
+			cp = 6
+			# ⚠ 選點要同時避開建築與樹：只掃一條直線會整段被同一棟房子擋住而退回預設值
+			#   （人被放進屋裡）；不避開樹則角色正前方一棵樹就佔掉四分之一畫面。
+			var spot_c: Vector2 = _open_spot([14.0, 10.0, 7.0, 5.0, 0.0])
+			var crx: float = spot_c.x
+			var cry: float = spot_c.y
+			cru["node"].global_position = _to3d(crx, cry)
+			cru["wx"] = crx
+			cru["wy"] = cry
+			var in_bld := false
+			for bdc2 in _buildings:
+				if bdc2.inside(crx, cry):
+					in_bld = true
+			print("[crawlchk] 測試地點在室內=%s %s" % [in_bld,
+					"OK(在戶外空地)" if not in_bld else "FAIL(選點又選進屋裡了)"])
+			cru["node"].want_prone = true
+			_begin_action(cru)
+			cru["ap"] = 300.0
+			cru["ap_max"] = 300.0
+			cam.tps_yaw = 180.0
+			await get_tree().create_timer(1.6).timeout       # 等趴下（_prone 收斂）
+			var cr_from: Vector3 = cru["node"].global_position
+			# 分三段走，每段量一次雙腳的側向張開量：匍匐是左右腿交替蹬地，
+			# 這個數值必須隨時間變化——只拍一張靜態圖看不出「有沒有在交替」。
+			# 量的是「膝蓋」不是腳：匍匐的特徵是膝蓋先彎、再帶著大腿往外頂，
+			# 腳跟其實是折回身體中線的（使用者 2026-07-26 指正）。
+			var spreads: Array = []
+			var knee_angles: Array = []
+			for seg_i in 3:
+				await _hold_key(KEY_W, 0.55)
+				var rg = cru["node"]._rig
+				var kl: Vector3 = rg.bone_pos("LowerLeg.L")
+				var kr: Vector3 = rg.bone_pos("LowerLeg.R")
+				spreads.append(kl.distance_to(kr))
+				var thigh: Vector3 = kl - rg.bone_pos("UpperLeg.L")
+				var shin: Vector3 = rg.bone_pos("Foot.L") - kl
+				if thigh.length() > 0.001 and shin.length() > 0.001:
+					knee_angles.append(rad_to_deg(thigh.angle_to(shin)))
+				await _snap("res://crawl_%d.png" % (seg_i + 1))
+			var cr_d: float = cr_from.distance_to(cru["node"].global_position)
+			var cr_state: String = str(cru["node"]._state)
+			var cr_hip: float = cru["node"]._rig.bone_pos("Hips").y - cru["node"].global_position.y
+			var sp_min: float = spreads.min()
+			var sp_max: float = spreads.max()
+			print("[crawlchk] 趴著走 2.1 秒：位移 %.2fm、動畫=%s、髖高 %.2fm %s" % [cr_d, cr_state, cr_hip,
+					"OK(是匍匐不是趴著跑)" if (cr_d > 0.6 and cr_d < 2.6 and cr_state != "run"
+					and cr_state != "walk" and cr_hip < 0.55 and cr_hip > 0.05)
+					else "FAIL(速度/動畫/姿勢不對，髖高<=0 代表人陷進地裡)"])
+			print("[crawlchk] 膝蓋外張量 %.2f/%.2f/%.2f m（差 %.2f） %s" % [spreads[0], spreads[1],
+					spreads[2], sp_max - sp_min,
+					"OK(雙腿在交替蹬地)" if (sp_max - sp_min) > 0.05 else "FAIL(腿沒動＝只是趴著平移)"])
+			if knee_angles.is_empty():
+				print("[crawlchk] 屈膝角度量不到 FAIL(骨頭抓不到)")
+			else:
+				var ka_max: float = knee_angles.max()
+				print("[crawlchk] 左膝彎曲角 %.0f/%.0f/%.0f 度（0=伸直，最大 %.0f） %s" % [knee_angles[0],
+						knee_angles[1], knee_angles[2], ka_max,
+						"OK(膝蓋真的有彎)" if ka_max > 30.0 else "FAIL(腿是伸直的＝剪刀腿不是匍匐)"])
+			# 持續走就該起身：爬 2.5 秒（約 2m）之後還龜速爬過整個戰場很痛苦。
+			# 這條要獨立驗，否則哪天門檻被改壞（改成永不起身或立刻起身）不會有人發現。
+			await _hold_key(KEY_W, 3.5)
+			var up_hip: float = cru["node"]._rig.bone_pos("Hips").y - cru["node"].global_position.y
+			# 直接驗規則本身（趴姿混合值歸零），髖高只當佐證：
+			# 起身後若附近有掩體會停在蹲姿（髖高約 0.45），拿站姿高度當門檻會誤判。
+			var up_prone: float = float(cru["node"]._prone)
+			print("[crawlchk] 連續走 3.5 秒後 趴姿值=%.2f、髖高 %.2fm（趴著是 0.26） %s" % [up_prone, up_hip,
+					"OK(自動起身了)" if (up_prone < 0.1 and up_hip > 0.35)
+					else "FAIL(一直趴著爬，跨越戰場會很痛苦)"])
+			await _snap("res://crawl_standup.png")
+			cru["node"].want_prone = false
+			_end_action()
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -2086,23 +2166,28 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 			var u: float = (p3 - p1).cross(d1) / den
 			if t > 0.0 and t < best and u > 0.0 and u < 1.0:
 				best = t
-	# 中景物件也要擋鏡頭：不然人躲在樹後面，鏡頭卻穿過樹幹看得一清二楚。
-	# 只算夠高、擋得住視線的（護欄 0.9m 高、瓦礫不在清單裡），矮的不擋鏡頭。
-	for bk in _blockers:
-		var c: Vector2
-		var rr: float = float(bk["r"])
-		if bk["t"] == "cir":
-			c = bk["c"]
-		else:
-			c = Geometry2D.get_closest_point_to_segment(p1, bk["a"], bk["b"])
-		# 圓與射線求交：先取射線上離圓心最近的點
-		var l2: float = d1.length_squared()
-		if l2 < 0.0001:
-			continue
-		var tt: float = clampf((c - p1).dot(d1) / l2, 0.0, 1.0)
-		var near: Vector2 = p1 + d1 * tt
-		if near.distance_to(c) < rr and tt > 0.0 and tt < best:
-			best = tt
+	# 樹與粗障礙也要擋鏡頭（半徑 0.35m 以上：樹幹/樹叢/龍牙）。
+	# 電線桿 0.32m、柵欄 0.14m 不列入——那麼細的東西一直把鏡頭往回拉很煩，
+	# 而且它們本來就遮不住什麼。
+	# ⚠ 求交必須取「射線進入圓的那個交點」，不是「線段上離圓心最近的點」：
+	#   寫成最近點時，鏡頭落在樹幹內部會算出 t≈1（最近點就是端點本身）＝判定成沒擋到，
+	#   鏡頭就停在樹幹裡，整個畫面被樹幹填滿（2026-07-26 實拍匍匐時抓到，查了兩輪）。
+	var l2: float = d1.length_squared()
+	if l2 > 0.0001:
+		var seg_len: float = sqrt(l2)
+		for bk in _blockers:
+			var rr: float = float(bk["r"])
+			if bk["t"] != "cir" or rr * WORLD_SCALE < 0.35:
+				continue
+			var c: Vector2 = bk["c"]
+			var t_close: float = (c - p1).dot(d1) / l2
+			var perp: float = (p1 + d1 * t_close).distance_to(c)
+			if perp >= rr:
+				continue
+			var half: float = sqrt(rr * rr - perp * perp) / seg_len
+			var t_enter: float = t_close - half
+			if t_enter > 0.0 and t_enter < best:
+				best = t_enter
 	return best
 
 func _seg_hit(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> bool:
@@ -2221,6 +2306,32 @@ func _avoid_goal(from_p: Vector3, goal: Vector3, radius: float) -> Vector3:
 		if _path_clear(from_p, way, radius):
 			return way
 	return goal
+
+# 找一塊空地（驗收台用）：離建築與所有實體障礙至少 clear_m 公尺。
+# ⚠ 一定要分級放寬：門檻開太高會整張圖找不到，然後退回「地圖中央」——
+#   而地圖中央往往就是一棟房子裡（2026-07-26 實測 FAIL 兩項）。
+func _open_spot(clears: Array) -> Vector2:
+	var mw2: float = float(map_data.get("w", 960))
+	var mh2: float = float(map_data.get("h", 600))
+	for clear_m in clears:
+		var cr: float = float(clear_m) / WORLD_SCALE
+		for gy in range(2, 13):
+			for gx in range(2, 19):
+				var cand := Vector2(mw2 * float(gx) / 20.0, mh2 * float(gy) / 14.0)
+				var bad := false
+				for bd2 in _buildings:
+					if bd2.rect.grow(maxf(cr, 6.0 / WORLD_SCALE)).has_point(cand):
+						bad = true
+						break
+				if not bad and cr > 0.0:
+					for bk2 in _blockers:
+						var pc: Vector2 = bk2["c"] if bk2["t"] == "cir" 								else Geometry2D.get_closest_point_to_segment(cand, bk2["a"], bk2["b"])
+						if cand.distance_to(pc) < cr:
+							bad = true
+							break
+				if not bad:
+					return cand
+	return Vector2(mw2 * 0.5, mh2 * 0.5)
 
 func _intercept_tick(delta: float) -> void:
 	if st != St.CMD and st != St.ENEMY:

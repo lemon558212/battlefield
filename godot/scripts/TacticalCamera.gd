@@ -101,7 +101,11 @@ func _apply_tps(delta: float) -> void:
 	var pr := deg_to_rad(tps_pitch)
 	var fwd := Vector3(sin(yr), 0, cos(yr))
 	var right := Vector3(fwd.z, 0, -fwd.x)
-	var head: Vector3 = tps_node.global_position + Vector3(0, TPS_EYE, 0)
+	# 眼高跟著姿勢走（站/蹲/趴），否則趴著時鏡頭仍吊在站姿高度、人被草淹沒
+	var eye: float = TPS_EYE
+	if tps_node.has_method("eye_height"):
+		eye = float(tps_node.eye_height())
+	var head: Vector3 = tps_node.global_position + Vector3(0, eye, 0)
 	# 自動換肩（GDD/07）：貼著牆往右靠時，右肩鏡頭會被牆推到臉前、畫面整片牆。
 	# 主流 TPS 的解法不是硬拉近，而是換到另一邊肩膀——那邊通常是空的。
 	var k_r := 1.0
