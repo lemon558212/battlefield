@@ -96,6 +96,8 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 # 低桌與木箱＝室內掩體（登記進 covers 由 Main 讀），高櫃擋視線。
 # ⚠ 一律走 _emit_box 合併批次：一間房十來個家具，各自一個節點就是十幾次 draw call。
 var furniture: Array = []      # [{lx, lz, r, val}]，局部座標，Main 轉成掩體登記
+# 室內實體障礙 [lx, lz, r]：桌、櫃、木箱都擋人（使用者：任何物體都不能穿越）
+var solids_local: Array = []
 func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(absf(rect.position.x) * 17.0 + absf(rect.position.y) * 7.0) + 91
@@ -116,6 +118,8 @@ func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> 
 			var hgt: float = rng.randf_range(1.5, 2.0)
 			_emit_box("inner", im, Vector3(1.0, hgt, 0.45),
 					Transform3D(Basis(Vector3.UP, rot), Vector3(lx, y0 + hgt * 0.5, lz)))
+			if f == 0:
+				solids_local.append([lx, lz, 0.55])      # 高櫃擋人
 		# 桌子（桌面＋四腳）＋兩張椅子
 		var tx: float = rng.randf_range(-half.x * 0.4, half.x * 0.4)
 		var tz: float = rng.randf_range(-half.y * 0.4, half.y * 0.4)
@@ -131,6 +135,8 @@ func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> 
 			_emit_box("floor", fm, Vector3(0.42, 0.5, 0.07),
 					Transform3D(Basis(), Vector3(tx + sx2 * 1.18, y0 + 0.7, tz)))
 		furniture.append({"lx": tx, "lz": tz, "r": 1.1, "val": 0.35})
+		if f == 0:
+			solids_local.append([tx, tz, 0.78])          # 桌子
 		# 木箱堆＝真正好用的室內掩體（半身高，可以蹲在後面）
 		for k2 in 3:
 			var bx: float = rng.randf_range(-half.x * 0.75, half.x * 0.75)
@@ -144,6 +150,7 @@ func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> 
 						Vector3(bx + 0.1, y0 + bs + bs * 0.4, bz - 0.08)))
 			if f == 0:
 				furniture.append({"lx": bx, "lz": bz, "r": 0.9, "val": 0.5})
+				solids_local.append([bx, bz, bs * 0.72])  # 木箱堆
 		# 翻倒的桌子：被打過的房子不會桌椅整齊
 		var ox: float = rng.randf_range(-half.x * 0.6, half.x * 0.6)
 		var oz: float = rng.randf_range(-half.y * 0.6, half.y * 0.6)

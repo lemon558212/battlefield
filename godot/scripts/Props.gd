@@ -184,6 +184,9 @@ func _rubble(m: Dictionary) -> void:
 			var sz: float = rng.randf_range(0.18, 0.55)
 			_box("rock", Vector3(sz, sz * rng.randf_range(0.4, 0.8), sz * rng.randf_range(0.7, 1.3)),
 					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(px, py, sz * 0.25)))
+			# 大塊的瓦礫也要擋人（小碎石仍可跨過）
+			if sz > 0.36:
+				_blk_cir(Vector2(px, py), sz * 0.5)
 
 # ---------- 戰爭痕跡（GDD/14 §0a：這裡打過仗）----------
 # 車輛殘骸：燒毀的卡車骨架。放在道路旁與彈坑附近——車不會憑空停在草原中間。

@@ -83,6 +83,7 @@ var _buildings: Array = []             # 場上所有建築（牆線段＝視線
 var terrain = null                     # 地形高度真相（GDD/14）
 # 中景物件與樹的實體障礙（形狀定義見 Props.blockers），座標為遊戲 px。
 var _blockers: Array = []
+var _tree_feet: Array = []             # 樹腳位置（px）：Terrain 在樹底補草做過渡
 const BODY_R := 0.42                   # 步兵肩寬半徑
 const VEHICLE_R := 1.6                 # 載具車體半徑（坦克 3.1m 寬）
 
@@ -225,6 +226,29 @@ func _hold_key(code: Key, secs: float) -> void:
 	up.pressed = false
 	Input.parse_input_event(up)
 	await get_tree().process_frame
+
+# 按住鍵並在期間分段取樣位置（不放開鍵，否則每段之間的停頓會蓋掉要量的東西）。
+# 用來驗「移動是不是脈動的」——等速與脈動在靜態圖上分不出來，只能量。
+func _hold_key_sampled(code: Key, secs: float, n: int, node: Node3D) -> Array:
+	var down := InputEventKey.new()
+	down.keycode = code
+	down.physical_keycode = code
+	down.pressed = true
+	Input.parse_input_event(down)
+	var out: Array = []
+	var prev: Vector3 = node.global_position
+	for i in n:
+		await get_tree().create_timer(secs / float(n)).timeout
+		var now: Vector3 = node.global_position
+		out.append(Vector2(now.x - prev.x, now.z - prev.z).length())
+		prev = now
+	var up := InputEventKey.new()
+	up.keycode = code
+	up.physical_keycode = code
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+	return out
 
 func _snap(p: String) -> void:
 	await RenderingServer.frame_post_draw
@@ -783,6 +807,7 @@ func _selftest() -> void:
 			var mwp: float = map_data.get("w", 960)
 			var mhp: float = map_data.get("h", 600)
 			_buildings = []              # 只排除建築，中景障礙照舊全開
+			var solu_save := _shield(solu)
 			if seg == null:
 				print("[solidchk] SKIP 這張圖沒有線段型障礙（護欄/柵欄）")
 			else:
@@ -872,6 +897,7 @@ func _selftest() -> void:
 			cam.pitch_deg = 22.0
 			await get_tree().create_timer(0.6).timeout
 			await _snap("res://solid_tank.png")
+			_unshield(solu, solu_save)
 			soltk["alive"] = false
 			soltk["node"].queue_free()
 			units.erase(soltk)
@@ -915,6 +941,7 @@ func _selftest() -> void:
 			cu["node"].global_position = _to3d(cwx, cwy)
 			cu["wx"] = cwx
 			cu["wy"] = cwy
+			var cu_save := _shield(cu)
 			_begin_action(cu)
 			cu["ap"] = 300.0
 			cu["ap_max"] = 300.0
@@ -928,6 +955,7 @@ func _selftest() -> void:
 			print("[camchk] 貼牆時鏡頭離頭 %.2fm、肩側=%+.2f（-1=左肩） %s" % [cdist, cam._shoulder,
 					"OK(沒被牆擠到臉上)" if cdist > 1.5 else "FAIL(鏡頭被壓到後腦杓)"])
 			await _snap("res://cam_wall.png")
+			_unshield(cu, cu_save)
 			_end_action()
 		# I-4e) 匍匐前進（GDD/07 [crawlchk]）：趴著移動不可以是「趴著跑」——
 		#      播跑步動畫會讓腿在跑、手臂在擺而軀幹壓平，畫面上就是自由式游泳。
@@ -941,7 +969,7 @@ func _selftest() -> void:
 			cp = 6
 			# ⚠ 選點要同時避開建築與樹：只掃一條直線會整段被同一棟房子擋住而退回預設值
 			#   （人被放進屋裡）；不避開樹則角色正前方一棵樹就佔掉四分之一畫面。
-			var spot_c: Vector2 = _open_spot([14.0, 10.0, 7.0, 5.0, 0.0])
+			var spot_c: Vector2 = _open_spot([14.0, 10.0, 7.0, 5.0, 0.0], 22.0)
 			var crx: float = spot_c.x
 			var cry: float = spot_c.y
 			cru["node"].global_position = _to3d(crx, cry)
@@ -955,10 +983,7 @@ func _selftest() -> void:
 					"OK(在戶外空地)" if not in_bld else "FAIL(選點又選進屋裡了)"])
 			# ⚠ 測試單位在戰場上走五秒多，會被敵方警戒射擊打死，然後 queue_free
 			#   ——下一行存取 _rig 就炸「previously freed」。驗姿勢的測試不該被戰鬥干擾。
-			var hp_save: int = int(cru["hp"])
-			var hpmax_save: int = int(cru["maxhp"])
-			cru["hp"] = 999999
-			cru["maxhp"] = 999999
+			var cru_save := _shield(cru)
 			cru["node"].want_prone = true
 			_begin_action(cru)
 			cru["ap"] = 300.0
@@ -972,17 +997,37 @@ func _selftest() -> void:
 			# 腳跟其實是折回身體中線的（使用者 2026-07-26 指正）。
 			var spreads: Array = []
 			var knee_angles: Array = []
+			var knee_fwd: Array = []
 			for seg_i in 3:
 				await _hold_key(KEY_W, 0.55)
 				var rg = cru["node"]._rig
 				var kl: Vector3 = rg.bone_pos("LowerLeg.L")
 				var kr: Vector3 = rg.bone_pos("LowerLeg.R")
 				spreads.append(kl.distance_to(kr))
-				var thigh: Vector3 = kl - rg.bone_pos("UpperLeg.L")
+				var hipp: Vector3 = rg.bone_pos("UpperLeg.L")
+				var thigh: Vector3 = kl - hipp
 				var shin: Vector3 = rg.bone_pos("Foot.L") - kl
 				if thigh.length() > 0.001 and shin.length() > 0.001:
 					knee_angles.append(rad_to_deg(thigh.angle_to(shin)))
+				# ★剪刀腳判定：匍匐是把膝蓋收到身體「前方」蹬地，剪刀腳是膝蓋往側後張開。
+				#   只量外張量與屈膝角會漏掉這件事（使用者指正三次才抓到）。
+				var fwdv: Vector3 = cru["node"].facing_dir()
+				knee_fwd.append((kl - hipp).dot(fwdv))
 				await _snap("res://crawl_%d.png" % (seg_i + 1))
+				# ★側視近照：第三人稱是從背後看，腿被身體擋住，根本看不出匍匐動作。
+				#   驗腿的姿勢一定要有側面圖（使用者三次指正剪刀腳，前兩次我都只有背影圖）。
+				var cnode = cru["node"]
+				cam.clear_tps()
+				cam.set_follow(null)
+				cam.focus = cnode.global_position + Vector3(0, 0.35, 0)
+				cam.yaw = cnode.rotation.y + PI * 0.5
+				cam.dist = 3.0
+				cam.pitch_deg = 8.0
+				await get_tree().create_timer(0.35).timeout
+				await _snap("res://crawl_side%d.png" % (seg_i + 1))
+				cam.set_tps(cnode)
+				cam.tps_yaw = 180.0
+				await get_tree().create_timer(0.2).timeout
 			var cr_d: float = cr_from.distance_to(cru["node"].global_position)
 			var cr_state: String = str(cru["node"]._state)
 			var cr_hip: float = cru["node"]._rig.bone_pos("Hips").y - cru["node"].global_position.y
@@ -995,6 +1040,11 @@ func _selftest() -> void:
 			print("[crawlchk] 膝蓋外張量 %.2f/%.2f/%.2f m（差 %.2f） %s" % [spreads[0], spreads[1],
 					spreads[2], sp_max - sp_min,
 					"OK(雙腿在交替蹬地)" if (sp_max - sp_min) > 0.05 else "FAIL(腿沒動＝只是趴著平移)"])
+			if not knee_fwd.is_empty():
+				var kf_max: float = knee_fwd.max()
+				print("[crawlchk] 膝蓋相對髖部前後 %.2f/%.2f/%.2f m（正=在前方蹬地） %s" % [
+						knee_fwd[0], knee_fwd[1], knee_fwd[2],
+						"OK(膝蓋往前收)" if kf_max > 0.05 else "FAIL(膝蓋往側後張＝剪刀腳)"])
 			if knee_angles.is_empty():
 				print("[crawlchk] 屈膝角度量不到 FAIL(骨頭抓不到)")
 			else:
@@ -1002,6 +1052,17 @@ func _selftest() -> void:
 				print("[crawlchk] 左膝彎曲角 %.0f/%.0f/%.0f 度（0=伸直，最大 %.0f） %s" % [knee_angles[0],
 						knee_angles[1], knee_angles[2], ka_max,
 						"OK(膝蓋真的有彎)" if ka_max > 30.0 else "FAIL(腿是伸直的＝剪刀腿不是匍匐)"])
+			# ★脈動驗證（使用者：「腿在動但完全不像真的在移動」）：
+			#   等速平移＋腿在擺動＝人被拖著滑行。真實匍匐是一蹬一停，
+			#   所以每一小段的位移必須有明顯落差。
+			var segs: Array = await _hold_key_sampled(KEY_W, 1.6, 10, cru["node"])
+			if segs.size() >= 4:
+				var s_min: float = segs.min()
+				var s_max: float = segs.max()
+				var ratio: float = s_max / maxf(s_min, 0.0005)
+				print("[crawlchk] 每段位移 min=%.3f max=%.3f 落差=%.1f倍 %s" % [s_min, s_max, ratio,
+						"OK(一蹬一停，不是等速滑行)" if ratio > 2.0
+						else "FAIL(等速平移＝看起來像被拖著滑)"])
 			# 持續走就該起身：爬 2.5 秒（約 2m）之後還龜速爬過整個戰場很痛苦。
 			# 這條要獨立驗，否則哪天門檻被改壞（改成永不起身或立刻起身）不會有人發現。
 			await _hold_key(KEY_W, 3.5)
@@ -1013,9 +1074,57 @@ func _selftest() -> void:
 					"OK(自動起身了)" if (up_prone < 0.1 and up_hip > 0.35)
 					else "FAIL(一直趴著爬，跨越戰場會很痛苦)"])
 			await _snap("res://crawl_standup.png")
-			cru["hp"] = hp_save
-			cru["maxhp"] = hpmax_save
+			_unshield(cru, cru_save)
 			cru["node"].want_prone = false
+			_end_action()
+		# I-4f) 鍵盤操作（GDD/07；使用者 2026-07-26 要求不要什麼都靠滑鼠）：
+		#      方向鍵移動、Q/E 轉視角、C 蹲 / Z 趴 / Space 站起。
+		var ku = _deployed[0]
+		if not is_instance_valid(ku["node"]):
+			print("[keychk] SKIP 沒有可用單位")
+		else:
+			ku["node"].stop()
+			_end_action()
+			cp = 6
+			var ku_save := _shield(ku)
+			var kspot: Vector2 = _open_spot([10.0, 7.0, 5.0, 0.0], 22.0)
+			ku["node"].global_position = _to3d(kspot.x, kspot.y)
+			ku["wx"] = kspot.x
+			ku["wy"] = kspot.y
+			ku["node"].want_prone = false
+			_begin_action(ku)
+			ku["ap"] = 300.0
+			ku["ap_max"] = 300.0
+			await get_tree().create_timer(0.5).timeout
+			# 方向鍵（不是 WASD）要能移動
+			var kfrom: Vector3 = ku["node"].global_position
+			await _hold_key(KEY_UP, 1.0)
+			var kmoved: float = kfrom.distance_to(ku["node"].global_position)
+			print("[keychk] 方向鍵↑ 走 1 秒位移 %.2fm %s" % [kmoved,
+					"OK" if kmoved > 0.8 else "FAIL(方向鍵不能移動)"])
+			# Q/E 轉視角
+			var yaw0: float = cam.tps_yaw
+			await _hold_key(KEY_Q, 0.6)
+			var yaw_d: float = absf(cam.tps_yaw - yaw0)
+			print("[keychk] Q 轉視角 %.0f 度 %s" % [yaw_d,
+					"OK" if yaw_d > 15.0 else "FAIL(鍵盤轉不動視角＝還是得用滑鼠)"])
+			# 姿勢鍵：C 蹲 → Z 趴 → Space 站
+			await _hold_key(KEY_C, 0.12)
+			await get_tree().create_timer(0.9).timeout
+			var c_crouch: float = float(ku["node"]._crouch)
+			await _hold_key(KEY_Z, 0.12)
+			await get_tree().create_timer(1.2).timeout
+			var c_prone: float = float(ku["node"]._prone)
+			await _snap("res://key_prone.png")
+			await _hold_key(KEY_SPACE, 0.12)
+			await get_tree().create_timer(1.2).timeout
+			var c_stand: float = float(ku["node"]._prone) + float(ku["node"]._crouch)
+			print("[keychk] C 蹲=%.2f → Z 趴=%.2f → Space 站起(蹲+趴)=%.2f %s" % [
+					c_crouch, c_prone, c_stand,
+					"OK(三個姿勢鍵都有效)" if (c_crouch > 0.7 and c_prone > 0.7 and c_stand < 0.2)
+					else "FAIL(姿勢鍵沒作用)"])
+			ku["node"].stance_cmd = ""
+			_unshield(ku, ku_save)
 			_end_action()
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
@@ -1878,6 +1987,14 @@ func _capture_mouse(on: bool) -> void:
 
 # 第三人稱操控（GDD/07）：WASD 相對鏡頭移動、準心決定瞄準方向。
 # AP 照樣由 _action_tick 依「實際位移」扣，兩種操作方式共用同一套經濟。
+# 按鍵「剛按下」偵測：姿勢切換不能用 is_key_pressed（按住會每幀切換一次）
+var _key_prev := {}
+func _key_edge(code: Key) -> bool:
+	var now: bool = Input.is_key_pressed(code)
+	var was: bool = bool(_key_prev.get(code, false))
+	_key_prev[code] = now
+	return now and not was
+
 func _tps_control(delta: float) -> void:
 	if acting == null or st != St.CMD or not cam.is_tps():
 		return
@@ -1889,6 +2006,25 @@ func _tps_control(delta: float) -> void:
 	node.aim_point = node.global_position + Vector3(0, 1.4, 0) + fwd * 20.0
 	if ui.fire_panel_open():
 		return                      # 面板開著時不要一邊走一邊選部位
+	# 鍵盤轉視角（使用者 2026-07-26：不想什麼都靠滑鼠）。
+	# 方向鍵移動是「相對鏡頭」的，鏡頭原本只能用滑鼠轉，等於還是離不開滑鼠。
+	var turn := 0.0
+	if Input.is_key_pressed(KEY_Q):
+		turn += 1.0
+	if Input.is_key_pressed(KEY_E):
+		turn -= 1.0
+	if turn != 0.0:
+		cam.tps_yaw += turn * 96.0 * delta
+	# 姿勢：C 蹲、Z 趴、Space 站起（按下即切換，不是按住）
+	if _key_edge(KEY_C):
+		node.stance_cmd = "" if node.stance_cmd == "crouch" else "crouch"
+		ui.flash_msg("姿勢：蹲下" if node.stance_cmd == "crouch" else "姿勢：自動", Color(0.7, 0.9, 1.0))
+	if _key_edge(KEY_Z):
+		node.stance_cmd = "" if node.stance_cmd == "prone" else "prone"
+		ui.flash_msg("姿勢：伏臥" if node.stance_cmd == "prone" else "姿勢：自動", Color(0.7, 0.9, 1.0))
+	if _key_edge(KEY_SPACE):
+		node.stance_cmd = "stand"
+		ui.flash_msg("姿勢：站立", Color(0.7, 0.9, 1.0))
 	var ix := 0.0
 	var iz := 0.0
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
@@ -2387,10 +2523,27 @@ func _anichk(u3) -> void:
 	print("[anichk] 陣亡倒地 頭高 %.2f→%.2f %s" % [
 		head_up, head_dn, "OK" if head_dn < head_up * 0.6 else "FAIL(沒倒下)"])
 
+# 驗收台專用：讓測試對象在測試期間打不死。
+# ⚠ 這已經是第三次踩到同一件事（crawlchk / anichk / camchk）：驗姿勢或鏡頭的測試
+#   會讓單位在戰場上走好幾秒，敵方警戒射擊一開火它就 queue_free，
+#   下一行讀 global_position / _rig 直接炸「previously freed」。
+#   驗表現的測試不該被戰鬥干擾——凡是「用走的」超過一兩秒的段落都要先上護盾。
+func _shield(u) -> Array:
+	var save := [int(u["hp"]), int(u["maxhp"])]
+	u["hp"] = 999999
+	u["maxhp"] = 999999
+	return save
+
+func _unshield(u, save: Array) -> void:
+	u["hp"] = save[0]
+	u["maxhp"] = save[1]
+
 # 找一塊空地（驗收台用）：離建築與所有實體障礙至少 clear_m 公尺。
 # ⚠ 一定要分級放寬：門檻開太高會整張圖找不到，然後退回「地圖中央」——
 #   而地圖中央往往就是一棟房子裡（2026-07-26 實測 FAIL 兩項）。
-func _open_spot(clears: Array) -> Vector2:
+# ⚠ 也要避開敵方單位：驗姿勢的側視圖被敵人擋住就等於沒拍到，
+#   而且測試對象會一直「遭到迎擊」干擾畫面（實拍兩張都被擋）。
+func _open_spot(clears: Array, away_from_foes := 0.0) -> Vector2:
 	var mw2: float = float(map_data.get("w", 960))
 	var mh2: float = float(map_data.get("h", 600))
 	for clear_m in clears:
@@ -2403,6 +2556,12 @@ func _open_spot(clears: Array) -> Vector2:
 					if bd2.rect.grow(maxf(cr, 6.0 / WORLD_SCALE)).has_point(cand):
 						bad = true
 						break
+				if not bad and away_from_foes > 0.0:
+					for fu in units:
+						if fu["alive"] and fu["side"] != player_side and is_instance_valid(fu["node"]):
+							if cand.distance_to(Vector2(fu["wx"], fu["wy"])) < away_from_foes / WORLD_SCALE:
+								bad = true
+								break
 				if not bad and cr > 0.0:
 					for bk2 in _blockers:
 						var pc: Vector2 = bk2["c"] if bk2["t"] == "cir" 								else Geometry2D.get_closest_point_to_segment(cand, bk2["a"], bk2["b"])
@@ -2549,6 +2708,7 @@ func _build_ground() -> void:
 	# 舊做法是擺現成模型的實心外殼＋一個圓形掩體，玩家進不去、視線也只能用圓近似。
 	_buildings = []
 	_blockers = []          # 重建場景時一定要清，否則上一張地圖的障礙會留在新戰場上
+	_tree_feet = []
 	var solids = map_data.get("solids", [])
 	if solids is Array:
 		var i := 0
@@ -2605,18 +2765,18 @@ func _build_ground() -> void:
 	# 中景物件（GDD/14）：道路、路障、拒馬、圍籬、電線桿、瓦礫。
 	# 第三人稱一站進戰場，眼睛高度沒東西可看就會覺得空——這層補的就是那個。
 	fort.finish()
-	# 草要等建築建好才鋪（禁草區得用建築的實際佔地，見 Terrain.build 的註解）
-	if terrain != null:
-		var no_rects: Array = []
-		for bdg in _buildings:
-			no_rects.append(bdg.rect)
-		terrain.build_grass(no_rects)
 	var props = PROPS.new()
 	world.add_child(props)
 	props.build(map_data, WORLD_SCALE, terrain)
 	_blockers = props.blockers.duplicate()
 	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感），樹幹本身也是實體
 	_scatter_trees(mw, mh)
+	# 草最後鋪：禁草區要用建築的實際佔地，樹腳的草也要等樹放好才知道位置
+	if terrain != null:
+		var no_rects: Array = []
+		for bdg in _buildings:
+			no_rects.append(bdg.rect)
+		terrain.build_grass(no_rects, _tree_feet)
 
 	# 我方部署藍框（開戰後隱藏）
 	var z := _my_zone()
@@ -2823,10 +2983,12 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			var pr3: Dictionary = proto[path3]
 			var sc3: float = rng.randf_range(0.65, 1.9)
 			var ty3: float = terrain.height_at(px, py) if terrain != null else 0.0
+			var lean3 := Basis(Vector3(1, 0, 0), rng.randf_range(-0.06, 0.06)) 					* Basis(Vector3(0, 0, 1), rng.randf_range(-0.06, 0.06))
 			var base3 := Transform3D(
-					Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc3),
+					(Basis(Vector3.UP, rng.randf() * TAU) * lean3).scaled(Vector3.ONE * sc3),
 					Vector3((px - gwp * 0.5) * WORLD_SCALE,
-							ty3 + float(pr3["dy"]) * sc3, (py - ghp * 0.5) * WORLD_SCALE))
+							ty3 + float(pr3["dy"]) * sc3 - 0.12 * sc3,
+							(py - ghp * 0.5) * WORLD_SCALE))
 			for part3 in pr3["parts"]:
 				var k3 = part3[0]
 				if not xf_by_mesh.has(k3):
@@ -2852,10 +3014,13 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		var pr: Dictionary = proto[path2]
 		var sc: float = rng.randf_range(0.62, 1.6)
 		var ty: float = terrain.height_at(px, py) if terrain != null else 0.0
+		# 樹要「長進地裡」而不是站在地面上：底部略微下沉，再加隨機傾斜。
+		# 全部筆直等高的樹一眼看破是複製貼上（使用者 2026-07-26 指正場景不真實）。
+		var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.05, 0.05)) 				* Basis(Vector3(0, 0, 1), rng.randf_range(-0.05, 0.05))
 		var base := Transform3D(
-				Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc),
+				(Basis(Vector3.UP, rng.randf() * TAU) * lean).scaled(Vector3.ONE * sc),
 				Vector3((px - gwp * 0.5) * WORLD_SCALE,
-						ty + float(pr["dy"]) * sc, (py - ghp * 0.5) * WORLD_SCALE))
+						ty + float(pr["dy"]) * sc - 0.12 * sc, (py - ghp * 0.5) * WORLD_SCALE))
 		for part in pr["parts"]:
 			var key = part[0]
 			if not xf_by_mesh.has(key):
@@ -2867,6 +3032,7 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		#   _resolve_solids 每幀要多跑幾百次，碰撞成本會被背景吃掉。
 		if not outside:
 			_covers.append({"wx": px, "wy": py, "r": 34.0 * sc, "val": 0.30, "type": "bush"})
+			_tree_feet.append(tp)
 			_blockers.append({"t": "cir", "c": tp,
 					"r": (0.85 if clus else 0.40) * sc / WORLD_SCALE})
 		placed += 1

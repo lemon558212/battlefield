@@ -137,6 +137,9 @@ var _gun_pos := Vector3.ZERO
 # 看得見的敵人一律 1.0——那段是玩家要看的（也是迎擊發生的地方）。
 var speed_mul := 1.0
 var want_prone := false        # 趴姿：全身伏地出槍（狙擊/壓制用）
+# 玩家用鍵盤指定的姿勢（"" = 交給自動判定）。使用者 2026-07-26 要求
+# 蹲/趴/起立要能自己按鍵控制，不是只由「有沒有掩體」自動決定。
+var stance_cmd := ""
 var _prone := 0.0
 var _crawl := 0.0              # 匍匐動作相位（只在趴著移動時前進）
 var _crawl_amt := 0.0          # 匍匐擺動強度（起停漸進，靜止臥射時為 0）
@@ -732,8 +735,13 @@ func move_dir(dir: Vector3, delta: float) -> void:
 	# 趴著移動＝匍匐前進，不是趴著跑。播跑步動畫會讓腿在跑、手臂在擺，
 	# 而軀幹又被趴姿骨骼壓平——畫面上就是自由式游泳（使用者 2026-07-26 指正）。
 	if _prone > 0.5:
-		global_position += d * PRONE_SPEED * delta
+		# ★脈動式前進（使用者 2026-07-26：「腿在動但完全不像真的在移動」）：
+		#   等速平移＋腿在擺動＝人被拖著滑行。真實匍匐是「一蹬一停」——蹬地那下
+		#   往前衝，收腿時幾乎不動。速度必須跟著蹬地相位走，腳才不會在地上打滑。
+		#   |sin| 的平均值是 2/π≈0.637，除掉它才能維持設定的平均速度。
 		_crawl += delta * CRAWL_RATE
+		var thrust: float = (0.12 + 0.88 * absf(sin(_crawl))) / 0.667
+		global_position += d * PRONE_SPEED * thrust * delta
 		_prone_hold += delta        # 持續走就會超過門檻，_update_crouch 會讓他起身
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
 		return
@@ -849,12 +857,22 @@ func _update_crouch(delta: float) -> void:
 	# 鬆開方向鍵就重置：停下來重新臥射，再走又是一次短距離匍匐
 	if not _dir_moving and _move_target == null:
 		_prone_hold = maxf(0.0, _prone_hold - delta * 2.0)
-	var ptarget: float = 1.0 if (want_prone and not _dead and _move_target == null
-			and _prone_hold < PRONE_BREAK_T) else 0.0
+	# 玩家按鍵優先：按了趴就趴（而且不受 PRONE_BREAK_T 自動起身限制——
+	# 那條是給「自動臥射」用的，玩家明確要趴就不該被系統拉起來）。
+	var ptarget := 0.0
+	if stance_cmd == "prone":
+		ptarget = 1.0 if not _dead else 0.0
+	elif stance_cmd == "":
+		ptarget = 1.0 if (want_prone and not _dead and _move_target == null
+				and _prone_hold < PRONE_BREAK_T) else 0.0
 	_prone = move_toward(_prone, ptarget, delta * 2.4)
 	# 掩體區內小幅移動＝蹲行（真人在掩體後不會站起來走）；長距離移動才站起來跑。
 	var short_hop: bool = _move_target != null and global_position.distance_to(_move_target) < CROUCH_WALK_MAX
 	var stay_low: bool = want_cover and not _dead and (_move_target == null or short_hop)
+	if stance_cmd == "crouch":
+		stay_low = not _dead
+	elif stance_cmd == "stand" or stance_cmd == "prone":
+		stay_low = false
 	var target: float = 0.0 if _prone > 0.01 else (1.0 if stay_low else 0.0)
 	_crouch = move_toward(_crouch, target, delta * 3.2)
 	# 起身還原：趴姿把 _model.position.y 壓下去 1m 多，解除趴姿時那行就不再執行，
@@ -1041,6 +1059,8 @@ func _aim_pose() -> void:
 			# 身體隨著蹬地的那一腿側滾——這是匍匐看起來「有在使力」的來源
 			_rig.add_world_rotation("Hips", fwd, deg_to_rad(9.0) * sin(_crawl) * _crawl_amt)
 			_rig.add_world_rotation("Abdomen", fwd, deg_to_rad(5.0) * sin(_crawl) * _crawl_amt)
+			# 上身在蹬地瞬間撐起、收腿時放低（跟 bob 同相位）：肘撐的動作感
+			_rig.add_world_rotation("Abdomen", rgt, deg_to_rad(-7.0) * sin(_crawl * 2.0) * _crawl_amt)
 		# 腿：平放在身後、略微朝下。腿掛在 Root，必須自己搬到髖部位置再擺方向。
 		for sd in ["L", "R"]:
 			var sgn: float = -1.0 if sd == "L" else 1.0
@@ -1055,18 +1075,27 @@ func _aim_pose() -> void:
 			# 大腿：從「併攏向後平放」轉成「向外側張開、略朝後」。
 			# ⚠ 基礎（sw=0）要**微微內收**：先前基礎就是純 -fwd，兩腿各自被髖寬撐開，
 			#   實拍看起來像劈腿（使用者說的「左右腳向左右晃」有一半是這個造成的）。
-			var up_dir: Vector3 = (-fwd * (0.98 - 0.63 * sw) + rgt * sgn * (-0.10 + 0.95 * sw)
-					- Vector3.UP * 0.24).normalized()
+			# ⚠ 使用者 2026-07-26 第三次指正「還是剪刀腳」——真因就在這一行：
+			#   先前 sw=1 時大腿指向「側後方」(-fwd*0.35 + rgt*0.85)，那正是剪刀腿張開的定義。
+			#   匍匐是把膝蓋往身體「側前方」收去蹬地，所以要轉成 (+fwd + rgt)。
+			#   係數要夠大：第一版 sw=1 才剛好到 +0.32，而 sw 很少真的到 1，
+			#   實測膝蓋仍全程在髖部後方（-0.41m）。要 sw≈0.45 就已經明顯朝前。
+			var up_dir: Vector3 = (fwd * (-0.98 + 2.30 * sw) + rgt * sgn * (-0.10 + 0.55 * sw)
+					- Vector3.UP * (0.24 - 0.12 * sw)).normalized()
 			_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir, _prone)
 			# 小腿：折回身體中線（腳跟朝臀部）＝膝蓋彎起來，而不是跟著往外
-			var lo_dir: Vector3 = (-fwd * (0.99 - 0.19 * kn) - rgt * sgn * (0.08 + 0.55 * kn)
-					- Vector3.UP * (0.14 - 0.04 * kn)).normalized()
+			# 小腿：膝蓋收到前方之後，小腿要往**後**折（腳掌拖在身後）＝膝蓋大幅彎曲。
+			# 小腿必須與大腿反向才叫屈膝；同向就是整條腿伸直在地上劃圈＝剪刀腳。
+			var lo_dir: Vector3 = (-fwd * (0.99 - 0.10 * kn) - rgt * sgn * (0.08 + 0.42 * kn)
+					- Vector3.UP * (0.14 - 0.06 * kn)).normalized()
 			_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir, _prone)
 		# 貼地：量髖部離地多少，整個模型降下去（只有這裡寫高度，避免兩處互相抵銷）
 		# ⚠ 要用「相對目前位置再修正」的收斂寫法：寫成 base - (量到的高度) 會左右震盪
 		#   （量到的高度本身就含上一幀的修正量），畫面上就是趴著上下抖。
+		# 身體隨著蹬地起伏：撐起→前送→落下。少了這個，整個人像貼在地板上平移。
+		var bob: float = 0.030 * sin(_crawl * 2.0) * _crawl_amt
 		var hip_y: float = _rig.bone_pos("Hips").y - global_position.y
-		_model.position.y = clampf(_model.position.y - (hip_y - PRONE_H) * _prone,
+		_model.position.y = clampf(_model.position.y - (hip_y - (PRONE_H + bob)) * _prone,
 				_model_base_y - 1.2, _model_base_y + 0.1)
 	# 蹲姿（換法 2026-07-25）：不再猜骨頭該繞哪個軸轉——那條路三個軸實測都失敗。
 	# 改用「壓低身體 → 用 IK 把雙腳釘回地面」，膝蓋就會被幾何關係自然頂彎。

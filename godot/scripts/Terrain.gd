@@ -247,10 +247,13 @@ func _ground_color(v: Vector3) -> Color:
 	return c.srgb_to_linear()
 
 # 由 Main 在建築建好後呼叫：no_rects＝建築的實際佔地（禁草區）
-func build_grass(no_rects: Array) -> void:
+var _tree_feet: Array = []      # 樹腳位置（px）：在樹底補一圈草，樹才不是「插在地上」
+
+func build_grass(no_rects: Array, tree_feet: Array = []) -> void:
 	_no_grass = []
 	for r in no_rects:
 		_no_grass.append((r as Rect2).grow(1.2 / ws))
+	_tree_feet = tree_feet
 	_build_grass()
 
 # ---------- 草（MultiMesh，一次繪製）----------
@@ -263,6 +266,24 @@ func _build_grass() -> void:
 	_grass_mat.shader = sh
 	_grass_layer(_tuft_mesh(1.0), _scatter_field(), 55.0, "GrassField")
 	_grass_layer(_tuft_mesh(1.5), _scatter_bushes(), 70.0, "GrassBush")
+	_grass_layer(_tuft_mesh(1.25), _scatter_tree_feet(), 55.0, "GrassRoots")
+
+# 樹腳的草：物件與地面的過渡。少了這一圈，樹看起來就是「插在草皮上的模型」。
+func _scatter_tree_feet() -> Array:
+	var xf: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5150
+	for tf in _tree_feet:
+		var c: Vector2 = tf
+		for i in 7:
+			var a: float = rng.randf() * TAU
+			var d: float = sqrt(rng.randf()) * (1.1 / ws)
+			var gx: float = c.x + cos(a) * d
+			var gy: float = c.y + sin(a) * d
+			if _indoors(gx, gy):
+				continue
+			xf.append(_tuft_xf(gx, gy, rng, 0.9, 1.4))
+	return xf
 
 # 全地圖稀疏矮草：間距約 3.6m，避開建築、壕溝與陡坡（陡坡是裸土碎石）
 func _scatter_field() -> Array:

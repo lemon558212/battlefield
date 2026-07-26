@@ -82,6 +82,12 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 				+ rng.randf_range(0.5, 1.1))
 		_bag(Vector2(cx, cy), off, Vector3(bag_l, bag_h, bag_w),
 				rng.randf() * TAU, rng.randf_range(-0.5, 0.5), rng)
+	# 實體：沙包牆是一道牆，人不可能從中間穿過去（使用者 2026-07-26 指正
+	# 「任何的物體都是不能穿越的」）。用線段涵蓋整道牆。
+	var half_len: float = length_m * 0.5 / _ws
+	var dpx := Vector2(dir.x, dir.y) * half_len
+	blockers.append({"t": "seg", "a": Vector2(cx, cy) - dpx, "b": Vector2(cx, cy) + dpx,
+			"r": 0.30 / _ws, "m": Vector2(cx, cy), "hl": half_len})
 	# 底部泥土堆：物件與地面的過渡，沒有這層就是「硬插進地面」
 	for k2 in 10:
 		var t2: float = rng.randf_range(-length_m * 0.55, length_m * 0.55)
