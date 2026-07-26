@@ -1146,34 +1146,44 @@ func _aim_pose() -> void:
 			_rig.add_world_rotation("Abdomen", fwd, deg_to_rad(5.0) * sin(_crawl) * _crawl_amt)
 			# 上身在蹬地瞬間撐起、收腿時放低（跟 bob 同相位）：肘撐的動作感
 			_rig.add_world_rotation("Abdomen", rgt, deg_to_rad(-7.0) * sin(_crawl * 2.0) * _crawl_amt)
-		# 腿：平放在身後、略微朝下。腿掛在 Root，必須自己搬到髖部位置再擺方向。
+		# ★腿：依美軍 STP 21-1-SMCT（Warrior Skills Level 1）的 low crawl 定義重寫。
+		#   文件原文的動作循環是：
+		#     (a) Push both arms forward while pulling your right leg forward.
+		#     (b) Then pull with both arms while pushing with your right leg.
+		#   關鍵三點，先前全做錯：
+		#     ① 推進只用**單邊腿**（右腿），不是雙腿交替。雙腿交替＝游泳，不是匍匐。
+		#     ② 左腿幾乎不動，伸直拖在身後（只被身體帶著滑）。
+		#     ③ 手臂**兩隻同相位**（一起前推、一起後拉），不是左右交替。
+		#   相位定義：ph=0 收腿伸手（蓄力），ph=π 蹬地拉手（前進）。
+		var ph: float = _crawl
+		var draw: float = maxf(sin(ph), 0.0) * _crawl_amt          # 收腿：右膝屈起外頂
+		var push: float = maxf(-sin(ph), 0.0) * _crawl_amt         # 蹬地：右腿伸直
 		for sd in ["L", "R"]:
 			var sgn: float = -1.0 if sd == "L" else 1.0
-			# 左右腿相位相差半圈＝交替蹬地；只取正半波（收腿，再蹬直）
-			var ph: float = _crawl + (0.0 if sd == "L" else PI)
-			var sw: float = maxf(sin(ph), 0.0) * _crawl_amt              # 大腿外展
-			# ★膝蓋要「先彎，再帶著大腿往外」：屈膝相位超前大腿外展 0.5 rad。
-			#   使用者 2026-07-26 指正——先前小腿跟著大腿一起往外，整條腿伸直左右晃，
-			#   那是剪刀腿不是匍匐。匍匐是屈膝把膝蓋往外側頂出去、再用膝內側蹬地。
-			var kn: float = maxf(sin(ph + 0.5), 0.0) * _crawl_amt        # 屈膝
-			_rig.place_bone("UpperLeg." + sd, hips + rgt * sgn * (0.07 + 0.10 * sw) - fwd * 0.02, _prone)
-			# 大腿：從「併攏向後平放」轉成「向外側張開、略朝後」。
-			# ⚠ 基礎（sw=0）要**微微內收**：先前基礎就是純 -fwd，兩腿各自被髖寬撐開，
-			#   實拍看起來像劈腿（使用者說的「左右腳向左右晃」有一半是這個造成的）。
-			# ⚠ 使用者 2026-07-26 第三次指正「還是剪刀腳」——真因就在這一行：
-			#   先前 sw=1 時大腿指向「側後方」(-fwd*0.35 + rgt*0.85)，那正是剪刀腿張開的定義。
-			#   匍匐是把膝蓋往身體「側前方」收去蹬地，所以要轉成 (+fwd + rgt)。
-			#   係數要夠大：第一版 sw=1 才剛好到 +0.32，而 sw 很少真的到 1，
-			#   實測膝蓋仍全程在髖部後方（-0.41m）。要 sw≈0.45 就已經明顯朝前。
-			var up_dir: Vector3 = (fwd * (-0.98 + 2.30 * sw) + rgt * sgn * (-0.10 + 0.55 * sw)
-					- Vector3.UP * (0.24 - 0.12 * sw)).normalized()
-			_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir, _prone)
-			# 小腿：折回身體中線（腳跟朝臀部）＝膝蓋彎起來，而不是跟著往外
-			# 小腿：膝蓋收到前方之後，小腿要往**後**折（腳掌拖在身後）＝膝蓋大幅彎曲。
-			# 小腿必須與大腿反向才叫屈膝；同向就是整條腿伸直在地上劃圈＝剪刀腳。
-			var lo_dir: Vector3 = (-fwd * (0.99 - 0.10 * kn) - rgt * sgn * (0.08 + 0.42 * kn)
-					- Vector3.UP * (0.14 - 0.06 * kn)).normalized()
-			_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir, _prone)
+			var is_drive: bool = (sd == "R")                        # 只有右腿是動力腿
+			_rig.place_bone("UpperLeg." + sd,
+					hips + rgt * sgn * (0.07 + (0.13 * draw if is_drive else 0.0)) - fwd * 0.02,
+					_prone)
+			if is_drive:
+				# 動力腿：收腿時膝往「側前方」頂出（往前才拉得到地），蹬完回到伸直朝後
+				var up_dir: Vector3 = (fwd * (-0.95 + 2.10 * draw)
+						+ rgt * sgn * (-0.08 + 0.60 * draw)
+						- Vector3.UP * (0.22 - 0.10 * draw)).normalized()
+				_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir, _prone)
+				# 小腿與大腿反向＝屈膝；蹬地那半波要伸直（kn 回到 0）
+				var kn: float = draw
+				var lo_dir: Vector3 = (-fwd * (0.99 - 0.12 * kn) - rgt * sgn * (0.06 + 0.46 * kn)
+						- Vector3.UP * (0.13 - 0.05 * kn)).normalized()
+				_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir, _prone)
+			else:
+				# 拖行腿：伸直、併攏、略朝下，只有極小的被動晃動（被身體帶著走）
+				var trail: float = 0.03 * sin(ph * 2.0) * _crawl_amt
+				var up_dir2: Vector3 = (-fwd * 0.97 + rgt * sgn * (0.06 + trail)
+						- Vector3.UP * 0.22).normalized()
+				_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir2, _prone)
+				var lo_dir2: Vector3 = (-fwd * 0.99 - rgt * sgn * 0.05
+						- Vector3.UP * 0.12).normalized()
+				_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir2, _prone)
 		# 貼地：量髖部離地多少，整個模型降下去（只有這裡寫高度，避免兩處互相抵銷）
 		# ⚠ 要用「相對目前位置再修正」的收斂寫法：寫成 base - (量到的高度) 會左右震盪
 		#   （量到的高度本身就含上一幀的修正量），畫面上就是趴著上下抖。

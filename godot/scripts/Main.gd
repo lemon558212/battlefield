@@ -1201,15 +1201,18 @@ func _selftest() -> void:
 				var kl: Vector3 = rg.bone_pos("LowerLeg.L")
 				var kr: Vector3 = rg.bone_pos("LowerLeg.R")
 				spreads.append(kl.distance_to(kr))
-				var hipp: Vector3 = rg.bone_pos("UpperLeg.L")
-				var thigh: Vector3 = kl - hipp
-				var shin: Vector3 = rg.bone_pos("Foot.L") - kl
+				# 依 STP 21-1-SMCT，low crawl 的動力腿是右腿、左腿伸直拖在身後。
+				# 這個測試原本量左腿，於是「左腿本來就該伸直」被誤判成剪刀腳 FAIL。
+				# 量錯維度＝白修，本專案第二次踩到，所以改量右腿。
+				var hipp: Vector3 = rg.bone_pos("UpperLeg.R")
+				var thigh: Vector3 = kr - hipp
+				var shin: Vector3 = rg.bone_pos("Foot.R") - kr
 				if thigh.length() > 0.001 and shin.length() > 0.001:
 					knee_angles.append(rad_to_deg(thigh.angle_to(shin)))
 				# ★剪刀腳判定：匍匐是把膝蓋收到身體「前方」蹬地，剪刀腳是膝蓋往側後張開。
 				#   只量外張量與屈膝角會漏掉這件事（使用者指正三次才抓到）。
 				var fwdv: Vector3 = cru["node"].facing_dir()
-				knee_fwd.append((kl - hipp).dot(fwdv))
+				knee_fwd.append((kr - hipp).dot(fwdv))
 				# 左手要往前撐地拉行：趴姿唯一看得見的推進動作
 				var hl: Vector3 = rg.bone_pos(cru["node"]._hand_l)
 				hand_fwd.append((hl - cru["node"].global_position).dot(fwdv))
@@ -1242,7 +1245,7 @@ func _selftest() -> void:
 					"OK(雙腿在交替蹬地)" if (sp_max - sp_min) > 0.05 else "FAIL(腿沒動＝只是趴著平移)"])
 			if not knee_fwd.is_empty():
 				var kf_max: float = knee_fwd.max()
-				print("[crawlchk] 膝蓋相對髖部前後 %.2f/%.2f/%.2f m（正=在前方蹬地） %s" % [
+				print("[crawlchk] 右膝相對髖部前後 %.2f/%.2f/%.2f m（正=在前方蹬地） %s" % [
 						knee_fwd[0], knee_fwd[1], knee_fwd[2],
 						"OK(膝蓋往前收)" if kf_max > 0.05 else "FAIL(膝蓋往側後張＝剪刀腳)"])
 			if hand_fwd.size() >= 3:
@@ -1256,7 +1259,7 @@ func _selftest() -> void:
 				print("[crawlchk] 屈膝角度量不到 FAIL(骨頭抓不到)")
 			else:
 				var ka_max: float = knee_angles.max()
-				print("[crawlchk] 左膝彎曲角 %.0f/%.0f/%.0f 度（0=伸直，最大 %.0f） %s" % [knee_angles[0],
+				print("[crawlchk] 右膝(動力腿)彎曲角 %.0f/%.0f/%.0f 度（0=伸直，最大 %.0f） %s" % [knee_angles[0],
 						knee_angles[1], knee_angles[2], ka_max,
 						"OK(膝蓋真的有彎)" if ka_max > 30.0 else "FAIL(腿是伸直的＝剪刀腿不是匍匐)"])
 			# ★脈動驗證（使用者：「腿在動但完全不像真的在移動」）：
