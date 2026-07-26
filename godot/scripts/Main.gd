@@ -988,6 +988,72 @@ func _selftest() -> void:
 					and shot_along) else "FAIL(子彈穿沙包/沙包變無敵牆)"])
 			_buildings = keep_bld3
 			_blockers = keep_blk3
+		# I-4b3) 沒有東西可以插進固體裡（使用者 2026-07-26 兩次指正：「不管是槍或是人
+		#        又或是任何的物品都不可能會跑進去固體裡面」）。這裡量三件事：
+		#          1. 身體中心到牆面的距離（>0＝身體沒進牆）
+		#          2. 槍口到抵肩點之間有沒有穿過固體（_solid_ray＝1 才算沒穿）
+		#          3. 槍口本身在不在室內（在＝槍穿牆進屋了）
+		if _buildings.is_empty():
+			print("[clipchk] SKIP 場上沒有建築")
+		else:
+			var keep_bld4 := _buildings
+			var keep_blk4 := _blockers
+			var cbd = _buildings[0]
+			_buildings = [cbd]
+			_blockers = []          # 只驗牆，別讓路邊柵欄先把人擋住
+			var cu2 = _deployed[0]
+			var cu2_save := _shield(cu2)
+			# 站在南面牆外，正對牆走（南面有門，所以往東偏 1/3 個房子寬避開門洞）
+			var cc: Vector2 = cbd.rect.get_center()
+			var cwall_y: float = cc.y + cbd.rect.size.y * 0.5
+			var cstart := Vector2(cc.x + cbd.rect.size.x * 0.33, cwall_y + 5.0 / WORLD_SCALE)
+			cu2["node"].stop()
+			_end_action()
+			cp = 6
+			cu2["node"].global_position = _to3d(cstart.x, cstart.y)
+			cu2["wx"] = cstart.x
+			cu2["wy"] = cstart.y
+			_begin_action(cu2)
+			cu2["ap"] = 300.0
+			cu2["ap_max"] = 300.0
+			cam.tps_yaw = 180.0          # 朝 -z＝往北，正對南牆
+			await get_tree().create_timer(0.5).timeout
+			await _hold_key(KEY_W, 4.0)
+			# 1) 身體：中心到最近牆線段的距離，扣掉半個牆厚＝身體中心到牆面
+			var cp_now := Vector2(cu2["wx"], cu2["wy"])
+			var body_gap := 1e9
+			for w in cbd.walls:
+				var q: Vector2 = Geometry2D.get_closest_point_to_segment(cp_now, w["a"], w["b"])
+				body_gap = minf(body_gap, cp_now.distance_to(q) * WORLD_SCALE - Building.WALL_T * 0.5)
+			var inside_body: bool = cbd.inside(cp_now.x, cp_now.y)
+			# 2)+3) 槍：抵肩點→槍口這一段不可以穿過牆，槍口也不可以落在室內
+			var mz: Vector3 = cu2["node"].muzzle_point()
+			var gsrc: Vector3 = cu2["node"].gun_src_point()
+			var ray_t: float = _solid_ray(gsrc, mz)
+			var mzp := Vector2(mz.x / WORLD_SCALE + map_data.get("w", 960) * 0.5,
+					mz.z / WORLD_SCALE + map_data.get("h", 600) * 0.5)
+			var mz_inside: bool = cbd.inside(mzp.x, mzp.y)
+			print("[clipchk] 貼牆 4 秒：身體中心離牆面 %.2fm 進到室內=%s %s"
+					% [body_gap, inside_body,
+					"OK(人沒進牆)" if (body_gap > 0.15 and not inside_body) else "FAIL(人插進牆/穿牆了)"])
+			print("[clipchk] 槍：抵肩→槍口穿過固體比例 t=%.2f（1＝沒穿）槍口在室內=%s 抬槍量=%.2f %s"
+					% [ray_t, mz_inside, cu2["node"].muzzle_block(),
+					"OK(槍沒插進牆)" if (ray_t > 0.995 and not mz_inside) else "FAIL(槍穿進固體)"])
+			# 側面拍：正面拍只看到牆，看不出槍在牆外還是牆內
+			cam.clear_tps()
+			cam.set_follow(null)
+			cam.focus = _to3d(cp_now.x, cp_now.y) + Vector3(0, 1.1, 0)
+			# ⚠ 機位要在「人與牆的外側」再斜著看：貼太近或正對牆，畫面會被整片牆填滿
+			#   （4.2m 那版實拍就是一面水泥牆，看不到人也看不到槍）。
+			cam.dist = 8.0
+			cam.pitch_deg = 14.0
+			cam.yaw = deg_to_rad(125.0)
+			await get_tree().create_timer(0.6).timeout
+			await _snap("res://clip_wall.png")
+			_end_action()
+			_unshield(cu2, cu2_save)
+			_buildings = keep_bld4
+			_blockers = keep_blk4
 		# I-4c) AI 繞開實體障礙（AI09 [navchk]）：直接驗純函式，不受敵方階段時序干擾
 		if _blockers.is_empty():
 			print("[navchk] SKIP 這張圖沒有中景障礙")
@@ -1333,12 +1399,12 @@ func _build_static() -> void:
 	# 遠景霧氣：拉出空間深度
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.58, 0.66, 0.74)
-	e.fog_density = 0.0010
+	e.fog_density = 0.00045      # 0.0010 在遠鏡頭把整片戰場壓成灰綠（實拍），對比全失
 	e.fog_sky_affect = 0.0        # 霧吃到天空會把整片天壓成灰色（實拍發現）
-	e.fog_aerial_perspective = 0.38   # 遠景要褪成天空色，山脈才有距離感
+	e.fog_aerial_perspective = 0.30   # 遠景要褪成天空色，山脈才有距離感
 	# 高度霧：低窪處積霧，戰場才有空氣感（也讓遠處的兵不再像貼紙）
 	e.fog_height = 1.5
-	e.fog_height_density = 0.06
+	e.fog_height_density = 0.035
 	# 色調映射＋微光暈：去除死白、增加層次
 	# SSIL（螢幕空間間接照明）：低多邊形最缺的就是「光在物體之間彈射」——
 	# 草地的綠會反到人腿上、牆面暗部帶到地面色，質感提升比再加模型有效（GDD/14 §0a）。
@@ -1350,7 +1416,7 @@ func _build_static() -> void:
 	# 體積霧：晨霧與陽光穿過樹林的光柱，這是「戰場氛圍」最便宜的來源。
 	# 貼地那層要厚一點，遠處的樹腳才會沒入霧裡＝景深感。
 	e.volumetric_fog_enabled = true
-	e.volumetric_fog_density = 0.0095
+	e.volumetric_fog_density = 0.0042    # 同上：體積霧也要減半，近景才不會霧濛濛
 	e.volumetric_fog_albedo = Color(0.86, 0.87, 0.86)   # 偏中性，太藍會把整片戰場染冷
 	e.volumetric_fog_length = 96.0
 	e.volumetric_fog_detail_spread = 2.0
@@ -2571,6 +2637,46 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 			return false
 	return true
 
+# 實體射線：從 a 到 b，回傳最近命中比例（0~1，1＝沒撞到）。牆一律擋；中景障礙
+# 只有「比射線在該點的離地高度還高」才擋（槍口 1.3m 高本來就該越過 1.05m 的柵欄）。
+# 給 Unit.solid_probe 用（貼牆抬槍）。
+func _solid_ray(a: Vector3, b: Vector3) -> float:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p1 := Vector2(a.x / WORLD_SCALE + mw * 0.5, a.z / WORLD_SCALE + mh * 0.5)
+	var p2 := Vector2(b.x / WORLD_SCALE + mw * 0.5, b.z / WORLD_SCALE + mh * 0.5)
+	var best := 1.0
+	for bd in _buildings:
+		for w in bd.walls:
+			var t: float = _seg_param(p1, p2, w["a"], w["b"])
+			if t > 0.0 and t < best:
+				best = t
+	var d1: Vector2 = p2 - p1
+	var l2: float = d1.length_squared()
+	if l2 < 0.000001:
+		return best
+	var seg_len: float = sqrt(l2)
+	for bk in _blockers:
+		var t2: float
+		if bk["t"] == "cir":
+			var c: Vector2 = bk["c"]
+			var rr: float = float(bk["r"])
+			var tc: float = (c - p1).dot(d1) / l2
+			var perp: float = (p1 + d1 * tc).distance_to(c)
+			if perp >= rr:
+				continue
+			t2 = tc - sqrt(rr * rr - perp * perp) / seg_len
+		else:
+			t2 = _seg_param(p1, p2, bk["a"], bk["b"])
+		if t2 <= 0.0 or t2 >= best:
+			continue
+		# 高度：射線在該點離地多高，比障礙高就過得去
+		var hit3: Vector3 = a.lerp(b, t2)
+		var gy: float = terrain.height_at_world(hit3) if terrain != null else 0.0
+		if hit3.y - gy < float(bk.get("h", 1.2)):
+			best = t2
+	return best
+
 # 兩線段的交點在第一條上的比例（0~1），沒交點回 -1
 func _seg_param(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> float:
 	var d1: Vector2 = p2 - p1
@@ -2637,6 +2743,10 @@ func _resolve_walls(pos: Vector3, radius := 0.42) -> Vector3:
 
 func _push_walls_px(p_in: Vector2, r_px: float) -> Vector2:
 	var p := p_in
+	# ⚠ walls 存的是「牆的中心線」，只推 r_px 的話身體表面剛好貼在牆面上，
+	#   模型的肩膀與背上的槍看起來就插進牆裡（使用者 2026-07-26 指正）。
+	#   多推半個牆厚＋2cm 餘裕，人才是真的站在牆外。門洞寬 1.5m，仍過得去。
+	r_px += (Building.WALL_T * 0.5 + 0.02) / WORLD_SCALE
 	for bd in _buildings:
 		if not bd.rect.grow(r_px + 20.0).has_point(p):
 			continue
@@ -2908,6 +3018,9 @@ func _build_ground() -> void:
 	world.add_child(terrain)
 	terrain.build(map_data, WORLD_SCALE)
 	Unit.ground_sampler = func(p: Vector3) -> float: return terrain.height_at_world(p)
+	# 槍口不可以插進固體（使用者 2026-07-26 第二次指正）：把「實體射線」交給 Unit，
+	# 它在瞄準時自己判斷要不要抬槍。見 Unit.solid_probe。
+	Unit.solid_probe = func(a: Vector3, b: Vector3) -> float: return _solid_ray(a, b)
 	# 鏡頭碰撞：把「牆」與「地面」的查詢注入相機（真相在這邊，相機只負責用）
 	cam.wall_probe = func(a: Vector3, b: Vector3) -> float: return _wall_ray(a, b)
 	cam.ground_probe = func(p: Vector3) -> float: return terrain.height_at_world(p)

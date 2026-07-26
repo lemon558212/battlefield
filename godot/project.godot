@@ -34,6 +34,7 @@ window/stretch/aspect="expand"
 
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="mobile"
+renderer/rendering_method.web="gl_compatibility"
 ; 2026-07-26 全 3D 化：Forward+ 才有 SSAO/SSIL/體積霧。
 ; 但預設品質吃掉一半幀率（8 單位 5.7ms→24ms），故把「看不太出來卻很貴」的項目降級：
 ; SSAO 半解析度低品質、陰影貼圖 2048、軟陰影低品質，改用便宜的 FXAA 補鋸齒。

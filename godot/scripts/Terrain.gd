@@ -270,7 +270,7 @@ func _build_grass() -> void:
 	_grass_mat.shader = sh
 	# ⚠ 比例（合理化鐵則）：草地那層先前最高接近 1m，第三人稱走進去畫面全是巨大葉片。
 	#   真實草地是「矮而密」——高度砍到腳踝，葉片數加倍補密度，繪製次數不變。
-	_grass_layer(_tuft_mesh(0.42, 13), _scatter_field(), 55.0, "GrassField")
+	_grass_layer(_tuft_mesh(0.55, 9), _scatter_field(), 42.0, "GrassField")
 	_grass_layer(_tuft_mesh(1.35, 9), _scatter_bushes(), 70.0, "GrassBush")   # 藏得住人的高草
 	_grass_layer(_tuft_mesh(0.75, 10), _scatter_tree_feet(), 55.0, "GrassRoots")
 
@@ -296,7 +296,10 @@ func _scatter_field() -> Array:
 	var xf: Array = []
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260727
-	var step: float = 0.8 / ws
+	# ⚠ 密度與成本的平衡（2026-07-26 實測）：0.8m 太疏（俯瞰是光禿草皮），
+	#   但一路加到 0.55m 會讓實例數翻倍、幀時 5.8→20.5ms（49FPS，破 60FPS 預算）。
+	#   0.7m 間距＋每叢葉片數 13→9，總頂點數幾乎不變，看起來卻更密。
+	var step: float = 0.7 / ws
 	var px := step
 	while px < mw - step:
 		var py := step
@@ -362,34 +365,71 @@ func _grass_layer(tuft: ArrayMesh, xf: Array, vis_end: float, nm: String) -> voi
 	mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(mmi)
 
-# 遠景山脈剪影：戰場外圍一圈低多邊形山，讓地圖不再像一塊有邊界的積木。
-# 不投影、不受霧影響太多，純粹當背板（GDD/14 §0a：質感來自光影與空間層次）。
+# 遠景山脈（2026-07-26 重做）：先前是一圈「各自獨立的單片三角形」，
+# 實拍就是天邊一排純灰三角錐——沒有山脊、沒有受光面、沒有距離感（使用者指正）。
+# 真山脈看起來對的三件事，本函式就是照著做：
+#   1. 連續山脊：相鄰的峰要連成一道稜線，不是各自站著的錐體
+#   2. 受光面／背光面：同一座山朝太陽那側亮、背側暗，體積感全靠這個
+#   3. 空氣透視：越遠的層越淡、越接近天空水平色，山腳融進霧裡
 func _build_backdrop() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 424242
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var radius: float = maxf(mw, mh) * ws * 1.5 + 120.0
-	var n := 46
-	for i in n:
-		var a: float = TAU * float(i) / float(n) + rng.randf_range(-0.03, 0.03)
-		var d: float = radius * rng.randf_range(0.85, 1.25)
-		var hgt: float = rng.randf_range(28.0, 74.0)
-		var wdt: float = rng.randf_range(60.0, 130.0)
-		var c: Vector3 = Vector3(cos(a) * d, -4.0, sin(a) * d)
-		var side := Vector3(-sin(a), 0, cos(a)) * wdt * 0.5
-		var top := c + Vector3(0, hgt, 0) + side * rng.randf_range(-0.25, 0.25)
-		var col := Color(0.30, 0.36, 0.42).lerp(Color(0.42, 0.48, 0.54), rng.randf())
-		for v in [c - side, c + side, top]:
-			st.set_color(col.srgb_to_linear())
-			st.add_vertex(v)
-		for v in [c + side, c - side, top]:      # 背面也畫，繞圈時哪一側都看得到
-			st.set_color(col.srgb_to_linear())
-			st.add_vertex(v)
+	var base_r: float = maxf(mw, mh) * ws * 1.5 + 120.0
+	# 三層：近山深而細、遠山淡而高大（遠山要更高才看得到，被近山擋掉一半）
+	# [半徑倍率, 高度下限, 高度上限, 顏色, 雜訊頻率, 段數]
+	var layers := [
+		[1.00, 26.0, 62.0, Color(0.32, 0.38, 0.43), 3.1, 92],
+		[1.55, 48.0, 108.0, Color(0.46, 0.54, 0.62), 2.3, 74],
+		[2.30, 82.0, 170.0, Color(0.60, 0.70, 0.80), 1.7, 58],
+	]
+	# 太陽在西南（跟 Main 的主光一致）：那一側的坡面亮
+	var sun_dir := Vector2(-0.6, -0.8).normalized()
+	for L in layers:
+		var rmul: float = float(L[0])
+		var h_lo: float = float(L[1])
+		var h_hi: float = float(L[2])
+		var col: Color = L[3]
+		var freq: float = float(L[4])
+		var n: int = int(L[5])
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 4242 + n
+		var prev_out: Vector3 = Vector3.ZERO
+		var prev_in: Vector3 = Vector3.ZERO
+		var prev_top: Vector3 = Vector3.ZERO
+		var prev_a := 0.0
+		for i in range(n + 1):
+			var t: float = float(i) / float(n)
+			var a: float = TAU * t
+			# 稜線高度＝兩層雜訊（大山塊 + 小峰）；用角度當座標，繞回來要接得上
+			var nz: float = _vnoise(cos(a) * freq + 11.3, sin(a) * freq + 7.1)
+			var nz2: float = _vnoise(cos(a) * freq * 3.7 + 3.0, sin(a) * freq * 3.7 + 9.0)
+			var hh: float = h_lo + (h_hi - h_lo) * clampf(nz * 0.75 + nz2 * 0.35, 0.0, 1.0)
+			var d: float = base_r * rmul * (0.94 + 0.12 * nz2)
+			var dir := Vector3(cos(a), 0, sin(a))
+			# 山脊有厚度：外緣、內緣各一條底線，中間是稜線
+			var out_p: Vector3 = dir * (d + hh * 0.85) + Vector3(0, -6.0, 0)
+			var in_p: Vector3 = dir * (d - hh * 0.75) + Vector3(0, -6.0, 0)
+			var top_p: Vector3 = dir * d + Vector3(0, hh, 0)
+			if i > 0:
+				# 受光：稜線兩側的坡面各給不同亮度（內側朝場中央＝朝相機那面）
+				var nrm_in := Vector2(-dir.x, -dir.z)
+				var lit: float = clampf(nrm_in.dot(sun_dir) * 0.5 + 0.5, 0.0, 1.0)
+				var c_in: Color = col.lightened(0.10 + 0.22 * lit)
+				var c_out: Color = col.darkened(0.22)
+				# 山腳融進霧：底邊拉向天空水平色
+				var c_foot: Color = col.lerp(Color(0.70, 0.80, 0.88), 0.55)
+				# 頂端補亮（受光的岩脊／殘雪）
+				var c_top: Color = c_in.lightened(0.12)
+				_ridge_quad(st, prev_in, in_p, top_p, prev_top, c_foot, c_top)
+				_ridge_quad(st, prev_top, top_p, out_p, prev_out, c_top.lerp(c_out, 0.6), c_out)
+			prev_out = out_p
+			prev_in = in_p
+			prev_top = top_p
+			prev_a = a
 	st.generate_normals()
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED   # 剪影不需要打光，也省效能
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED   # 背板不打光：受光感靠頂點色，也省效能
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	st.set_material(mat)
 	var mi := MeshInstance3D.new()
@@ -397,6 +437,15 @@ func _build_backdrop() -> void:
 	mi.mesh = st.commit()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
+
+# 山脊的一片四邊形：a,b 是底邊（顏色 c0），c,d 是上邊（顏色 c1）。兩面都畫。
+func _ridge_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+		c0: Color, c1: Color) -> void:
+	var quad := [[a, c0], [b, c0], [c, c1], [d, c1]]
+	for tri in [[0, 1, 2], [0, 2, 3], [2, 1, 0], [3, 2, 0]]:
+		for k in tri:
+			st.set_color((quad[k][1] as Color).srgb_to_linear())
+			st.add_vertex(quad[k][0] as Vector3)
 
 # 一叢草（2026-07-26 重做）：原本是三片交叉的大三角形（0.95m 高、0.34m 寬），
 # 第三人稱趴下來近看就是三片塑膠片。改成多根細葉，每根兩段、往上收尖並朝隨機方向彎。

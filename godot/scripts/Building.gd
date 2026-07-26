@@ -95,6 +95,7 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 		slopeb.position = Vector3(0, top + 0.62, sgn * sizez * 0.26)
 		slopeb.rotation.x = sgn * deg_to_rad(22.0)
 		roof.add_child(slopeb)
+	_decorate(half, top)
 
 # 室內陳設：桌、櫃、床、木箱、翻倒的桌子。
 # 低桌與木箱＝室內掩體（登記進 covers 由 Main 讀），高櫃擋視線。
@@ -173,6 +174,7 @@ func _side(a: Vector2, b: Vector2, mat: BaseMaterial3D, is_door: bool) -> void:
 		var c: float = len_m * 0.32
 		gaps.append([c - DOOR_W * 0.5, c + DOOR_W * 0.5])
 		doors.append(_local_to_px(a + dir * c))
+		_deco_doors.append([a + dir * c, atan2(dir.y, dir.x)])
 	else:
 		# 每 3.2m 開一扇窗，牆太短就只開中間一扇
 		var n: int = maxi(1, int(len_m / 3.2))
@@ -182,6 +184,7 @@ func _side(a: Vector2, b: Vector2, mat: BaseMaterial3D, is_door: bool) -> void:
 				continue
 			gaps.append([c2 - WIN_W * 0.5, c2 + WIN_W * 0.5])
 			windows.append(_local_to_px(a + dir * c2))
+			_deco_wins.append([a + dir * c2, atan2(dir.y, dir.x)])
 	gaps.sort_custom(func(x, y): return x[0] < y[0])
 	var cursor := 0.0
 	for g in gaps:
@@ -237,6 +240,8 @@ func _local_to_px(p: Vector2) -> Vector2:
 	return Vector2(rect.get_center().x + p.x / _ws, rect.get_center().y + p.y / _ws)
 
 static var _shared_mats := {}
+var _deco_doors: Array = []    # [[局部座標 Vector2, 牆的方向角], ...] 裝飾件用
+var _deco_wins: Array = []
 var _wall_mat: BaseMaterial3D = null      # 這棟的外牆材質（批次鍵用，見 _wall_piece）
 func _shared(key: String, c: Color, rough: float) -> StandardMaterial3D:
 	if not _shared_mats.has(key):
@@ -319,3 +324,94 @@ func set_roof_alpha(a: float) -> void:
 		else:
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
 		m.albedo_color.a = a
+
+
+# ---------- 建築裝飾件（GDD/14 §0a：素材升級）----------
+# 為什麼要有這一段：程式生成的方盒即使貼了圖，輪廓還是「一個開了洞的箱子」。
+# 真實建築的辨識度來自輪廓上的凸出物——簷口、門扇、外掛的冷氣機。
+# 模組件取自 Downtown City MegaKit（assets/models/city/），授權見 assets/textures/。
+# ⚠ 一律 MultiMesh：一棟房子的簷口就二十幾件，逐件一個節點就是二十幾次 draw call。
+const DECO := {
+	"cornice": "res://assets/models/city/Cornice_Trim_Center.gltf",
+	"door": "res://assets/models/city/Door_1.gltf",
+	"ac": "res://assets/models/city/Prop_ACUnit.gltf",
+}
+
+func _decorate(half: Vector2, top: float) -> void:
+	var xf_cornice: Array = []
+	var xf_door: Array = []
+	var xf_ac: Array = []
+	# 簷口：沿四面牆頂鋪，每 2m 一件（模組件原尺寸剛好 2m 寬）
+	var runs := [
+		[Vector2(-half.x, half.y), Vector2(half.x, half.y)],
+		[Vector2(half.x, half.y), Vector2(half.x, -half.y)],
+		[Vector2(half.x, -half.y), Vector2(-half.x, -half.y)],
+		[Vector2(-half.x, -half.y), Vector2(-half.x, half.y)],
+	]
+	for r in runs:
+		var a: Vector2 = r[0]
+		var b: Vector2 = r[1]
+		var L: float = a.distance_to(b)
+		var dir: Vector2 = (b - a) / maxf(L, 0.001)
+		var n: int = maxi(1, int(round(L / 2.0)))
+		var step: float = L / float(n)
+		for i in n:
+			var c: Vector2 = a + dir * (step * (float(i) + 0.5))
+			# 簷口往外凸 10cm（凸出物才有輪廓），高度壓成 0.45m
+			var outv := Vector2(-dir.y, dir.x) * 0.10
+			var bs := Basis(Vector3.UP, -atan2(dir.y, dir.x)).scaled(
+					Vector3(step / 2.0, 0.45, 1.0))
+			xf_cornice.append(Transform3D(bs, Vector3(c.x + outv.x, top - 0.22, c.y + outv.y)))
+	# 門扇：卡在門洞裡（模組件 1.0×2.2m → 縮到 DOOR_W×2.15m）
+	for d in _deco_doors:
+		var pos: Vector2 = d[0]
+		var ang: float = d[1]
+		var bs2 := Basis(Vector3.UP, -ang).scaled(Vector3(DOOR_W / 1.0, 2.15 / 2.2, 1.0))
+		xf_door.append(Transform3D(bs2, Vector3(pos.x, 0.0, pos.y)))
+	# 冷氣機：掛在窗台下方，隔一扇窗掛一台（每扇都掛看起來像機房）
+	var k := 0
+	for w in _deco_wins:
+		k += 1
+		if k % 2 == 0:
+			continue
+		var pw: Vector2 = w[0]
+		var angw: float = w[1]
+		var outw := Vector2(-sin(angw), cos(angw)) * 0.24
+		if (pw + outw).length() < pw.length():
+			outw = -outw          # 一定要朝建築外側凸出
+		xf_ac.append(Transform3D(Basis(Vector3.UP, -angw),
+				Vector3(pw.x + outw.x, WIN_SILL - 0.42, pw.y + outw.y)))
+	_deco_mm("cornice", xf_cornice)
+	_deco_mm("door", xf_door)
+	_deco_mm("ac", xf_ac)
+
+static var _deco_mesh := {}      # 路徑 → Mesh（全場共用，一個模型只讀一次）
+
+func _deco_mm(key: String, xfs: Array) -> void:
+	if xfs.is_empty():
+		return
+	var path: String = DECO[key]
+	if not _deco_mesh.has(path):
+		var found: Mesh = null
+		if ResourceLoader.exists(path):
+			var inst := (load(path) as PackedScene).instantiate()
+			for mi in inst.find_children("*", "MeshInstance3D", true, false):
+				var m3 := mi as MeshInstance3D
+				if m3.mesh != null:
+					found = m3.mesh
+					break
+			inst.queue_free()
+		_deco_mesh[path] = found
+	var mesh: Mesh = _deco_mesh[path]
+	if mesh == null:
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = xfs.size()
+	for i in xfs.size():
+		mm.set_instance_transform(i, xfs[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Deco_" + key
+	mmi.multimesh = mm
+	add_child(mmi)

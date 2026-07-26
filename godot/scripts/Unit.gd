@@ -9,6 +9,11 @@ signal shot_fired(from_pos: Vector3, to_pos: Vector3)
 # 地形取樣器（由 Main 在建好地形後注入）：所有單位一律貼著地形站，
 # 地面不再是 y=0，否則走上丘陵會埋進土裡、走進壕溝會浮在空中（GDD/14 §1）。
 static var ground_sampler: Callable = Callable()
+# 實體探測（由 Main 注入 _wall_ray）：從 a 到 b 打一條線，回傳最近命中比例（1＝沒撞到）。
+# 用途：槍口不可以插進牆裡（使用者 2026-07-26：「不管是槍或是人又或是任何的物品
+# 都不可能會跑進去固體裡面」）。貼牆時的正解是抬槍（真實的 high port 持槍），
+# 不是讓槍穿過去。
+static var solid_probe: Callable = Callable()
 # 抵達目的地：Main 要靠這個重算掩體狀態，否則玩家移動到掩體後不會自動蹲下
 signal arrived
 
@@ -103,6 +108,10 @@ var _anim_src: Node3D = null   # UAL 動作來源（模型自身沒有動畫時�
 var _retarget := false         # true＝動作來自 UAL 重定向
 var _gun_armed := false        # 有真實武器模型才做程式化持槍姿
 var _gun_len_scale := 1.0      # 網格 → 真實槍長的縮放
+var _gun_len := 1.0            # 槍全長（公尺）：貼牆抬槍要用
+var _muzzle_block := 0.0       # 目前抬槍角度（度）：貼牆時槍口朝天，平滑過渡
+var _muzzle_world := Vector3.ZERO   # 這一幀的槍口世界座標（驗證用：槍口不可在固體內）
+var _gun_src_world := Vector3.ZERO  # 這一幀的抵肩點世界座標
 var _gun_stock := Vector3.ZERO # 抵肩點（mesh 座標）
 var _gun_grip := Vector3.ZERO  # 右手握把
 var _gun_fore := Vector3.ZERO  # 左手前護木
@@ -429,6 +438,7 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 		var raw: float = ab.size.x
 		if raw > 0.0001:
 			_gun_len_scale = float(WEAPON_MODEL[p_cls][1]) / raw
+		_gun_len = float(WEAPON_MODEL[p_cls][1])
 		_gun_stock = Vector3(ab.position.x + 0.03 * raw, ab.position.y + 0.62 * ab.size.y, ab.get_center().z)
 		_gun_grip = Vector3(ab.position.x + 0.30 * raw, ab.position.y + 0.46 * ab.size.y, ab.get_center().z)
 		_gun_fore = Vector3(ab.position.x + 0.46 * raw, ab.position.y + 0.56 * ab.size.y, ab.get_center().z)
@@ -442,6 +452,7 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 		_gun_grip = g[1]
 		_gun_fore = g[2]
 		_gun_len_scale = 1.0
+		_gun_len = 1.15                # 程式生成的槍身（機槍/火箭筒）大致長度
 		_gun_axis_fix = PROC_AXIS_FIX     # 程式生成的槍口是 +Z，瞄準基底以 +X 為槍口
 		_gun_armed = true
 
@@ -760,6 +771,16 @@ func eye_height() -> float:
 
 # 槍口高度（公尺）：彈道從這裡射出。跟眼高不同——出槍的手比眼睛低，
 # 趴姿更明顯（貼地出槍 0.32m），這個差距就是「趴在沙包後面根本射不出去」的來源。
+# 槍口／抵肩點的世界座標（[clipchk] 用：要能量出槍有沒有插進固體）
+func muzzle_point() -> Vector3:
+	return _muzzle_world
+
+func gun_src_point() -> Vector3:
+	return _gun_src_world
+
+func muzzle_block() -> float:
+	return _muzzle_block
+
 func muzzle_height() -> float:
 	return lerpf(lerpf(1.32, 0.92, clampf(_crouch, 0.0, 1.0)), 0.32, clampf(_prone, 0.0, 1.0))
 
@@ -1170,6 +1191,28 @@ func _aim_pose() -> void:
 		_rig.add_world_rotation("Chest", right, -deg_to_rad(5.0) * _recoil) # 上身後仰一下
 	if PROC_POCKET_DROP.has(cls):
 		aim = facing_dir()      # 迫砲：砲管自帶仰角，方向只取水平，否則會被拉成平射
+	# ★貼牆抬槍：槍口前方 _gun_len 內有固體就把槍抬起來（最多 62 度）。
+	#   先前沒有這段，站在牆邊瞄準時整支步槍會穿進牆裡——固體不該被任何東西穿過。
+	#   探測從「抵肩點」出發，因為槍是從那裡往前伸的。
+	# ⚠ 抬槍的角度必須由「可用長度」反算，不能用「受阻比例 × 固定角度」：
+	#   牆在半個槍長處時，比例式只抬 31 度，cos31°=0.86 → 槍口水平還伸出 0.86 個槍長，
+	#   照樣插進牆裡（實測 t=0.64、槍口落在室內＝FAIL）。
+	#   要讓槍口水平投影 ≤ 可用長度 d，需要的角度就是 acos(d / 槍長)。
+	var need_deg := 0.0
+	if solid_probe.is_valid() and _gun_len > 0.01:
+		var reach: float = _gun_len * 1.15
+		var t_hit: float = float(solid_probe.call(pocket, pocket + aim * reach))
+		if t_hit < 0.999:
+			var d: float = t_hit * reach - 0.12          # 扣 12cm 餘裕：槍口別貼著牆面
+			var ratio: float = clampf(d / _gun_len, 0.0, 1.0)
+			need_deg = rad_to_deg(acos(ratio))
+	# 平滑：每秒最多轉 240 度，抬槍與放下都不會瞬間跳
+	_muzzle_block = move_toward(_muzzle_block, need_deg, get_process_delta_time() * 240.0)
+	if _muzzle_block > 0.5:
+		# 繞右手軸往上轉＝槍口朝天（真實的 high port 持槍），同時把槍往後收貼近身體
+		var lift: float = minf(_muzzle_block, 86.0)
+		aim = aim.rotated(right, deg_to_rad(lift)).normalized()
+		pocket -= facing_dir() * (0.12 * clampf(lift / 60.0, 0.0, 1.0))
 	var up_ref := Vector3.UP
 	if absf(aim.dot(up_ref)) > 0.97:
 		up_ref = facing_dir()                    # 目標近乎正上/正下時叉積會退化
@@ -1201,6 +1244,8 @@ func _aim_pose() -> void:
 		_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf
+	_gun_src_world = pocket
+	_muzzle_world = pocket + aim * _gun_len
 	_crouch_offset()
 
 # 收槍：斜背在背上。修理/佔領/赤手待機時雙手放開，槍若還掛在手腕上會垂直插進地面。
