@@ -74,6 +74,8 @@ var _covers: Array = []
 # 新腳本的 class_name 要等編輯器掃描過才註冊得到，直接用會 Parse Error（2026-07-26 踩到）。
 # 用 preload 引用最保險，不依賴 .godot 的類別快取。
 const TERRAIN := preload("res://scripts/Terrain.gd")
+const BUILDING := preload("res://scripts/Building.gd")
+var _buildings: Array = []             # 場上所有建築（牆線段＝視線與碰撞的真相）
 var terrain = null                     # 地形高度真相（GDD/14）
 
 const GROUND_SHADER := """
@@ -643,6 +645,52 @@ func _selftest() -> void:
 			cam.pitch_deg = 34.0
 			await get_tree().create_timer(0.6).timeout
 			await _snap("res://terrain_overview.png")
+		# I-4) 可進入的建築（GDD/14 §2、§5 [buildingchk]）
+		if _buildings.is_empty():
+			print("[buildingchk] SKIP 這張圖沒有建築")
+		else:
+			var bd = _buildings[0]
+			print("[buildingchk] 牆段=%d 門=%d 窗=%d 樓層=%d %s" % [bd.walls.size(), bd.doors.size(),
+					bd.windows.size(), bd.floors,
+					"OK" if bd.walls.size() > 4 and bd.doors.size() >= 1 else "FAIL"])
+			var bc: Vector2 = bd.rect.get_center()
+			# 隔離：場上有好幾棟，不只留一棟就驗不到「從旁邊繞過去」（會被別棟擋到）
+			var keep_b := _buildings
+			_buildings = [bd]
+			var thru: bool = not _los_clear(bc + Vector2(-bd.rect.size.x, 0), bc + Vector2(bd.rect.size.x, 0))
+			var past: bool = _los_clear(bc + Vector2(-bd.rect.size.x, bd.rect.size.y * 1.6),
+					bc + Vector2(bd.rect.size.x, bd.rect.size.y * 1.6))
+			_buildings = keep_b
+			print("[buildingchk] 牆擋視線 穿越=%s 從旁邊過=%s %s" % [thru, past,
+					"OK" if (thru and past) else "FAIL"])
+			# 牆會把人推開、門不會（門洞不是牆段）
+			var wall_pt: Vector3 = _to3d(bc.x, bd.rect.position.y)          # 北牆正中
+			var pushed: float = _resolve_walls(wall_pt).distance_to(wall_pt)
+			var door_pt: Vector3 = _to3d(bd.doors[0].x, bd.doors[0].y)
+			var door_push: float = _resolve_walls(door_pt).distance_to(door_pt)
+			print("[buildingchk] 牆推開人 %.2fm、門口不推 %.2fm %s" % [pushed, door_push,
+					"OK" if pushed > 0.1 and door_push < 0.1 else "FAIL"])
+			# 屋頂淡出：把操控中的單位放進室內
+			var iu = _deployed[0]
+			iu["node"].stop()
+			iu["node"].global_position = _to3d(bc.x, bc.y)
+			iu["wx"] = bc.x
+			iu["wy"] = bc.y
+			_end_action()
+			cp = 6
+			_begin_action(iu)
+			await get_tree().create_timer(1.2).timeout
+			print("[buildingchk] 進屋後屋頂淡出 alpha=%.2f %s" % [float(_roof_a.get(0, 1.0)),
+					"OK" if float(_roof_a.get(0, 1.0)) < 0.15 else "FAIL"])
+			await _snap("res://bld_ingame.png")
+			cam.clear_tps()
+			cam.set_follow(null)
+			cam.focus = _to3d(bc.x, bc.y) + Vector3(0, 1.0, 0)
+			cam.dist = 22.0
+			cam.pitch_deg = 30.0
+			await get_tree().create_timer(0.6).timeout
+			await _snap("res://bld_ingame_out.png")
+			_end_action()
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -1378,6 +1426,7 @@ func _process(delta: float) -> void:
 			tr["m"].queue_free()
 			tr["l"].queue_free()
 			_tracers.erase(tr)
+	_roof_fade(delta)
 	_tps_control(delta)
 	_action_tick(delta)
 	_intercept_tick(delta)
@@ -1387,6 +1436,27 @@ func _process(delta: float) -> void:
 		if _enemy_t <= 0:
 			_enemy_step()
 			_enemy_t = 0.25
+
+# 屋頂淡出（GDD/14 §2）：玩家操控的單位進到室內時，那棟樓的屋頂淡掉，
+# 否則第三人稱鏡頭會被屋頂整個擋住、根本看不到自己在做什麼。
+var _roof_a := {}
+func _roof_fade(delta: float) -> void:
+	if _buildings.is_empty():
+		return
+	var watch = acting if acting != null else selected
+	var px := -99999.0
+	var py := -99999.0
+	if watch != null and is_instance_valid(watch["node"]):
+		var lp := _live_px(watch)
+		px = lp.x
+		py = lp.y
+	for i in _buildings.size():
+		var bd = _buildings[i]
+		var want: float = 0.0 if bd.inside(px, py) else 1.0
+		var cur: float = float(_roof_a.get(i, 1.0))
+		cur = move_toward(cur, want, delta * 3.5)
+		_roof_a[i] = cur
+		bd.set_roof_alpha(cur)
 
 # 滑鼠鎖定：第三人稱要自由轉視角就得鎖游標；但一開面板/回指令模式就要放開，否則點不到 UI。
 func _capture_mouse(on: bool) -> void:
@@ -1425,7 +1495,7 @@ func _tps_control(delta: float) -> void:
 	var before: Vector3 = node.global_position
 	node.move_dir(dir, delta)
 	# 邊界與 AP 上限：走到夾限外就把人推回來（AP 由 _action_tick 依實際位移扣）
-	var clamped: Vector3 = _clamp_to_map(node.global_position)
+	var clamped: Vector3 = _clamp_to_map(_resolve_walls(node.global_position))
 	node.global_position = Vector3(clamped.x, node.global_position.y, clamped.z)
 	if before.distance_to(node.global_position) < 0.0001:
 		return
@@ -1702,16 +1772,50 @@ func _in_bush(p: Vector2) -> bool:
 # 視線是否無阻擋（GDD/01 §3 要求、§5「建築/岩石完全阻擋視線」）：
 # 線段對圓的最短距離判定，只有 building 類掩體擋線。
 func _los_clear(a: Vector2, b: Vector2) -> bool:
-	for c in _covers:
-		if c["type"] != "building":
-			continue
-		var p := Vector2(c["wx"], c["wy"])
-		var ab := b - a
-		var l2: float = ab.length_squared()
-		var t: float = 0.0 if l2 < 0.0001 else clampf((p - a).dot(ab) / l2, 0.0, 1.0)
-		if a.lerp(b, t).distance_to(p) <= float(c["r"]):
-			return false
+	# 牆擋視線（GDD/14 §2）：門窗缺口不擋，所以用「實心牆段」逐段做線段相交，
+	# 比舊的圓形近似準得多——站在窗邊就是射得到，站在牆後就是射不到。
+	for bd in _buildings:
+		for w in bd.walls:
+			if _seg_hit(a, b, w["a"], w["b"]):
+				return false
 	return true
+
+func _seg_hit(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> bool:
+	var d1: Vector2 = p2 - p1
+	var d2: Vector2 = p4 - p3
+	var den: float = d1.cross(d2)
+	if absf(den) < 0.00001:
+		return false
+	var t: float = (p3 - p1).cross(d2) / den
+	var u: float = (p3 - p1).cross(d1) / den
+	return t > 0.0 and t < 1.0 and u > 0.0 and u < 1.0
+
+# 牆碰撞：把單位推出牆面（門洞不是牆段，所以走門就進得去）。
+# 回傳修正後的世界座標。半徑 0.42m＝一個人的肩寬。
+func _resolve_walls(pos: Vector3, radius := 0.42) -> Vector3:
+	if _buildings.is_empty():
+		return pos
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p := Vector2(pos.x / WORLD_SCALE + mw * 0.5, pos.z / WORLD_SCALE + mh * 0.5)
+	var r_px: float = radius / WORLD_SCALE
+	for bd in _buildings:
+		if not bd.rect.grow(r_px + 20.0).has_point(p):
+			continue
+		for w in bd.walls:
+			var a: Vector2 = w["a"]
+			var b: Vector2 = w["b"]
+			var ab: Vector2 = b - a
+			var l2: float = ab.length_squared()
+			var t: float = 0.0 if l2 < 0.0001 else clampf((p - a).dot(ab) / l2, 0.0, 1.0)
+			var closest: Vector2 = a + ab * t
+			var away: Vector2 = p - closest
+			var d: float = away.length()
+			if d < r_px and d > 0.0001:
+				p = closest + away / d * r_px          # 推出去
+			elif d <= 0.0001:
+				p = closest + ab.orthogonal().normalized() * r_px
+	return Vector3((p.x - mw * 0.5) * WORLD_SCALE, pos.y, (p.y - mh * 0.5) * WORLD_SCALE)
 
 func _intercept_tick(delta: float) -> void:
 	if st != St.CMD and st != St.ENEMY:
@@ -1842,30 +1946,31 @@ func _build_ground() -> void:
 		_covers.append({"wx": float(bz.get("x", 0)), "wy": float(bz.get("y", 0)),
 				"r": float(bz.get("r", 60)), "val": 0.30, "type": "bush"})
 
-	# 建築：依實際 AABB 自動縮放到合理樓高（治「放大2.5倍變黑色巨牆」）
+	# 建築（GDD/14 §2）：程式生成模組化建築，每棟都有真正的室內空間。
+	# 舊做法是擺現成模型的實心外殼＋一個圓形掩體，玩家進不去、視線也只能用圓近似。
+	_buildings = []
 	var solids = map_data.get("solids", [])
-	var bmodels := ["res://assets/models/house-b.glb", "res://assets/models/townhouse-b.glb",
-			"res://assets/models/twostory.glb", "res://assets/models/smallbuilding.glb"]
 	if solids is Array:
 		var i := 0
 		for sdef in solids:
 			if i >= 6:
 				break
-			# 建築不得生成在任一方部署區內（否則擋兵、且貼著鏡頭變成一道巨牆）
 			if _in_any_deploy(sdef):
 				continue
-			_covers.append({"wx": sdef.get("x", 0) + sdef.get("w", 40) * 0.5,
-					"wy": sdef.get("y", 0) + sdef.get("h", 40) * 0.5,
-					"r": maxf(sdef.get("w", 40), sdef.get("h", 40)) * 0.85 + 30.0,
+			var bd = BUILDING.new()
+			world.add_child(bd)
+			var cx: float = float(sdef.get("x", 0)) + float(sdef.get("w", 60)) * 0.5
+			var cy: float = float(sdef.get("y", 0)) + float(sdef.get("h", 60)) * 0.5
+			var gy := 0.0
+			if terrain != null:
+				gy = terrain.height_at(cx, cy)
+			bd.build(sdef, WORLD_SCALE, map_data.get("w", 960), map_data.get("h", 600),
+					gy, 2 if i % 2 == 0 else 1)
+			_buildings.append(bd)
+			# 掩體：建築本體仍登記一個圓（貼著外牆＝硬掩體），視線改吃牆線段
+			_covers.append({"wx": cx, "wy": cy,
+					"r": maxf(float(sdef.get("w", 60)), float(sdef.get("h", 60))) * 0.85 + 30.0,
 					"val": 0.75, "type": "building"})
-			var mp: String = bmodels[i % bmodels.size()]
-			if ResourceLoader.exists(mp):
-				var b := (load(mp) as PackedScene).instantiate()
-				world.add_child(b)
-				var dy: float = _fit_prop(b, 5.2 if i % 2 == 0 else 3.6)   # 樓高 3.6~5.2m
-				b.position = _to3d(sdef.get("x", 0) + sdef.get("w", 40) * 0.5,
-						sdef.get("y", 0) + sdef.get("h", 40) * 0.5) + Vector3(0, dy, 0)
-				b.rotation.y = randf() * TAU
 			i += 1
 
 	# 掩體：沙包（Phase2 掩體系統的實體，先做出來才躲得進去）
