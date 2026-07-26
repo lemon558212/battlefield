@@ -51,9 +51,8 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	var sizez: float = rect.size.y * _ws
 	# 地板（每層一片）
 	for f in floors:
-		var slab := _box(sizex, 0.18, sizez, fm)
-		slab.position = Vector3(0, float(f) * FLOOR_H - 0.09, 0)
-		add_child(slab)
+		_emit_box("floor", fm, Vector3(sizex, 0.18, sizez),
+				Transform3D(Basis(), Vector3(0, float(f) * FLOOR_H - 0.09, 0)))
 	# 四面外牆：南面開門，其餘開窗
 	var half := Vector2(sizex * 0.5, sizez * 0.5)
 	_side(Vector2(-half.x, half.y), Vector2(half.x, half.y), wm, true)     # +Z（南）：門
@@ -75,6 +74,7 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	lamp.shadow_enabled = false
 	lamp.position = Vector3(0, FLOOR_H * 0.7, 0)
 	add_child(lamp)
+	_flush_batch()
 	# 屋頂：單獨節點，玩家進屋時淡出
 	roof = Node3D.new()
 	roof.name = "Roof"
@@ -132,16 +132,16 @@ func _wall_piece(a: Vector2, b: Vector2, mat: StandardMaterial3D, y0: float, hh:
 	var mid: Vector2 = (a + b) * 0.5
 	var len_m: float = a.distance_to(b)
 	var ang: float = atan2(b.y - a.y, b.x - a.x)
-	var box := _box(len_m, hh, WALL_T, mat)
-	box.position = Vector3(mid.x, y0 + hh * 0.5, mid.y)
-	box.rotation.y = -ang
-	add_child(box)
+	var key := "wall" if mat == _shared_mats.get("wall") else "inner"
+	_emit_box(key, mat, Vector3(len_m, hh, WALL_T),
+			Transform3D(Basis(Vector3.UP, -ang), Vector3(mid.x, y0 + hh * 0.5, mid.y)))
 	if y0 <= 0.02:            # 落地的段才擋人、擋子彈
 		walls.append({"a": _local_to_px(a), "b": _local_to_px(b)})
 
 func _partition(half: Vector2, mat: StandardMaterial3D) -> void:
-	var a := Vector2(0.0, -half.y)
-	var b := Vector2(0.0, half.y)
+	# 兩端內縮半個牆厚：與外牆重疊的共面會 z-fighting，畫面上是一片閃爍的雜點
+	var a := Vector2(0.0, -half.y + WALL_T * 0.5)
+	var b := Vector2(0.0, half.y - WALL_T * 0.5)
 	var len_m: float = a.distance_to(b)
 	var c: float = len_m * 0.62
 	_wall_piece(a, a + Vector2(0, c - DOOR_W * 0.5), mat, 0.0, FLOOR_H * float(floors))
@@ -152,10 +152,9 @@ func _partition(half: Vector2, mat: StandardMaterial3D) -> void:
 func _stairs(half: Vector2, mat: StandardMaterial3D) -> void:
 	var n := 12
 	for i in n:
-		var step := _box(1.1, 0.16, 0.28, mat)
-		step.position = Vector3(half.x - 0.8, float(i) * (FLOOR_H / float(n)),
-				-half.y + 0.5 + float(i) * 0.28)
-		add_child(step)
+		_emit_box("floor", mat, Vector3(1.1, 0.16, 0.28),
+				Transform3D(Basis(), Vector3(half.x - 0.8, float(i) * (FLOOR_H / float(n)),
+						-half.y + 0.5 + float(i) * 0.28)))
 
 # 這個點是不是在建築室內（含牆內側）
 func inside(px: float, py: float) -> bool:
@@ -183,6 +182,46 @@ func _box(sx: float, sy: float, sz: float, mat: StandardMaterial3D) -> MeshInsta
 	mi.mesh = bm
 	mi.material_override = mat
 	return mi
+
+# ---------- 幾何合併（效能）----------
+# 一棟房子拆成二三十個 BoxMesh 節點＝二三十次 draw call，六棟就把幀時從 6.2ms 推到 13.4ms。
+# 改成「同材質的箱子全部烤進同一張網格」，一棟只剩一到兩個 surface。
+var _batch := {}          # 材質鍵 → SurfaceTool
+
+func _emit_box(key: String, mat: StandardMaterial3D, size: Vector3, xf: Transform3D) -> void:
+	if not _batch.has(key):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		st.set_material(mat)
+		_batch[key] = st
+	var st2: SurfaceTool = _batch[key]
+	var h: Vector3 = size * 0.5
+	var v := [
+		Vector3(-h.x, -h.y, -h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z),
+		Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]
+	var faces := [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]]
+	for f in faces:
+		var a: Vector3 = xf * v[f[0]]
+		var b: Vector3 = xf * v[f[1]]
+		var c: Vector3 = xf * v[f[2]]
+		var d: Vector3 = xf * v[f[3]]
+		# ⚠ 法線要自己給，不可用 generate_normals()：它會把相鄰箱子的頂點合併平均，
+		#   合併後的牆會出現漸層條紋、看起來像半透明（2026-07-26 實拍踩到）。
+		var nrm: Vector3 = (b - a).cross(c - a).normalized()
+		for p in [a, b, c, a, c, d]:
+			st2.set_normal(nrm)
+			st2.add_vertex(p)
+
+func _flush_batch() -> void:
+	for key in _batch.keys():
+		var st: SurfaceTool = _batch[key]
+		var mi := MeshInstance3D.new()
+		mi.name = "Merged_" + key
+		mi.mesh = st.commit()
+		# 室內構件（地板/樓梯/隔牆）不投影：陰影貼圖裡本來就看不到，白算
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if key == "wall" 				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+	_batch.clear()
 
 # 屋頂淡出（玩家在室內時）：整棟消失會看不出自己在哪棟樓，只淡屋頂
 func set_roof_alpha(a: float) -> void:

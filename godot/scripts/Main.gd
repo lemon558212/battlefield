@@ -75,6 +75,7 @@ var _covers: Array = []
 # 用 preload 引用最保險，不依賴 .godot 的類別快取。
 const TERRAIN := preload("res://scripts/Terrain.gd")
 const BUILDING := preload("res://scripts/Building.gd")
+const PROPS := preload("res://scripts/Props.gd")
 var _buildings: Array = []             # 場上所有建築（牆線段＝視線與碰撞的真相）
 var terrain = null                     # 地形高度真相（GDD/14）
 
@@ -752,7 +753,10 @@ func _build_static() -> void:
 	sun.directional_shadow_split_1 = 0.06
 	sun.directional_shadow_split_2 = 0.16
 	sun.directional_shadow_split_3 = 0.42
-	sun.shadow_normal_bias = 1.2
+	# 建築牆面出現規則的點狀噪點＝陰影自我遮蔽(shadow acne)，大平面在斜射光下最明顯。
+	# 提高 bias 就乾淨了；代價是接觸陰影稍微離開物體一點點，這個尺度看不出來。
+	sun.shadow_normal_bias = 2.6
+	sun.shadow_bias = 0.06
 	add_child(sun)
 	# 補光：從反方向打冷色弱光，避免暗面全黑（治「黑色邊」的觀感）
 	var fill := DirectionalLight3D.new()
@@ -1983,6 +1987,11 @@ func _build_ground() -> void:
 			_make_sandbag(_to3d(sb.get("x", 0) + sb.get("w", 40) * 0.5, sb.get("y", 0) + sb.get("h", 24) * 0.5),
 					float(sb.get("w", 80)), float(sb.get("h", 24)))
 
+	# 中景物件（GDD/14）：道路、路障、拒馬、圍籬、電線桿、瓦礫。
+	# 第三人稱一站進戰場，眼睛高度沒東西可看就會覺得空——這層補的就是那個。
+	var props = PROPS.new()
+	world.add_child(props)
+	props.build(map_data, WORLD_SCALE, terrain)
 	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感）
 	_scatter_trees(mw, mh)
 
