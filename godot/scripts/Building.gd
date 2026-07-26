@@ -19,6 +19,10 @@ var doors: Array = []         # 門中心點（px）＝唯一的進出點
 var windows: Array = []       # 窗中心點（px）
 var rect := Rect2()           # 建築外框（px）
 var floors := 1
+# 地標型別（劇情場景用）："" 一般民房／"tower" 塔樓（平頂＋女兒牆）／
+# "radar" 雷達站（平頂＋天線碟）。第一章劇本點名了雷達站與鐘樓，
+# 全部長成同一種紅瓦斜頂民房的話，玩家認不出劇情講的是哪一棟。
+var kind := ""
 var roof: Node3D = null       # 屋頂節點（玩家進屋時淡出）
 
 var _ws := 0.05
@@ -37,6 +41,7 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	_mh = map_h
 	_base_y = world_y
 	floors = n_floors
+	kind = String(sdef.get("kind", ""))
 	rect = Rect2(float(sdef.get("x", 0)), float(sdef.get("y", 0)),
 			maxf(float(sdef.get("w", 60)), 120.0), maxf(float(sdef.get("h", 60)), 120.0))
 	position = Vector3((rect.get_center().x - map_w * 0.5) * _ws, world_y,
@@ -71,6 +76,13 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	# 室內陳設（GDD/14 §2）：空殼房子進去只有四面牆，既沒有可看的東西，
 	# 也沒有室內掩體可用——進建築的戰術價值只剩「牆擋子彈」。
 	_furnish(half, im, fm)
+	# 保險：任何落在樓梯範圍內的室內障礙一律拿掉（家具是裝飾，樓梯是通路）
+	if floors > 1:
+		var keep: Array = []
+		for sl in solids_local:
+			if not _in_stairs(float(sl[0]), float(sl[1]), float(sl[2])):
+				keep.append(sl)
+		solids_local = keep
 	# 室內照明：牆一圍起來就是全黑，玩家看不到自己在哪。
 	# 每層放一盞低強度暖光當「窗外漫射進來的光」，成本很低。
 	var lamp := OmniLight3D.new()
@@ -87,14 +99,35 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	roof.name = "Roof"
 	add_child(roof)
 	var top: float = float(floors) * FLOOR_H
-	var ridge := _box(sizex + 0.5, 0.22, sizez + 0.5, rm)
-	ridge.position = Vector3(0, top + 0.11, 0)
-	roof.add_child(ridge)
-	for sgn in [-1.0, 1.0]:
-		var slopeb := _box(sizex + 0.7, 0.2, sizez * 0.62, rm)
-		slopeb.position = Vector3(0, top + 0.62, sgn * sizez * 0.26)
-		slopeb.rotation.x = sgn * deg_to_rad(22.0)
-		roof.add_child(slopeb)
+	if kind == "tower" or kind == "radar":
+		# 軍用設施是平頂＋女兒牆（屋頂要能站人、架天線），不是紅瓦斜頂
+		var deck := _box(sizex + 0.4, 0.22, sizez + 0.4, _wall_mat)
+		deck.position = Vector3(0, top + 0.11, 0)
+		roof.add_child(deck)
+		for e in [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]:
+			var along := Vector3(absf(e.z) * sizex + 0.4, 0.55, absf(e.x) * sizez + 0.4)
+			var par := _box(maxf(along.x, 0.18), along.y, maxf(along.z, 0.18), _wall_mat)
+			par.position = Vector3(e.x * (sizex * 0.5 + 0.1), top + 0.5,
+					e.z * (sizez * 0.5 + 0.1))
+			roof.add_child(par)
+		if kind == "radar":
+			var mast := _box(0.26, 1.6, 0.26, _wall_mat)
+			mast.position = Vector3(0, top + 1.0, 0)
+			roof.add_child(mast)
+			# 天線碟：一片傾斜的薄盤，遠遠就認得出「那是雷達站」
+			var dish := _box(2.6, 0.16, 2.6, _wall_mat)
+			dish.position = Vector3(0, top + 1.95, 0)
+			dish.rotation = Vector3(deg_to_rad(-38.0), deg_to_rad(24.0), 0)
+			roof.add_child(dish)
+	else:
+		var ridge := _box(sizex + 0.5, 0.22, sizez + 0.5, rm)
+		ridge.position = Vector3(0, top + 0.11, 0)
+		roof.add_child(ridge)
+		for sgn in [-1.0, 1.0]:
+			var slopeb := _box(sizex + 0.7, 0.2, sizez * 0.62, rm)
+			slopeb.position = Vector3(0, top + 0.62, sgn * sizez * 0.26)
+			slopeb.rotation.x = sgn * deg_to_rad(22.0)
+			roof.add_child(slopeb)
 	_decorate(half, top)
 
 # 室內陳設：桌、櫃、床、木箱、翻倒的桌子。
@@ -111,6 +144,11 @@ func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 		# 靠牆的高櫃：擋視線、也讓空牆面有東西
 		for k in 2:
 			var wall_i: int = rng.randi() % 4
+			# ⚠ 樓梯靠東牆（_stairs 的 lx = half.x-0.8）。高櫃也放東牆的話會把樓梯口堵死，
+			#   實測結果是「人在樓梯前抽搐、上不了二樓」——跟「門前一根柱子廢掉整棟房」
+			#   是同一個錯誤。有樓梯的樓層一律把櫃子挪到對面牆。
+			if floors > 1 and wall_i == 1:
+				wall_i = 0
 			var along: float = rng.randf_range(-0.55, 0.55)
 			var lx := 0.0
 			var lz := 0.0
@@ -225,12 +263,34 @@ func _partition(half: Vector2, mat: BaseMaterial3D) -> void:
 	_wall_piece(a + Vector2(0, c - DOOR_W * 0.5), a + Vector2(0, c + DOOR_W * 0.5), mat,
 			2.15, FLOOR_H * float(floors) - 2.15)
 
+# 樓梯佔地（局部座標）：家具與障礙都不可以放進來
+func _in_stairs(lx: float, lz: float, rad := 0.0) -> bool:
+	if floors <= 1:
+		return false
+	var half := Vector2(rect.size.x * _ws * 0.5, rect.size.y * _ws * 0.5)
+	var z0: float = -half.y + 0.36
+	var zone := Rect2(half.x - 1.55, z0, STAIR_W, _stair_run()).grow(0.4 + rad)
+	return zone.has_point(Vector2(lx, lz))
+
+# 樓梯坡度（鐵律 0⑤：真實量級）。
+# ⚠ 舊值是 12 階 × 0.28m 跑完 3.1m 高＝**43 度**，比真實樓梯（30~35 度）陡太多。
+#   後果不只是看起來怪：人以 3m/s 走上 43 度斜面需要 2.8m/s 的垂直爬升，
+#   超過 CLIMB_SPEED 2.4m/s 的上限 → 腳跟不上斜面 → 支撐判定掉回一樓 → 滑下來。
+#   實測就是「走 4 秒還在 0.00m，上不了二樓」。
+const STAIR_DEG := 32.0
+const STAIR_W := 1.5
+
+func _stair_run() -> float:
+	var half_z: float = rect.size.y * _ws * 0.5
+	return minf(FLOOR_H / tan(deg_to_rad(STAIR_DEG)), half_z * 2.0 - 1.2)
+
 func _stairs(half: Vector2, mat: BaseMaterial3D) -> void:
-	var n := 12
+	var run: float = _stair_run()
+	var n: int = maxi(8, int(run / 0.28))
 	for i in n:
-		_emit_box("floor", mat, Vector3(1.1, 0.16, 0.28),
+		_emit_box("floor", mat, Vector3(1.1, 0.16, run / float(n) + 0.02),
 				Transform3D(Basis(), Vector3(half.x - 0.8, float(i) * (FLOOR_H / float(n)),
-						-half.y + 0.5 + float(i) * 0.28)))
+						-half.y + 0.5 + float(i) * (run / float(n)))))
 
 # 腳下的支撐面（鐵律 0③：有重量的東西會停在最近的支撐面上，不會沉到地形高度）。
 # ⚠ 先前二樓地板只是畫出來的：站在二樓的人高度照 terrain.height_at() 算，
@@ -251,7 +311,7 @@ func floor_at(px: float, py: float, y: float) -> float:
 	if floors > 1:
 		var half := Vector2(rect.size.x * _ws * 0.5, rect.size.y * _ws * 0.5)
 		var z0: float = -half.y + 0.36
-		var run: float = 12.0 * 0.28
+		var run: float = _stair_run()
 		if absf(lp.x - (half.x - 0.8)) <= 0.75 and lp.y >= z0 and lp.y <= z0 + run:
 			var ramp: float = clampf((lp.y - z0) / run, 0.0, 1.0) * FLOOR_H
 			if ramp <= ly + STEP_TOL:

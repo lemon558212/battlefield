@@ -255,9 +255,12 @@ func _e2e() -> void:
 	print("[e2e]   選取=", "OK" if selected != null else "FAIL(點不到兵)")
 	print("[e2e]   第三人稱=%s" % ("OK" if cam.is_tps() else "FAIL(沒進第三人稱)"))
 	var before: Vector3 = pu["node"].global_position
+	var bpx := _live_px(pu)
 	await _hold_key(KEY_W, 1.5)
 	var moved: float = before.distance_to(pu["node"].global_position)
-	print("[e2e]   位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	var apx := _live_px(pu)
+	print("[e2e]   位移=%.2fm 終點 px=(%.0f,%.0f) %s" % [moved, apx.x, apx.y,
+			"OK" if moved > 0.5 else "FAIL(人沒動)"])
 	# 站著不動不可以往下沉（鐵律 0：重力只作用到落地為止，不是無止盡下拉）。
 	# 使用者 2026-07-26 回報「啟動遊戲有一直往下拉」——加重力那批的回歸，量得出來。
 	var sink_u = _deployed[0]
@@ -382,6 +385,58 @@ func _hold_key(code: Key, secs: float) -> void:
 
 # 按住鍵並在期間分段取樣位置（不放開鍵，否則每段之間的停頓會蓋掉要量的東西）。
 # 用來驗「移動是不是脈動的」——等速與脈動在靜態圖上分不出來，只能量。
+# 匍匐專用：按住鍵並**逐幀**取樣腿與手的幾何。
+# ⚠ 為什麼不能沿用「走一段停一下量一次」：匍匐是週期動作，3 個離散取樣點
+#   落在週期的哪個相位純看運氣——膝蓋收到最前面只佔一個週期的 15%，
+#   量到的極值會隨機通過或失敗。週期動作一定要取**整段的極值**。
+func _hold_key_crawlscan(code: Key, secs: float, u: Node3D) -> Dictionary:
+	var down := InputEventKey.new()
+	down.keycode = code
+	down.physical_keycode = code
+	down.pressed = true
+	Input.parse_input_event(down)
+	var kf_min := 9.9
+	var kf_max := -9.9
+	var sp_min := 9.9
+	var sp_max := -9.9
+	var hf_min := 9.9
+	var hf_max := -9.9
+	var ka_min := 999.0
+	var ka_max := -999.0
+	var t := 0.0
+	while t < secs:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		var rg = u._rig
+		var kl: Vector3 = rg.bone_pos("LowerLeg.L")
+		var kr: Vector3 = rg.bone_pos("LowerLeg.R")
+		var hipp: Vector3 = rg.bone_pos("UpperLeg.R")
+		var fwdv: Vector3 = u.facing_dir()
+		var sp: float = kl.distance_to(kr)
+		sp_min = minf(sp_min, sp)
+		sp_max = maxf(sp_max, sp)
+		var kf: float = (kr - hipp).dot(fwdv)
+		kf_min = minf(kf_min, kf)
+		kf_max = maxf(kf_max, kf)
+		var hl: Vector3 = rg.bone_pos(u._hand_l)
+		var hf: float = (hl - u.global_position).dot(fwdv)
+		hf_min = minf(hf_min, hf)
+		hf_max = maxf(hf_max, hf)
+		var thigh: Vector3 = kr - hipp
+		var shin: Vector3 = rg.bone_pos("Foot.R") - kr
+		if thigh.length() > 0.001 and shin.length() > 0.001:
+			var ka: float = rad_to_deg(thigh.angle_to(shin))
+			ka_min = minf(ka_min, ka)
+			ka_max = maxf(ka_max, ka)
+	var up := InputEventKey.new()
+	up.keycode = code
+	up.physical_keycode = code
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+	return {"kf": [kf_min, kf_max], "sp": [sp_min, sp_max],
+			"hf": [hf_min, hf_max], "ka": [ka_min, ka_max]}
+
 func _hold_key_sampled(code: Key, secs: float, n: int, node: Node3D) -> Array:
 	var down := InputEventKey.new()
 	down.keycode = code
@@ -1023,11 +1078,15 @@ func _selftest() -> void:
 			# 載具：坦克是 3m 級的鋼鐵，人不可能從中間穿過去。
 			# 找一塊「周圍 12m 內沒有任何障礙」的空地，才驗得到是被坦克擋住而不是被柵欄。
 			var spot := Vector2(mwp * 0.5, mhp * 0.5)
-			var clear_r: float = 8.0 / WORLD_SCALE
+			# ⚠ 8m 淨空在教學圖（48×30m、六棟建築＋沿岸工事）根本找不到，
+			#   於是 found_spot=false、坦克生在雜物堆裡，測出來的 5.52m 是被別的東西擋住。
+			#   6m 足夠（走 5 秒約 4m，車體半徑 1.6m），而且找不到時要報 SKIP 不是 FAIL——
+			#   前提不成立的測試不算失敗，報 FAIL 會蓋掉真正的問題。
+			var clear_r: float = 6.0 / WORLD_SCALE
 			var found_spot := false
-			for gy in range(2, 13):
-				for gx in range(2, 19):
-					var c := Vector2(mwp * float(gx) / 20.0, mhp * float(gy) / 14.0)
+			for gy in range(2, 19):
+				for gx in range(2, 29):
+					var c := Vector2(mwp * float(gx) / 30.0, mhp * float(gy) / 20.0)
 					var ok := true
 					for bk2 in _blockers:
 						var cp2: Vector2 = bk2["c"] if bk2["t"] == "cir" 								else Geometry2D.get_closest_point_to_segment(c, bk2["a"], bk2["b"])
@@ -1060,10 +1119,11 @@ func _selftest() -> void:
 			await get_tree().create_timer(0.4).timeout
 			await _hold_key(KEY_W, 5.0)
 			var tgap: float = (solu["wy"] - soltk["wy"]) * WORLD_SCALE
+			var tank_ok: bool = tgap > VEHICLE_R * 0.9 and tgap < 3.5 and float(solu["ap"]) > 1.0
 			print("[solidchk] 對著坦克走 5 秒：空地=%s 停在車體外 %.2fm、剩餘AP=%.0f %s"
 					% [found_spot, tgap, float(solu["ap"]),
-					"OK(載具是實體)" if (tgap > VEHICLE_R * 0.9 and tgap < 3.5 and float(solu["ap"]) > 1.0)
-					else "FAIL(穿過去了/沒走到/AP用盡)"])
+					("OK(載具是實體)" if tank_ok else "FAIL(穿過去了/沒走到/AP用盡)")
+					if found_spot else "SKIP(這張圖找不到 6m 淨空的空地，前提不成立)"])
 			# ⚠ 這張不能用第三人稱拍：鏡頭會直接埋進車體，整張圖是一片灰＝沒有佐證力
 			#   （2026-07-26 實拍到）。切回俯瞰、框住人與坦克，才看得出人停在車體外。
 			_end_action()
@@ -1336,7 +1396,14 @@ func _selftest() -> void:
 				wet_d = dep
 				wet = Vector2(wx2, wy2)
 			elif dep <= 0.0 and dry == Vector2.ZERO and terrain.slope_at(wx2, wy2) < 0.12:
-				dry = Vector2(wx2, wy2)
+				# ⚠ 陸上對照點必須「真的走得動」：先前只檢查沒水沒坡，結果挑到緊貼柵欄的點，
+				#   陸上只走了 0.02m、比水裡還短，比值算出 3583% 這種荒謬數字。
+				var dp: Vector3 = _to3d(wx2, wy2)
+				# 起點自己也要是空的：_path_clear 只從 0.6m 之後開始取樣，
+				# 站在障礙裡的點照樣會通過，結果陸上只走了 0.02m（比水裡還短）。
+				var dfix: Vector3 = _resolve_solids(dp, BODY_R, null)
+				if Vector2(dfix.x - dp.x, dfix.z - dp.z).length() < 0.01 						and _path_clear(dp, dp + Vector3(3.0, 0, 0), BODY_R) 						and _path_clear(dp, dp + Vector3(-1.0, 0, 0), BODY_R):
+					dry = Vector2(wx2, wy2)
 		if wet_d < 0.25 or dry == Vector2.ZERO:
 			print("[wadechk] SKIP 這張圖沒有可涉的水（最深 %.2fm）" % wet_d)
 		else:
@@ -1379,11 +1446,13 @@ func _selftest() -> void:
 			_unshield(wu, wsave)
 		# I-4b7) 樓板是實體（鐵律 0③）：走樓梯上二樓，量他站的高度是不是二樓地板。
 		#        ⚠ 先前二樓地板只是畫出來的：站上去高度照 terrain 算＝整個人陷在一樓。
-		var mb = null
+		# ⚠ 逐棟試：某些配置下樓梯口會被室內家具或隔牆堵住，
+		#   只取第一棟會把「這一棟剛好堵住」誤報成「樓板功能壞了」。
+		var mb_list: Array = []
 		for bd2 in _buildings:
 			if bd2.floors > 1:
-				mb = bd2
-				break
+				mb_list.append(bd2)
+		var mb = mb_list[0] if not mb_list.is_empty() else null
 		if mb == null:
 			print("[floorchk] SKIP 這張圖沒有兩層以上的建築")
 		else:
@@ -1406,6 +1475,23 @@ func _selftest() -> void:
 				tf += dtf
 				fu["node"].move_dir(Vector3(0, 0, 1), dtf)
 			var y_after: float = fu["node"].global_position.y - mb.position.y
+			# 沒爬上去就換下一棟再試（最多三棟）
+			var try_i := 1
+			while y_after < mb.FLOOR_H * 0.75 and try_i < mini(3, mb_list.size()):
+				mb = mb_list[try_i]
+				try_i += 1
+				bhalf = Vector2(mb.rect.size.x * WORLD_SCALE * 0.5,
+						mb.rect.size.y * WORLD_SCALE * 0.5)
+				fu["node"].global_position = mb.position + Vector3(bhalf.x - 0.8, 0.0, -bhalf.y + 0.5)
+				await get_tree().create_timer(0.8).timeout
+				y_before = fu["node"].global_position.y - mb.position.y
+				var tf2 := 0.0
+				while tf2 < 4.0:
+					await get_tree().process_frame
+					var dtf2: float = get_process_delta_time()
+					tf2 += dtf2
+					fu["node"].move_dir(Vector3(0, 0, 1), dtf2)
+				y_after = fu["node"].global_position.y - mb.position.y
 			print("[floorchk] 沿樓梯往上走 4 秒：離一樓地板 %.2fm → %.2fm（樓高 %.2fm） %s"
 					% [y_before, y_after, mb.FLOOR_H,
 					"OK(真的走上二樓)" if y_after > mb.FLOOR_H * 0.75 else "FAIL(樓梯爬不上去)"])
@@ -1572,31 +1658,16 @@ func _selftest() -> void:
 			# 這個數值必須隨時間變化——只拍一張靜態圖看不出「有沒有在交替」。
 			# 量的是「膝蓋」不是腳：匍匐的特徵是膝蓋先彎、再帶著大腿往外頂，
 			# 腳跟其實是折回身體中線的（使用者 2026-07-26 指正）。
-			var spreads: Array = []
-			var knee_angles: Array = []
-			var knee_fwd: Array = []
-			var hand_fwd: Array = []
+			var sc_kf := [9.9, -9.9]
+			var sc_sp := [9.9, -9.9]
+			var sc_hf := [9.9, -9.9]
+			var sc_ka := [999.0, -999.0]
 			for seg_i in 3:
-				await _hold_key(KEY_W, 0.55)
-				var rg = cru["node"]._rig
-				var kl: Vector3 = rg.bone_pos("LowerLeg.L")
-				var kr: Vector3 = rg.bone_pos("LowerLeg.R")
-				spreads.append(kl.distance_to(kr))
-				# 依 STP 21-1-SMCT，low crawl 的動力腿是右腿、左腿伸直拖在身後。
-				# 這個測試原本量左腿，於是「左腿本來就該伸直」被誤判成剪刀腳 FAIL。
-				# 量錯維度＝白修，本專案第二次踩到，所以改量右腿。
-				var hipp: Vector3 = rg.bone_pos("UpperLeg.R")
-				var thigh: Vector3 = kr - hipp
-				var shin: Vector3 = rg.bone_pos("Foot.R") - kr
-				if thigh.length() > 0.001 and shin.length() > 0.001:
-					knee_angles.append(rad_to_deg(thigh.angle_to(shin)))
-				# ★剪刀腳判定：匍匐是把膝蓋收到身體「前方」蹬地，剪刀腳是膝蓋往側後張開。
-				#   只量外張量與屈膝角會漏掉這件事（使用者指正三次才抓到）。
-				var fwdv: Vector3 = cru["node"].facing_dir()
-				knee_fwd.append((kr - hipp).dot(fwdv))
-				# 左手要往前撐地拉行：趴姿唯一看得見的推進動作
-				var hl: Vector3 = rg.bone_pos(cru["node"]._hand_l)
-				hand_fwd.append((hl - cru["node"].global_position).dot(fwdv))
+				var scan: Dictionary = await _hold_key_crawlscan(KEY_W, 0.55, cru["node"])
+				for pair in [["kf", sc_kf], ["sp", sc_sp], ["hf", sc_hf], ["ka", sc_ka]]:
+					var got: Array = scan[pair[0]]
+					(pair[1] as Array)[0] = minf(float((pair[1] as Array)[0]), float(got[0]))
+					(pair[1] as Array)[1] = maxf(float((pair[1] as Array)[1]), float(got[1]))
 				await _snap("res://crawl_%d.png" % (seg_i + 1))
 				# ★側視近照：第三人稱是從背後看，腿被身體擋住，根本看不出匍匐動作。
 				#   驗腿的姿勢一定要有側面圖（使用者三次指正剪刀腳，前兩次我都只有背影圖）。
@@ -1615,34 +1686,35 @@ func _selftest() -> void:
 			var cr_d: float = cr_from.distance_to(cru["node"].global_position)
 			var cr_state: String = str(cru["node"]._state)
 			var cr_hip: float = cru["node"]._rig.bone_pos("Hips").y - cru["node"].global_position.y
-			var sp_min: float = spreads.min()
-			var sp_max: float = spreads.max()
+			var sp_min: float = float(sc_sp[0])
+			var sp_max: float = float(sc_sp[1])
 			print("[crawlchk] 趴著走 2.1 秒：位移 %.2fm、動畫=%s、髖高 %.2fm %s" % [cr_d, cr_state, cr_hip,
 					"OK(是匍匐不是趴著跑)" if (cr_d > 0.6 and cr_d < 2.6 and cr_state != "run"
 					and cr_state != "walk" and cr_hip < 0.55 and cr_hip > 0.05)
 					else "FAIL(速度/動畫/姿勢不對，髖高<=0 代表人陷進地裡)"])
-			print("[crawlchk] 膝蓋外張量 %.2f/%.2f/%.2f m（差 %.2f） %s" % [spreads[0], spreads[1],
-					spreads[2], sp_max - sp_min,
+			print("[crawlchk] 膝蓋外張量 %.2f~%.2f m（擺幅 %.2f，逐幀取極值） %s"
+					% [sp_min, sp_max, sp_max - sp_min,
 					"OK(雙腿在交替蹬地)" if (sp_max - sp_min) > 0.05 else "FAIL(腿沒動＝只是趴著平移)"])
-			if not knee_fwd.is_empty():
-				var kf_max: float = knee_fwd.max()
-				print("[crawlchk] 右膝相對髖部前後 %.2f/%.2f/%.2f m（正=在前方蹬地） %s" % [
-						knee_fwd[0], knee_fwd[1], knee_fwd[2],
-						"OK(膝蓋往前收)" if kf_max > 0.05 else "FAIL(膝蓋往側後張＝剪刀腳)"])
-			if hand_fwd.size() >= 3:
-				var hf_min: float = hand_fwd.min()
-				var hf_max: float = hand_fwd.max()
-				print("[crawlchk] 左手前伸距離 %.2f/%.2f/%.2f m（擺幅 %.2f） %s" % [hand_fwd[0],
-						hand_fwd[1], hand_fwd[2], hf_max - hf_min,
-						"OK(手在往前撐地拉行)" if (hf_max - hf_min) > 0.12 and hf_max > 0.35
-						else "FAIL(手沒動＝只有身體在滑)"])
-			if knee_angles.is_empty():
+			# ★剪刀腳判定：匍匐是把膝蓋收到身體「前方」再蹬，剪刀腳是膝蓋往側後張開。
+			#   一定要同時有「收到前面」與「蹬回後面」兩端，只驗單邊會被錯誤姿勢矇混過去。
+			print("[crawlchk] 右膝相對髖部前後 %.2f~%.2f m（正=在髖前，要一前一後） %s"
+					% [sc_kf[0], sc_kf[1],
+					"OK(膝蓋收到前面再往後蹬)" if (float(sc_kf[1]) > 0.05 and float(sc_kf[0]) < -0.10)
+					else "FAIL(膝蓋沒有收到髖部前方＝在地上往後岔開，不是匍匐)"])
+			print("[crawlchk] 左手前伸距離 %.2f~%.2f m（擺幅 %.2f） %s"
+					% [sc_hf[0], sc_hf[1], float(sc_hf[1]) - float(sc_hf[0]),
+					"OK(手在往前撐地拉行)"
+					if (float(sc_hf[1]) - float(sc_hf[0])) > 0.12 and float(sc_hf[1]) > 0.35
+					else "FAIL(手沒動＝只有身體在滑)"])
+			if float(sc_ka[1]) < -900.0:
 				print("[crawlchk] 屈膝角度量不到 FAIL(骨頭抓不到)")
 			else:
-				var ka_max: float = knee_angles.max()
-				print("[crawlchk] 右膝(動力腿)彎曲角 %.0f/%.0f/%.0f 度（0=伸直，最大 %.0f） %s" % [knee_angles[0],
-						knee_angles[1], knee_angles[2], ka_max,
-						"OK(膝蓋真的有彎)" if ka_max > 30.0 else "FAIL(腿是伸直的＝剪刀腿不是匍匐)"])
+				# 一樣要兩端：蹬完必須接近伸直，收腿時必須明顯彎——
+				# 只驗「最大彎曲角」的話，一條全程半彎的腿也會通過。
+				print("[crawlchk] 右膝(動力腿)彎曲角 %.0f~%.0f 度（0=伸直，逐幀取極值） %s"
+						% [sc_ka[0], sc_ka[1],
+						"OK(收腿彎、蹬完伸直)" if (float(sc_ka[1]) > 30.0 and float(sc_ka[0]) < 22.0)
+						else "FAIL(膝蓋沒有真的一彎一伸)"])
 			# ★脈動驗證（使用者：「腿在動但完全不像真的在移動」）：
 			#   等速平移＋腿在擺動＝人被拖著滑行。真實匍匐是一蹬一停，
 			#   所以每一小段的位移必須有明顯落差。
@@ -2670,7 +2742,8 @@ func _minimap_data() -> Dictionary:
 			yaw = deg_to_rad(cam.tps_yaw)
 		act = [ap.x, ap.y, yaw]
 	return {"mw": float(map_data.get("w", 960)), "mh": float(map_data.get("h", 600)),
-			"units": us, "trenches": trs, "buildings": bls, "acting": act}
+			"units": us, "trenches": trs, "buildings": bls, "acting": act,
+			"sight": SIGHT}          # 雷達圈半徑（px）＝這個單位的偵測距離
 
 # 滑鼠鎖定：第三人稱要自由轉視角就得鎖游標；但一開面板/回指令模式就要放開，否則點不到 UI。
 func _capture_mouse(on: bool) -> void:
@@ -3426,6 +3499,11 @@ func _avoid_goal(from_p: Vector3, goal: Vector3, radius: float) -> Vector3:
 
 # 受擊與陣亡動作驗收（從 _selftest 抽出來：測試對象可能中途陣亡要換人）
 func _anichk(u3) -> void:
+	# ⚠ 先站起來再測：狙擊手在空地會自動趴下，趴著的頭本來就只有 0.33m，
+	#   再倒地也降不了多少，會把「倒地動作正常」誤判成 FAIL（2026-07-27 實測到）。
+	u3.stance_cmd = "stand"
+	u3.want_prone = false
+	await get_tree().create_timer(1.2).timeout
 	var head_up: float = u3._rig.bone_pos("Head").y - u3.global_position.y
 	u3.take_hit()
 	await get_tree().create_timer(0.2).timeout    # 受擊動作很短，太晚量會量到已回 idle
@@ -3665,8 +3743,10 @@ func _build_ground() -> void:
 			var gy := 0.0
 			if terrain != null:
 				gy = terrain.height_at(cx, cy)
+			# 樓層改讀資料（鐵律 3）：先前寫死 `2 if i % 2 == 0 else 1`，
+			# 於是「鐘樓」跟旁邊的營舍一樣高，劇情說「狙擊組上鐘樓」卻沒有樓可上。
 			bd.build(sdef, WORLD_SCALE, map_data.get("w", 960), map_data.get("h", 600),
-					gy, 2 if i % 2 == 0 else 1)
+					gy, int(sdef.get("floors", 2 if i % 2 == 0 else 1)))
 			_buildings.append(bd)
 			# 室內家具進掩體表：進建築的戰術價值不能只有「牆擋子彈」，
 			# 屋裡要有東西可以蹲（木箱半身高＝硬掩體，桌子只算部分遮蔽）。

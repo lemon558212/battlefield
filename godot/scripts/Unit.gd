@@ -78,10 +78,17 @@ const FREEHAND_STATES := ["fix", "capture", "idle_relaxed", "death"]
 # 換彈若雙手全放，長槍會被舉成一根直挺挺的旗杆（2026-07-25 實拍發現）。
 const LEFTHAND_FREE := ["reload", "hit"]
 # 匍匐（蛙式）的角度規格——使用者 2026-07-26 親自給的：髖外展 30~45 度、屈膝 30~45 度
-const PRONE_ABD_MIN := 12.0
-const PRONE_ABD_MAX := 42.0
+# 匍匐（低姿匍匐）的大腿方向，以「水平面上距離正後方的角度」表示：
+#   0°＝腿打直往後、90°＝膝在正側方、>90°＝膝蓋收到髖部**前面**。
+# ⚠⚠ 2026-07-27 使用者第四次說「趴姿移動的動作還是沒變」，真因就在這裡：
+#   舊值 12°~42° 代表大腿**全程都在髖部後方**（cos42°=0.74 仍朝後），
+#   驗證台量到膝蓋永遠在髖後 0.41m。那不是匍匐，是兩腿往後岔開在地上磨。
+#   真實低姿匍匐是：① 屈膝把膝蓋收到腋下旁邊（明顯超過 90°，膝在髖前）
+#   ② 腳掌蹬地 ③ 髖伸展把身體推出去 ④ 換邊。收不到前面就沒有東西可以蹬。
+const PRONE_HIP_BACK := 8.0     # 蹬完：腿幾乎打直往後
+const PRONE_HIP_UP := 108.0     # 收腿到底：膝蓋在髖部前方（cos108°=-0.31）
 const PRONE_KNEE_MIN := 8.0
-const PRONE_KNEE_MAX := 44.0
+const PRONE_KNEE_MAX := 48.0
 # 會循環播放的動作（其餘播一次就回 idle）
 const LOOP_KEYS := ["idle", "idle_relaxed", "walk", "run", "sprint", "aim", "crouch", "crouch_walk", "fix"]
 
@@ -829,7 +836,19 @@ func move_dir(dir: Vector3, delta: float) -> void:
 		#   |sin| 的平均值是 2/π≈0.637，除掉它才能維持設定的平均速度。
 		_crawl += delta * CRAWL_RATE
 		# 左右腿交替蹬地＝一個週期推進兩次；|sin| 的平均是 2/π≈0.637
-		var thrust: float = (0.08 + 0.92 * absf(sin(_crawl))) / 0.665
+		# ⚠ 2026-07-27 修正相位：舊版用 |sin(_crawl)|，峰值落在「收腿收到底」那一刻，
+		#   等於膝蓋往前收的同時身體也往前衝——腳在地上是往前刮的，看起來就是打滑。
+		#   身體只能在**髖伸展（腿往後蹬）**那半段前進，也就是收腿量由大變小的時候。
+		#   左腿的收放區間是 sin>0、右腿是 sin<0，各自「正在變小」的那半段才算蹬地。
+		var cs: float = cos(_crawl)
+		var sn: float = sin(_crawl)
+		var drive := 0.0
+		if sn > 0.0 and cs < 0.0:
+			drive = -cs           # 左腿正在往後蹬
+		elif sn < 0.0 and cs > 0.0:
+			drive = cs            # 右腿正在往後蹬
+		# drive 在整個週期的平均是 1/π≈0.3183，除掉它才能維持設定的平均速度
+		var thrust: float = (0.12 + 0.88 * drive) / 0.4001
 		global_position += d * PRONE_SPEED * thrust * wade_mul() * delta
 		_prone_hold += delta        # 持續走就會超過門檻，_update_crouch 會讓他起身
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
@@ -1201,8 +1220,8 @@ func _aim_pose() -> void:
 			_rig.place_bone("UpperLeg." + sd,
 					hips + rgt * sgn * (0.07 + 0.06 * ab) - fwd * 0.02, _prone)
 			# 大腿：由「正後方」在水平面往外轉（髖外展 12°→42°），全程貼地
-			var abd: float = deg_to_rad(PRONE_ABD_MIN
-					+ (PRONE_ABD_MAX - PRONE_ABD_MIN) * ab)
+			var abd: float = deg_to_rad(PRONE_HIP_BACK
+					+ (PRONE_HIP_UP - PRONE_HIP_BACK) * ab)
 			var thigh: Vector3 = (-fwd).rotated(Vector3.UP, abd * sgn)
 			thigh = (thigh - Vector3.UP * 0.06).normalized()
 			_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, thigh, _prone)

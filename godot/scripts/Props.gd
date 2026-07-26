@@ -41,6 +41,12 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	for s in map_data.get("solids", []):
 		_no_zones.append(Rect2(float(s.get("x", 0)), float(s.get("y", 0)),
 				float(s.get("w", 60)), float(s.get("h", 60))).grow(2.5 / _ws))
+	# 部署區也是禁區（2026-07-27 實測抓到）：柵欄長在部署格上，
+	# 玩家一放下士兵就緊貼柵欄，按前進直接撞牆＝「人不會動」。
+	# 出生點必須是乾淨的地面，這跟「門口不能被堵死」是同一條理由。
+	for dz in map_data.get("deploy", []):
+		_no_zones.append(Rect2(float(dz.get("x", 0)), float(dz.get("y", 0)),
+				float(dz.get("w", 300)), float(dz.get("h", 200))).grow(1.0 / _ws))
 	# 貼圖化（GDD/14 §0a）：磚是磚、水泥是水泥、路是柏油，純色時代根本看不出材質差別。
 	# 沒有現成貼圖的（木、金屬、電線、燒黑）維持純色——硬套錯貼圖比純色更假。
 	_mats = {
