@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dd0lfptc5gdmb"
-path="res://.godot/imported/look_heroes.png-c8cfba9daf9a43740f9d7ca48e21e536.ctex"
+path="res://.godot/imported/look_heroes.png-bb5c60234d3ab72e2dc5944521cdfe6f.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://look_heroes.png"
-dest_files=["res://.godot/imported/look_heroes.png-c8cfba9daf9a43740f9d7ca48e21e536.ctex"]
+source_file="res://qa/look_heroes.png"
+dest_files=["res://.godot/imported/look_heroes.png-bb5c60234d3ab72e2dc5944521cdfe6f.ctex"]
 
 [params]
 

@@ -132,6 +132,8 @@ func _ready() -> void:
 		_selftest()
 	elif "shotseq" in OS.get_cmdline_user_args():
 		_shotseq()
+	elif "mapshots" in OS.get_cmdline_user_args():
+		_mapshots()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -153,6 +155,35 @@ func _click_btn(txt: String) -> bool:
 
 # 連拍模式（`-- shotseq`）：啟動後依時間序拍幾張，專門抓「畫面上有東西一直在動」
 # 這種肉眼才看得到、數值驗證抓不到的問題（使用者 2026-07-26：「啟動遊戲有一直往下拉」）。
+# 逐圖巡場（`-- mapshots`）：10 張圖各建一次場景、俯瞰＋人眼高度各拍一張。
+# 使用者 2026-07-26：「城鎮、沙灘、沙漠、叢林都要做，而且標準都是一樣」——
+# 標準一致的意思是每張圖都有同一套驗證：建得起來（無紅字）、有自己的地貌配色。
+func _mapshots() -> void:
+	await get_tree().create_timer(0.6).timeout
+	ui.root.visible = false      # 主選單 UI 會整面蓋住場景（第一輪拍出來全是選單）
+	for id in GameData.maps.keys():
+		map_data = GameData.maps[id]
+		_teardown_world()
+		await get_tree().process_frame
+		_build_ground()
+		var mwp: float = map_data.get("w", 960)
+		var mhp: float = map_data.get("h", 600)
+		cam.clear_tps()
+		cam.set_follow(null)
+		cam.focus = _to3d(mwp * 0.5, mhp * 0.55) + Vector3(0, 1.0, 0)
+		cam.dist = 44.0
+		cam.pitch_deg = 32.0
+		cam.yaw = 0.35
+		await get_tree().create_timer(1.0).timeout
+		await _snap("res://map_%s_over.png" % id)
+		cam.dist = 8.0
+		cam.pitch_deg = 6.0
+		await get_tree().create_timer(0.5).timeout
+		await _snap("res://map_%s_eye.png" % id)
+		print("[mapshots] %s biome=%s sky=%s OK" % [id, terrain.biome.get("key", "?"),
+				map_data.get("sky", "day")])
+	get_tree().quit(0)
+
 func _shotseq() -> void:
 	for i in 5:
 		await get_tree().create_timer(1.2).timeout
@@ -1432,9 +1463,38 @@ func _selftest() -> void:
 	print("[selftest] DONE units=", units.size())
 	get_tree().quit(0)
 
+var _sun: DirectionalLight3D = null
+var _fill: DirectionalLight3D = null
+var _env: Environment = null
+var _sky_mat: ShaderMaterial = null
+
+# 天色時段（讀 maps.json 的 sky 欄位）：夜襲章節就該是夜色，黎明搶灘就該是晨光。
+# 先前所有圖共用一組黃昏光——資料裡的 sky 欄位從來沒被讀過。
+func _apply_sky(preset_name: String) -> void:
+	var pr: Dictionary = Biome.sky_preset(preset_name)
+	if _sun != null:
+		_sun.rotation_degrees = pr["sun_deg"]
+		_sun.light_color = pr["sun_color"]
+		_sun.light_energy = pr["sun_energy"]
+	if _env != null:
+		_env.ambient_light_energy = pr["ambient"]
+		_env.fog_light_color = pr["fog"]
+	if _sky_mat != null:
+		_sky_mat.set_shader_parameter("top_color", pr["top"])
+		_sky_mat.set_shader_parameter("horizon_color", pr["horizon"])
+		# 地面半球跟著霧色走：沙漠圖地平線下不該是草綠（實拍抓到一圈綠邊）
+		var fogc: Color = pr["fog"]
+		_sky_mat.set_shader_parameter("ground_horizon", fogc * 0.92)
+		_sky_mat.set_shader_parameter("ground_bottom", fogc * 0.42)
+		# 夜間雲要暗：雲色也乘時段亮度
+		var mulc: Color = pr.get("mul", Color(1, 1, 1))
+		_sky_mat.set_shader_parameter("cloud_color", Color(1.0, 0.93, 0.82) * mulc)
+		_sky_mat.set_shader_parameter("cloud_shadow", Color(0.52, 0.50, 0.56) * mulc)
+
 func _build_static() -> void:
 	# 太陽：暖色、柔邊陰影、角度更斜（拉長影子＝立體感）
 	var sun := DirectionalLight3D.new()
+	_sun = sun
 	sun.rotation_degrees = Vector3(-26, 142, 0)   # 黃昏斜射：影子拉長＝體積感（正午頂光是死白的主因）
 	sun.light_color = Color(1.0, 0.87, 0.68)      # 金黃色溫
 	sun.light_energy = 1.35
@@ -1452,6 +1512,7 @@ func _build_static() -> void:
 	add_child(sun)
 	# 補光：從反方向打冷色弱光，避免暗面全黑（治「黑色邊」的觀感）
 	var fill := DirectionalLight3D.new()
+	_fill = fill
 	fill.rotation_degrees = Vector3(-28, -50, 0)
 	fill.light_color = Color(0.72, 0.80, 0.95)
 	fill.light_energy = 0.22     # Forward+ 的天空環境光比 compat 強很多，補光要跟著收
@@ -1459,10 +1520,12 @@ func _build_static() -> void:
 	add_child(fill)
 
 	var e := Environment.new()
+	_env = e
 	# 天空：漸層＋太陽＋**雲層**（GDD/14 §0a）。
 	# 為什麼要自己寫 shader：ProceduralSkyMaterial 沒有雲，一片乾淨漸層在遠鏡頭下
 	# 佔畫面上半部卻空無一物，是「場景還不像 3A」剩下最大的一塊面積。
 	var sky_mat := ShaderMaterial.new()
+	_sky_mat = sky_mat
 	var sky_sh := Shader.new()
 	sky_sh.code = SKY_SHADER
 	sky_mat.shader = sky_sh
@@ -3137,6 +3200,8 @@ func _build_ground() -> void:
 	terrain = TERRAIN.new()
 	world.add_child(terrain)
 	terrain.build(map_data, WORLD_SCALE)
+	_apply_sky(str(map_data.get("sky", "day")))
+	_build_water()
 	Unit.ground_sampler = func(p: Vector3) -> float: return terrain.height_at_world(p)
 	# 槍口不可以插進固體（使用者 2026-07-26 第二次指正）：把「實體射線」交給 Unit，
 	# 它在瞄準時自己判斷要不要抬槍。見 Unit.solid_probe。
@@ -3375,6 +3440,120 @@ func _make_sandbag(pos: Vector3, w_px: float, h_px: float) -> void:
 			bag.rotation.y += randf_range(-0.08, 0.08)
 			holder.add_child(bag)
 
+# 巨石散佈（沙漠/海岸）：低多邊形球體壓扁＋隨機傾斜，半埋進地（鐵律 0：有重量會下沉）。
+# 沙漠沒有樹，中景高度全靠巨石；同時登記碰撞與掩體（大石＝半身硬掩體）。
+func _scatter_rocks(gwp: float, ghp: float) -> void:
+	var rmul: float = float(terrain.biome.get("rock_mult", 1.0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 90210
+	var want: int = int(gwp * ghp / 52000.0 * rmul * 10.0)
+	var sm := SphereMesh.new()
+	sm.radial_segments = 7
+	sm.rings = 4
+	sm.radius = 1.0
+	sm.height = 1.5
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
+	mat.roughness = 0.97
+	sm.material = mat
+	var xfs: Array = []
+	var placed := 0
+	var guard := 0
+	while placed < want and guard < want * 25:
+		guard += 1
+		var px: float = rng.randf_range(30.0, gwp - 30.0)
+		var py: float = rng.randf_range(30.0, ghp - 30.0)
+		var tp := Vector2(px, py)
+		var bad := false
+		for bd2 in _buildings:
+			if bd2.rect.grow(4.0 / WORLD_SCALE).has_point(tp):
+				bad = true
+				break
+		if bad or (terrain != null and (terrain.in_trench(px, py) or terrain.in_water(px, py))):
+			continue
+		var sc: float = rng.randf_range(0.35, 1.5)
+		var ty: float = terrain.height_at(px, py)
+		var b := (Basis(Vector3.UP, rng.randf() * TAU)
+				* Basis(Vector3(1, 0, 0), rng.randf_range(-0.25, 0.25))).scaled(
+				Vector3(sc * rng.randf_range(0.8, 1.4), sc * rng.randf_range(0.5, 0.8), sc))
+		# 半埋：底部沉進地面 1/3，石頭才是「長在地裡」不是「擺在地上」
+		xfs.append(Transform3D(b, Vector3((px - gwp * 0.5) * WORLD_SCALE,
+				ty + sc * 0.28, (py - ghp * 0.5) * WORLD_SCALE)))
+		if sc > 0.7:
+			_blockers.append({"t": "cir", "c": tp, "r": sc * 0.9 / WORLD_SCALE, "h": sc * 1.0})
+			_covers.append({"wx": px, "wy": py, "r": sc * 0.95 / WORLD_SCALE,
+					"val": 0.5, "type": "sandbag"})
+		placed += 1
+	if xfs.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = sm
+	mm.instance_count = xfs.size()
+	for k in xfs.size():
+		mm.set_instance_transform(k, xfs[k])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Rocks"
+	mmi.multimesh = mm
+	world.add_child(mmi)
+
+# 水面（海灘/海峽/港口）：一片起伏的半透明水色平面蓋在水域上。
+# 深水對步兵不可通行（鐵律 0：人不會走進兩公尺深的海裡打仗），登記成線段圍欄。
+func _build_water() -> void:
+	var rects: Array = []
+	for wkey in ["waters", "deepwaters", "shallows"]:
+		for wr in map_data.get(wkey, []):
+			rects.append([Rect2(float(wr.get("x", 0)), float(wr.get("y", 0)),
+					float(wr.get("w", 60)), float(wr.get("h", 60))), wkey])
+	if rects.is_empty():
+		return
+	for pair in rects:
+		var r: Rect2 = pair[0]
+		var pm := PlaneMesh.new()
+		pm.size = Vector2(r.size.x * WORLD_SCALE, r.size.y * WORLD_SCALE)
+		pm.subdivide_width = 24
+		pm.subdivide_depth = 24
+		var mi := MeshInstance3D.new()
+		mi.mesh = pm
+		var wmat := ShaderMaterial.new()
+		var wsh := Shader.new()
+		wsh.code = WATER_SHADER
+		wmat.shader = wsh
+		mi.material_override = wmat
+		var c: Vector2 = r.get_center()
+		mi.position = Vector3((c.x - map_data.get("w", 960) * 0.5) * WORLD_SCALE, -0.30,
+				(c.y - map_data.get("h", 600) * 0.5) * WORLD_SCALE)
+		world.add_child(mi)
+		# 深水圍欄：四邊線段障礙（高度 3m＝人與彈道都擋不住的別想，這是水不是牆，
+		# 但步兵確實過不去；日後做船再改成「載具可通行」）
+		if pair[1] == "deepwaters":
+			var corners := [r.position, Vector2(r.end.x, r.position.y), r.end,
+					Vector2(r.position.x, r.end.y)]
+			for i in 4:
+				var a2: Vector2 = corners[i]
+				var b2: Vector2 = corners[(i + 1) % 4]
+				_blockers.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
+						"h": 0.0, "m": (a2 + b2) * 0.5, "hl": a2.distance_to(b2) * 0.5})
+
+# 水面 shader：兩層正弦波起伏＋菲涅耳反光。刻意簡單——手機 WebGL2 也要跑得動。
+const WATER_SHADER := """
+shader_type spatial;
+render_mode blend_mix, depth_draw_always, cull_back;
+
+void vertex() {
+	float t = TIME * 0.9;
+	VERTEX.y += sin(VERTEX.x * 0.7 + t) * 0.06 + sin(VERTEX.z * 1.1 + t * 1.3) * 0.05;
+}
+
+void fragment() {
+	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+	ALBEDO = mix(vec3(0.10, 0.26, 0.30), vec3(0.55, 0.70, 0.72), fres);
+	ALPHA = 0.82;
+	ROUGHNESS = 0.08;
+	SPECULAR = 0.6;
+}
+"""
+
 func _scatter_trees(mw: float, mh: float) -> void:
 	var tm := ["res://assets/models/tree-single.glb", "res://assets/models/pinetrees.glb"]
 	var avail: Array[String] = []
@@ -3410,7 +3589,13 @@ func _scatter_trees(mw: float, mh: float) -> void:
 	# 範圍要含「戰場外的地形」：Terrain 在戰場外還鋪了 90m（否則遠鏡頭看到地圖是塊浮空積木），
 	# 那片先前完全光禿——實拍全景時戰場只佔畫面中央一小塊，四周是空綠地。
 	var out_px: float = 88.0 / WORLD_SCALE
-	var want: int = int(clampf((gwp + out_px * 2.0) * (ghp + out_px * 2.0) / 26000.0, 120.0, 900.0))
+	# 樹量吃生態倍率（森林 2.2×、沙漠 0×——沙漠沒有樹，空缺由巨石補）
+	var tmul: float = float(terrain.biome.get("tree_mult", 1.0)) if terrain != null else 1.0
+	if tmul < 0.01:
+		_scatter_rocks(gwp, ghp)
+		return
+	var want: int = int(clampf((gwp + out_px * 2.0) * (ghp + out_px * 2.0) / 26000.0 * tmul,
+			40.0, 1400.0))
 	var placed := 0
 	var guard := 0
 	while placed < want and guard < want * 30:
@@ -3457,8 +3642,9 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			if bd2.rect.grow(5.0 / WORLD_SCALE).has_point(tp):
 				blocked = true
 				break
-		if not blocked and terrain != null and terrain.in_trench(px, py):
-			blocked = true      # 壕溝裡不長樹
+		if not blocked and terrain != null and (terrain.in_trench(px, py)
+				or terrain.in_water(px, py)):
+			blocked = true      # 壕溝與水裡不長樹（實拍海灘的樹站在海面上）
 		if not blocked:
 			for bk in _blockers:
 				var cq: Vector2 = bk["c"] if bk["t"] == "cir" 						else Geometry2D.get_closest_point_to_segment(tp, bk["a"], bk["b"])
@@ -3494,6 +3680,8 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			_blockers.append({"t": "cir", "c": tp,
 					"r": (0.85 if clus else 0.40) * sc / WORLD_SCALE, "h": 4.2 * sc})
 		placed += 1
+	if terrain != null and float(terrain.biome.get("rock_mult", 0.0)) > 0.01:
+		_scatter_rocks(gwp, ghp)
 	for mesh_key in xf_by_mesh.keys():
 		var list: Array = xf_by_mesh[mesh_key]
 		var mm := MultiMesh.new()

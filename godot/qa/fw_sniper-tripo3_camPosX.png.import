@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://ddu7t8arjy13f"
-path="res://.godot/imported/fw_sniper-tripo3_camPosX.png-e48ee96ffd2b117cfa43408ce1d06f54.ctex"
+path="res://.godot/imported/fw_sniper-tripo3_camPosX.png-23af3cc03e2829df0c97595b74bf24e4.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://fw_sniper-tripo3_camPosX.png"
-dest_files=["res://.godot/imported/fw_sniper-tripo3_camPosX.png-e48ee96ffd2b117cfa43408ce1d06f54.ctex"]
+source_file="res://qa/fw_sniper-tripo3_camPosX.png"
+dest_files=["res://.godot/imported/fw_sniper-tripo3_camPosX.png-23af3cc03e2829df0c97595b74bf24e4.ctex"]
 
 [params]
 

@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dgks3trioup06"
-path="res://.godot/imported/objchk_side.png-72299308d9882c07f294babeaae44ff0.ctex"
+path="res://.godot/imported/objchk_side.png-b132c4071eda146e6c77d1b02043da5e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://objchk_side.png"
-dest_files=["res://.godot/imported/objchk_side.png-72299308d9882c07f294babeaae44ff0.ctex"]
+source_file="res://qa/objchk_side.png"
+dest_files=["res://.godot/imported/objchk_side.png-b132c4071eda146e6c77d1b02043da5e.ctex"]
 
 [params]
 

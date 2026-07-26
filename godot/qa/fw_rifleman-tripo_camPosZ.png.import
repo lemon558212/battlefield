@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://v07vurf2jktc"
-path="res://.godot/imported/fw_rifleman-tripo_camPosZ.png-9064531776d0bae25621d846fa0da456.ctex"
+path="res://.godot/imported/fw_rifleman-tripo_camPosZ.png-bf75386a95adf2734dd157548804180b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://fw_rifleman-tripo_camPosZ.png"
-dest_files=["res://.godot/imported/fw_rifleman-tripo_camPosZ.png-9064531776d0bae25621d846fa0da456.ctex"]
+source_file="res://qa/fw_rifleman-tripo_camPosZ.png"
+dest_files=["res://.godot/imported/fw_rifleman-tripo_camPosZ.png-bf75386a95adf2734dd157548804180b.ctex"]
 
 [params]
 

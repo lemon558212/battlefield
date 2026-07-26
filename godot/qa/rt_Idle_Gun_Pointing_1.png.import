@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bkl4qcaqeueuo"
-path="res://.godot/imported/rt_Idle_Gun_Pointing_1.png-d7b59eae978706ccad762f4089f7217b.ctex"
+path="res://.godot/imported/rt_Idle_Gun_Pointing_1.png-be1020b0167c25ea0a1466bec25c1d72.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://rt_Idle_Gun_Pointing_1.png"
-dest_files=["res://.godot/imported/rt_Idle_Gun_Pointing_1.png-d7b59eae978706ccad762f4089f7217b.ctex"]
+source_file="res://qa/rt_Idle_Gun_Pointing_1.png"
+dest_files=["res://.godot/imported/rt_Idle_Gun_Pointing_1.png-be1020b0167c25ea0a1466bec25c1d72.ctex"]
 
 [params]
 

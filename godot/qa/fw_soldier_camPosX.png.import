@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c6b5tl8kts1u4"
-path="res://.godot/imported/fw_soldier_camPosX.png-030967cf54156f0c18347c7258705b67.ctex"
+path="res://.godot/imported/fw_soldier_camPosX.png-dd916ae75e9a123f2aca18d9c7e9a018.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://fw_soldier_camPosX.png"
-dest_files=["res://.godot/imported/fw_soldier_camPosX.png-030967cf54156f0c18347c7258705b67.ctex"]
+source_file="res://qa/fw_soldier_camPosX.png"
+dest_files=["res://.godot/imported/fw_soldier_camPosX.png-dd916ae75e9a123f2aca18d9c7e9a018.ctex"]
 
 [params]
 

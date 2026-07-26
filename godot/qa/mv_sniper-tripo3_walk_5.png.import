@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://8xbwvaqw8dlp"
-path="res://.godot/imported/mv_sniper-tripo3_walk_5.png-c10ea3e72a9c26e3c1caa804ecdd7c6f.ctex"
+path="res://.godot/imported/mv_sniper-tripo3_walk_5.png-7d143b33c44b8b77ebb921660bfbe67f.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://mv_sniper-tripo3_walk_5.png"
-dest_files=["res://.godot/imported/mv_sniper-tripo3_walk_5.png-c10ea3e72a9c26e3c1caa804ecdd7c6f.ctex"]
+source_file="res://qa/mv_sniper-tripo3_walk_5.png"
+dest_files=["res://.godot/imported/mv_sniper-tripo3_walk_5.png-7d143b33c44b8b77ebb921660bfbe67f.ctex"]
 
 [params]
 

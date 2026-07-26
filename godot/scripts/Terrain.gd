@@ -23,6 +23,8 @@ var _hills: Array = []
 var _craters: Array = []
 var _trenches: Array = []         # 每筆 {pts:[Vector2(px)], hw:半寬(px)}
 var _grass_zones: Array = []
+var biome: Dictionary = {}
+var _waters: Array = []
 var _no_grass: Array[Rect2] = []      # 建築佔地（室內不長草）
 var _grass_mat: ShaderMaterial = null
 
@@ -43,6 +45,16 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 			_trenches.append({"pts": pts, "hw": float(t.get("w", 44)) * 0.5})
 	_grass_zones = map.get("bushes", [])
 	_no_grass = []
+	# 生態設定（Biome.gd）：每張圖的地表配色、草量、遠山色都從這裡來——
+	# 先前全部寫死草原，10 張圖裡的沙漠/城鎮/海灘全長一個樣（使用者指正）。
+	biome = Biome.of(map)
+	# 水域（海灘/海峽/港口）：水面下的地要下陷，岸線才是斜坡不是斷崖
+	_waters = []
+	for wkey in ["waters", "deepwaters", "shallows"]:
+		for wr in map.get(wkey, []):
+			_waters.append({"r": Rect2(float(wr.get("x", 0)), float(wr.get("y", 0)),
+					float(wr.get("w", 60)), float(wr.get("h", 60))),
+					"deep": (1.9 if wkey == "deepwaters" else (0.5 if wkey == "shallows" else 1.2))})
 	_build_mesh()
 	# ⚠ 草不在這裡生成：建築的實際佔地要等 Building 建完才知道
 	#   （Building.rect 有「最小 120px」的規則，比 maps.json 的原始尺寸大），
@@ -90,6 +102,14 @@ func height_at(px: float, py: float) -> float:
 		if d2 < r2:
 			var k2: float = 1.0 - (d2 / r2) * (d2 / r2)
 			h -= CRATER_DEPTH * k2
+	# 水域下陷：離岸越遠越深（平滑過渡），deepwaters 最深 1.9m
+	for w in _waters:
+		var wr: Rect2 = w["r"]
+		var inner: Rect2 = wr.grow(-28.0)
+		if wr.has_point(Vector2(px, py)):
+			var edge_d: float = minf(minf(px - wr.position.x, wr.end.x - px),
+					minf(py - wr.position.y, wr.end.y - py))
+			h -= float(w["deep"]) * clampf(edge_d / 28.0, 0.0, 1.0)
 	for t in _trenches:
 		var d3: float = _dist_to_path(Vector2(px, py), t["pts"])
 		var hw: float = t["hw"]
@@ -236,10 +256,13 @@ func _ground_color(v: Vector3) -> Color:
 	var n2: float = _vnoise(px * 0.045, py * 0.045)     # 細碎變化
 	# 地面朝上、正對天空環境光，實測比同色的直立物件亮很多，
 	# 所以基準色要壓得比直覺更暗更飽和，遠看才不會一片死白（2026-07-26 實拍調出來的值）。
-	var grass := Color(0.15, 0.24, 0.09).lerp(Color(0.24, 0.34, 0.12), n)
-	grass = grass.lerp(Color(0.19, 0.28, 0.10), n2 * 0.35)
-	var dirt := Color(0.25, 0.20, 0.13)
-	var rock := Color(0.27, 0.26, 0.24)
+	# 基色＝maps.json 的 ground 色（美術在資料層定過的）：壓暗到頂點色量級再做雜訊變化。
+	# 沙漠圖的 ground 是沙色、城鎮是灰土——同一條公式，每張圖自然長自己的樣子。
+	var base: Color = biome.get("ground", Color(0.48, 0.56, 0.35)) * 0.42
+	var grass: Color = (base * 0.82).lerp(base * 1.25, n)
+	grass = grass.lerp(base, n2 * 0.35)
+	var dirt: Color = biome.get("dirt", Color(0.25, 0.20, 0.13))
+	var rock: Color = biome.get("rock", Color(0.27, 0.26, 0.24))
 	var sl: float = slope_at(px, py)
 	var c := grass
 	c = c.lerp(dirt, clampf((sl - 0.25) * 2.2, 0.0, 0.85))      # 斜面＝裸土
@@ -291,7 +314,9 @@ func _build_grass() -> void:
 	_grass_mat.shader = sh
 	# ⚠ 比例（合理化鐵則）：草地那層先前最高接近 1m，第三人稱走進去畫面全是巨大葉片。
 	#   真實草地是「矮而密」——高度砍到腳踝，葉片數加倍補密度，繪製次數不變。
-	_grass_layer(_tuft_mesh(0.55, 9), _scatter_field(), 42.0, "GrassField")
+	var gd: float = float(biome.get("grass_density", 1.0))
+	if gd > 0.01:
+		_grass_layer(_tuft_mesh(0.55, 9), _scatter_field(), 42.0, "GrassField")
 	_grass_layer(_tuft_mesh(1.35, 9), _scatter_bushes(), 70.0, "GrassBush")   # 藏得住人的高草
 	_grass_layer(_tuft_mesh(0.75, 10), _scatter_tree_feet(), 55.0, "GrassRoots")
 
@@ -320,7 +345,7 @@ func _scatter_field() -> Array:
 	# ⚠ 密度與成本的平衡（2026-07-26 實測）：0.8m 太疏（俯瞰是光禿草皮），
 	#   但一路加到 0.55m 會讓實例數翻倍、幀時 5.8→20.5ms（49FPS，破 60FPS 預算）。
 	#   0.7m 間距＋每叢葉片數 13→9，總頂點數幾乎不變，看起來卻更密。
-	var step: float = 0.7 / ws
+	var step: float = 0.7 / ws / maxf(float(biome.get("grass_density", 1.0)), 0.05)
 	var px := step
 	while px < mw - step:
 		var py := step
@@ -357,6 +382,13 @@ func _scatter_bushes() -> Array:
 func _indoors(px: float, py: float) -> bool:
 	for nz in _no_grass:
 		if nz.has_point(Vector2(px, py)):
+			return true
+	return in_water(px, py)      # 水裡不長草（實拍海灘的草長在水面下）
+
+# 這個點在不在水域（含淺水）：樹、巨石、電線桿的散佈都要避開
+func in_water(px: float, py: float) -> bool:
+	for w in _waters:
+		if (w["r"] as Rect2).grow(6.0).has_point(Vector2(px, py)):
 			return true
 	return false
 
@@ -398,10 +430,16 @@ func _build_backdrop() -> void:
 	var base_r: float = maxf(mw, mh) * ws * 1.5 + 120.0
 	# 三層：近山深而細、遠山淡而高大（遠山要更高才看得到，被近山擋掉一半）
 	# [半徑倍率, 高度下限, 高度上限, 顏色, 雜訊頻率, 段數]
+	# 遠山是 unshaded 頂點色（不吃光照），夜間圖要乘時段亮度自己壓暗，
+	# 否則夜襲章節的山還是白天亮度（實拍港口夜戰抓到）
+	var smul: Color = Biome.sky_preset(str(map.get("sky", "day"))).get("mul", Color(1, 1, 1))
+	var bd0: Array = biome.get("backdrop", [Color(0.26, 0.31, 0.28),
+			Color(0.40, 0.45, 0.50), Color(0.55, 0.62, 0.72)])
+	var bd: Array = [bd0[0] * smul, bd0[1] * smul, bd0[2] * smul]
 	var layers := [
-		[1.00, 26.0, 62.0, Color(0.26, 0.31, 0.28), 3.1, 92],
-		[1.55, 48.0, 108.0, Color(0.40, 0.45, 0.50), 2.3, 74],
-		[2.30, 82.0, 170.0, Color(0.55, 0.62, 0.72), 1.7, 58],
+		[1.00, 26.0, 62.0, bd[0], 3.1, 92],
+		[1.55, 48.0, 108.0, bd[1], 2.3, 74],
+		[2.30, 82.0, 170.0, bd[2], 1.7, 58],
 	]
 	# 太陽在西南（跟 Main 的主光一致）：那一側的坡面亮
 	var sun_dir := Vector2(-0.6, -0.8).normalized()
@@ -478,8 +516,9 @@ func _tuft_mesh(scale_f: float, blades := 7) -> ArrayMesh:
 	rng.seed = 424242
 	# ⚠ 頂點色會被當成線性空間直接用，不轉就整片偏亮——GDD/10「sRGB 洗白」，
 	#   地表 shader、地表頂點色之後，這是同一天第三次踩到。
-	var root := Color(0.16, 0.24, 0.09).srgb_to_linear()
-	var tipc := Color(0.48, 0.60, 0.24).srgb_to_linear()
+	var tint: Color = biome.get("grass_tint", Color(1, 1, 1)) if not biome.is_empty() else Color(1, 1, 1)
+	var root := (Color(0.16, 0.24, 0.09) * tint).srgb_to_linear()
+	var tipc := (Color(0.48, 0.60, 0.24) * tint).srgb_to_linear()
 	for k in blades:
 		var a: float = rng.randf() * TAU
 		var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.38) * scale_f
