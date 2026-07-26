@@ -1257,6 +1257,10 @@ func _aim_pose() -> void:
 	# 2) 槍：槍托抵右肩窩、槍口指向目標
 	var pocket: Vector3 = (sk.global_transform * sk.get_bone_global_pose(si).origin) \
 			- Vector3.UP * (0.06 + float(PROC_POCKET_DROP.get(cls, 0.0)))
+	# 匍匐時持槍的右手也要跟著異側循環前伸／後扒（使用者分解動作步驟 2~4）：
+	# 抵肩點沿正面前後移動，相位＝_crawl（與「左腿張開」同時），與左手差半圈。
+	if _prone > 0.5 and _crawl_amt > 0.01:
+		pocket += facing_dir() * (0.16 * sin(_crawl)) * _crawl_amt
 	var aim: Vector3 = (tgt - pocket).normalized()
 	if _recoil > 0.001:
 		aim = aim.rotated(right, -deg_to_rad(8.0) * _recoil).normalized()   # 槍口上跳
