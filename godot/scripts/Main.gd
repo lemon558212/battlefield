@@ -78,6 +78,7 @@ var _covers: Array = []
 const TERRAIN := preload("res://scripts/Terrain.gd")
 const BUILDING := preload("res://scripts/Building.gd")
 const PROPS := preload("res://scripts/Props.gd")
+const FORTIFY := preload("res://scripts/Fortify.gd")
 var _buildings: Array = []             # 場上所有建築（牆線段＝視線與碰撞的真相）
 var terrain = null                     # 地形高度真相（GDD/14）
 # 中景物件與樹的實體障礙（形狀定義見 Props.blockers），座標為遊戲 px。
@@ -645,6 +646,40 @@ func _selftest() -> void:
 			else:
 				var hill_top: float = terrain.height_at(float(hills[0].get("x", 0)), float(hills[0].get("y", 0)))
 				print("[terrainchk] 丘陵頂端高度 %.2fm %s" % [hill_top, "OK" if hill_top > 1.5 else "FAIL(太平)"])
+			# 工事近照（GDD/14 §7）：沙包與壕溝護壁的質感只有近拍才看得出來，
+			# 遠景圖上它們只是幾個色塊。
+			# 挑離建築最遠的那堆沙包來拍：第一堆剛好在建築陰影裡，
+			# 拍出來整堆是深藍黑，看不出袋子的形狀與顏色。
+			var sbs = map_data.get("sandbags", [])
+			if not sbs.is_empty():
+				var sb0 = sbs[0]
+				var best_d := -1.0
+				for cand_sb in sbs:
+					var cpx := Vector2(float(cand_sb.get("x", 0)), float(cand_sb.get("y", 0)))
+					var near := 99999.0
+					for bdz in _buildings:
+						near = minf(near, cpx.distance_to(bdz.rect.get_center()))
+					if near > best_d:
+						best_d = near
+						sb0 = cand_sb
+				var sbx: float = float(sb0.get("x", 0)) + float(sb0.get("w", 40)) * 0.5
+				var sby: float = float(sb0.get("y", 0)) + float(sb0.get("h", 24)) * 0.5
+				cam.set_follow(null)
+				cam.focus = _to3d(sbx, sby) + Vector3(0, 0.6, 0)
+				cam.dist = 6.0
+				cam.pitch_deg = 18.0
+				print("[fortdiag] 沙包中心 px=(%.0f,%.0f) w=%.0f h=%.0f" % [sbx, sby,
+						float(sb0.get("w", 40)), float(sb0.get("h", 24))])
+				await get_tree().create_timer(0.6).timeout
+				await _snap("res://fort_sandbag.png")
+			var trs2 = map_data.get("trenches", [])
+			if not trs2.is_empty() and not trs2[0].get("pts", []).is_empty():
+				var tp0 = trs2[0]["pts"][0]
+				cam.focus = _to3d(float(tp0[0]), float(tp0[1])) + Vector3(0, 0.4, 0)
+				cam.dist = 6.5
+				cam.pitch_deg = 12.0
+				await get_tree().create_timer(0.6).timeout
+				await _snap("res://fort_trench.png")
 			# 全景：地形起伏一定要用遠鏡頭看才判斷得出來
 			cam.set_follow(null)
 			cam.focus = _to3d(map_data.get("w", 960) * 0.5, map_data.get("h", 600) * 0.5)
@@ -2545,6 +2580,17 @@ func _build_ground() -> void:
 					"val": 0.75, "type": "building"})
 			i += 1
 
+	# 野戰工事（GDD/14 §7）：沙包牆與壕溝護壁，幾何合併成單一網格
+	var fort = FORTIFY.new()
+	world.add_child(fort)
+	fort.begin(map_data.get("w", 960), map_data.get("h", 600), WORLD_SCALE, terrain)
+	# 壕溝護壁：光是地形凹下去像「地上的溝」，有木板與支撐柱才像人挖的工事
+	for tr in map_data.get("trenches", []):
+		var tpts: Array = []
+		for pp in tr.get("pts", []):
+			tpts.append(Vector2(float(pp[0]), float(pp[1])))
+		if tpts.size() >= 2:
+			fort.trench_revet(tpts, float(tr.get("w", 44)) * 0.5)
 	# 掩體：沙包（Phase2 掩體系統的實體，先做出來才躲得進去）
 	var sandbags = map_data.get("sandbags", [])
 	if sandbags is Array:
@@ -2552,11 +2598,13 @@ func _build_ground() -> void:
 			_covers.append({"wx": sb.get("x", 0) + sb.get("w", 40) * 0.5,
 					"wy": sb.get("y", 0) + sb.get("h", 24) * 0.5,
 					"r": 52.0, "val": 0.55, "type": "sandbag"})
-			_make_sandbag(_to3d(sb.get("x", 0) + sb.get("w", 40) * 0.5, sb.get("y", 0) + sb.get("h", 24) * 0.5),
+			fort.sandbag_wall(float(sb.get("x", 0)) + float(sb.get("w", 40)) * 0.5,
+					float(sb.get("y", 0)) + float(sb.get("h", 24)) * 0.5,
 					float(sb.get("w", 80)), float(sb.get("h", 24)))
 
 	# 中景物件（GDD/14）：道路、路障、拒馬、圍籬、電線桿、瓦礫。
 	# 第三人稱一站進戰場，眼睛高度沒東西可看就會覺得空——這層補的就是那個。
+	fort.finish()
 	# 草要等建築建好才鋪（禁草區得用建築的實際佔地，見 Terrain.build 的註解）
 	if terrain != null:
 		var no_rects: Array = []

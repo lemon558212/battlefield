@@ -49,7 +49,8 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"rock": _mat(Color(0.40, 0.39, 0.36), 0.95),
 		"rust": _mat(Color(0.31, 0.20, 0.13), 0.98),
 		"burn": _mat(Color(0.17, 0.15, 0.13), 1.0),
-		"brick": _mat(Color(0.56, 0.40, 0.31), 0.96),
+		"brick": _mat(Color(0.64, 0.46, 0.35), 0.96),
+		"brick2": _mat(Color(0.52, 0.36, 0.28), 0.97),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
 	}
 	_roads(map_data)
@@ -232,16 +233,26 @@ func _walls_brick(m: Dictionary) -> void:
 			var a: float = rng.randf() * TAU
 			var p := Vector2(cx + cos(a) * rr, cy + sin(a) * rr)
 			var ang: float = a + PI * 0.5
-			var segn: int = rng.randi_range(3, 6)
+			var segn: int = rng.randi_range(3, 5)
 			var dirv := Vector2(cos(ang), sin(ang))
+			# ⚠ 一整片純色板子看不出是磚牆（實拍就是一面黑板）。改成逐層堆砌：
+			#   每層 0.24m、深淺兩色交錯、每塊略微錯位，磚砌感才出得來。
+			#   高度也降到半身牆——被炸垮的殘牆本來就不高，而且這樣才是好用的掩體。
 			for i in segn:
-				var q: Vector2 = p + dirv * (float(i) - float(segn) * 0.5) * (1.1 / _ws)
-				# 高度往一端遞減＝被炸垮的樣子
-				var hh: float = 2.1 * (1.0 - float(i) / float(segn) * rng.randf_range(0.25, 0.6))
-				if hh < 0.6:
+				var q: Vector2 = p + dirv * (float(i) - float(segn) * 0.5) * (0.92 / _ws)
+				# 高度往一端遞減＝被炸垮的樣子，再加隨機讓頂端破損不齊
+				var hh: float = 1.55 * (1.0 - float(i) / float(segn) * rng.randf_range(0.25, 0.6))
+				hh *= rng.randf_range(0.88, 1.05)
+				if hh < 0.5:
 					continue      # 太矮的整段不畫：一截 0.3m 的牆看起來是散落的板子，不是牆
-				_box("brick", Vector3(1.15, hh, 0.34),
-						Transform3D(Basis(Vector3.UP, -ang), _pos(q.x, q.y, hh * 0.5)))
+				var layers: int = maxi(2, int(hh / 0.24))
+				for ly in layers:
+					var lyh: float = hh / float(layers)
+					var shift: float = (0.055 if ly % 2 == 0 else -0.055) + rng.randf_range(-0.02, 0.02)
+					var key: String = "brick" if (ly + i) % 2 == 0 else "brick2"
+					_box(key, Vector3(0.9, lyh * 0.94, 0.28),
+							Transform3D(Basis(Vector3.UP, -ang),
+							_pos(q.x, q.y, lyh * (float(ly) + 0.5)) + Vector3(shift, 0, 0)))
 			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
 			_blk_seg(p - half, p + half, 0.20)
 
