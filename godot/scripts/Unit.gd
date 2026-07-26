@@ -1294,7 +1294,10 @@ func _aim_pose() -> void:
 	if not (_state in LEFTHAND_FREE):
 		_rig.reset_bones(["UpperArm.L", "LowerArm.L", _hand_l])
 	# 肘部極向量：兩肘都朝下外側，這是持槍的自然姿勢；沒有約束會扭成怪解
-	var down := -Vector3.UP
+	# 肘部極向量：⚠ 不可以只用「往下」——實拍放大看到肘被壓到臀部高度、前臂幾乎垂直，
+	# 遠景讀起來就是「沒有手臂」（使用者說的「跑步兩隻手不見」有一半是這個）。
+	# 真實持槍是肘部收在**肋骨高度的後外側**，所以極向量要含「往後」的成分。
+	var down := (-Vector3.UP * 0.5 - facing_dir() * 0.55).normalized()
 	var rightv := global_basis.x.normalized()
 	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.7 + rightv * 0.62).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
