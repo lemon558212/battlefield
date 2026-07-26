@@ -998,6 +998,7 @@ func _selftest() -> void:
 			var spreads: Array = []
 			var knee_angles: Array = []
 			var knee_fwd: Array = []
+			var hand_fwd: Array = []
 			for seg_i in 3:
 				await _hold_key(KEY_W, 0.55)
 				var rg = cru["node"]._rig
@@ -1013,6 +1014,9 @@ func _selftest() -> void:
 				#   只量外張量與屈膝角會漏掉這件事（使用者指正三次才抓到）。
 				var fwdv: Vector3 = cru["node"].facing_dir()
 				knee_fwd.append((kl - hipp).dot(fwdv))
+				# 左手要往前撐地拉行：趴姿唯一看得見的推進動作
+				var hl: Vector3 = rg.bone_pos(cru["node"]._hand_l)
+				hand_fwd.append((hl - cru["node"].global_position).dot(fwdv))
 				await _snap("res://crawl_%d.png" % (seg_i + 1))
 				# ★側視近照：第三人稱是從背後看，腿被身體擋住，根本看不出匍匐動作。
 				#   驗腿的姿勢一定要有側面圖（使用者三次指正剪刀腳，前兩次我都只有背影圖）。
@@ -1045,6 +1049,13 @@ func _selftest() -> void:
 				print("[crawlchk] 膝蓋相對髖部前後 %.2f/%.2f/%.2f m（正=在前方蹬地） %s" % [
 						knee_fwd[0], knee_fwd[1], knee_fwd[2],
 						"OK(膝蓋往前收)" if kf_max > 0.05 else "FAIL(膝蓋往側後張＝剪刀腳)"])
+			if hand_fwd.size() >= 3:
+				var hf_min: float = hand_fwd.min()
+				var hf_max: float = hand_fwd.max()
+				print("[crawlchk] 左手前伸距離 %.2f/%.2f/%.2f m（擺幅 %.2f） %s" % [hand_fwd[0],
+						hand_fwd[1], hand_fwd[2], hf_max - hf_min,
+						"OK(手在往前撐地拉行)" if (hf_max - hf_min) > 0.12 and hf_max > 0.35
+						else "FAIL(手沒動＝只有身體在滑)"])
 			if knee_angles.is_empty():
 				print("[crawlchk] 屈膝角度量不到 FAIL(骨頭抓不到)")
 			else:

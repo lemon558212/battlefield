@@ -1174,7 +1174,20 @@ func _aim_pose() -> void:
 	var rightv := global_basis.x.normalized()
 	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.85 + rightv * 0.5).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
-	if not (_state in LEFTHAND_FREE):
+	# 匍匐時左手離開前護木，往前撐地拉行（右手仍握把把槍拖著走）。
+	# ★這是趴姿唯一「看得見」的推進動作——腿在身體後方被身體與草擋住，
+	#   光靠腿動，玩家看到的仍然是一個人平貼地面往前滑（使用者 2026-07-26 回饋）。
+	if _prone > 0.5 and _crawl_amt > 0.01:
+		var fwd2 := facing_dir()
+		# 伸手→抓地→拉回：與腿的蹬地相位相反（手腳交替，跟走路一樣）
+		var ph_arm: float = _crawl + PI
+		var reach: float = 0.62 + 0.30 * sin(ph_arm)
+		var lift: float = 0.13 + 0.10 * maxf(sin(ph_arm), 0.0)      # 伸的時候抬起，拉的時候貼地
+		var hand_t: Vector3 = global_position + fwd2 * reach 				- rightv * 0.30 + Vector3.UP * lift
+		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, hand_t,
+				(down * 0.55 - rightv * 0.8).normalized())
+		_rig.curl_fingers(".L", 0, 30.0, 20.0)
+	elif not (_state in LEFTHAND_FREE):
 		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
 		_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
