@@ -90,7 +90,7 @@ func _blocks(m: Dictionary) -> void:
 		var n: int = maxi(2, int(w / 1.6))
 		# 一整排護欄＝一條線段障礙（比逐塊圓形省，而且中間不會有縫可以鑽）
 		var half: float = float(rb.get("w", 120)) * 0.5
-		_blk_seg(Vector2(cx - half, cy), Vector2(cx + half, cy), 0.36)
+		_blk_seg(Vector2(cx - half, cy), Vector2(cx + half, cy), 0.36, 0.85)
 		for i in n:
 			var t: float = (float(i) + 0.5) / float(n) - 0.5
 			var px: float = cx + t * float(rb.get("w", 120))
@@ -111,7 +111,7 @@ func _teeth(m: Dictionary) -> void:
 				continue
 			# 龍牙：四角錐用兩個交叉薄箱近似，低多邊形風格夠用
 			# 龍牙本來就是「車過不去、人可以繞」的東西，所以是各自獨立的圓，不連成線
-			_blk_cir(Vector2(px, py), 0.62)
+			_blk_cir(Vector2(px, py), 0.62, 1.10)
 			_box("concrete", Vector3(0.5, 1.1, 0.5),
 					Transform3D(Basis(Vector3.UP, deg_to_rad(45)).scaled(Vector3(1, 1, 1)), _pos(px, py, 0.55)))
 			_box("concrete", Vector3(0.9, 0.22, 0.9), Transform3D(Basis(), _pos(px, py, 0.11)))
@@ -138,7 +138,7 @@ func _fences(m: Dictionary) -> void:
 					continue
 				_box("wood", Vector3(0.12, 1.05, 0.12), Transform3D(Basis(), _pos(p.x, p.y, 0.52)))
 				# 柵欄是連續的橫杆，障礙必須是線段——只登記柱子的話人會從兩柱之間穿過去
-				_blk_seg(p, p + dir * step, 0.14)
+				_blk_seg(p, p + dir * step, 0.14, 1.05)
 				var p2: Vector2 = p + dir * step * 0.5
 				var ang: float = atan2(dir.y, dir.x)
 				for hh in [0.55, 0.9]:
@@ -159,7 +159,7 @@ func _poles(m: Dictionary) -> void:
 			if _off_limits(p):
 				d += 260.0
 				continue
-			_blk_cir(p, 0.32)
+			_blk_cir(p, 0.32, 6.2)
 			_box("wood", Vector3(0.22, 6.2, 0.22), Transform3D(Basis(), _pos(p.x, p.y, 3.1)))
 			_box("wood", Vector3(1.6, 0.14, 0.14), Transform3D(Basis(), _pos(p.x, p.y, 5.6)))
 			d += 260.0
@@ -186,7 +186,7 @@ func _rubble(m: Dictionary) -> void:
 					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(px, py, sz * 0.25)))
 			# 大塊的瓦礫也要擋人（小碎石仍可跨過）
 			if sz > 0.36:
-				_blk_cir(Vector2(px, py), sz * 0.5)
+				_blk_cir(Vector2(px, py), sz * 0.5, sz * 0.6)
 
 # ---------- 戰爭痕跡（GDD/14 §0a：這裡打過仗）----------
 # 車輛殘骸：燒毀的卡車骨架。放在道路旁與彈坑附近——車不會憑空停在草原中間。
@@ -221,7 +221,7 @@ func _wrecks(m: Dictionary) -> void:
 		_box("rust", Vector3(3.4, 1.0, 0.12),
 				Transform3D(b3 * Basis(Vector3.FORWARD, deg_to_rad(24.0)),
 				_pos(p.x, p.y, 1.15) + b3 * Vector3(-0.4, 0, 1.0)))
-		_blk_cir(p, 1.5)
+		_blk_cir(p, 1.5, 1.90)
 		_scorch_at(p, 3.4)
 
 # 磚牆殘段：城鎮感最便宜的來源，而且是天然掩體
@@ -257,7 +257,7 @@ func _walls_brick(m: Dictionary) -> void:
 							Transform3D(Basis(Vector3.UP, -ang),
 							_pos(q.x, q.y, lyh * (float(ly) + 0.5)) + Vector3(shift, 0, 0)))
 			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
-			_blk_seg(p - half, p + half, 0.20)
+			_blk_seg(p - half, p + half, 0.20, 1.25)
 
 # 電線：桿子有了卻沒有線，遠看就是一排孤零零的木頭。線是垂鏈，分段畫。
 func _cables(m: Dictionary) -> void:
@@ -311,12 +311,15 @@ func _scorch_at(c: Vector2, r_m: float) -> void:
 
 # ---------- 障礙登記 ----------
 # 半徑參數用公尺（跟建模同一套單位，改的時候不用心算），存進去統一換成 px。
-func _blk_cir(c: Vector2, r_m: float) -> void:
-	blockers.append({"t": "cir", "c": c, "r": r_m / _ws})
+# h_m＝這個障礙的實際高度（公尺）。人的碰撞不看高度（都擋），但彈道要看：
+# 0.95m 的護欄擋得住趴著與蹲著的人的彈道，擋不住站姿對站姿的對射——這是
+# 使用者 2026-07-26 指正「子彈可以穿過這些物體」的正解，不是一律擋或一律不擋。
+func _blk_cir(c: Vector2, r_m: float, h_m: float) -> void:
+	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m})
 
-func _blk_seg(a: Vector2, b: Vector2, r_m: float) -> void:
+func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float) -> void:
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
-	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws,
+	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m,
 			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
 
 # ---------- 幾何合併 ----------

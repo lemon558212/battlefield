@@ -322,6 +322,15 @@ func _selftest() -> void:
 	print("[movechk] 合成點擊選取 selected=", "OK" if selected != null else "FAIL(點擊被吃掉/選不到兵)")
 	print("[movechk] 點兵後進入第三人稱 %s" % ("OK" if cam.is_tps() else "FAIL"))
 	var p_before: Vector3 = pu["node"].global_position
+	# ⚠ 要驗的是「按 W 人會走」，不是「這個方向剛好沒東西」：戰場變成實體之後
+	#   （沙包、柵欄、樹都擋人），朝向亂給就有機會一開始就頂著沙包，位移 0.3m
+	#   被誤判成「人沒動」。先挑一個 3m 內確定走得通的方向再走。
+	for deg_try in [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]:
+		var dv := Vector3(sin(deg_to_rad(deg_try)), 0.0, cos(deg_to_rad(deg_try)))
+		if _path_clear(p_before, p_before + dv * 3.0, BODY_R):
+			cam.tps_yaw = deg_try
+			break
+	await get_tree().create_timer(0.3).timeout
 	await _hold_key(KEY_W, 1.2)
 	var moved: float = p_before.distance_to(pu["node"].global_position)
 	print("[movechk] 第三人稱前進位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
@@ -481,22 +490,27 @@ func _selftest() -> void:
 					"OK" if (not sn.has("_alert_t") and not _can_alert(sn["cls"])) else "FAIL(被算進警戒了)"])
 			eu["node"].stop()
 			# 建築擋視線（GDD/01 §3 要求視線無阻擋、§5 建築完全阻擋）：隔離只留一棟才驗得準
-			var bl := {}
-			for c in _covers:
-				if c["type"] == "building":
-					bl = c
-					break
-			if bl.is_empty():
-				print("[alertchk] SKIP 場上沒有建築掩體")
+			# ⚠ 先前隔離的是 _covers，但 _los_clear 讀的是 _buildings（牆線段），
+			#   等於完全沒隔離：別棟房子把「從旁邊繞過去」那條線也擋掉，兩項都被判 FAIL。
+			# ⚠ 門開在牆的正中央，穿過建築正中心的線剛好從門洞穿過去（那是對的行為）。
+			#   要驗「牆擋視線」就必須避開門洞，所以往旁邊偏半個房子的 55%。
+			if _buildings.is_empty():
+				print("[alertchk] SKIP 場上沒有建築")
 			else:
-				var keep := _covers
-				_covers = [bl]
-				var bp := Vector2(bl["wx"], bl["wy"])
-				var thru: bool = not _los_clear(bp - Vector2(bl["r"] + 60.0, 0), bp + Vector2(bl["r"] + 60.0, 0))
-				var side_ok: bool = _los_clear(bp + Vector2(-100.0, bl["r"] + 60.0), bp + Vector2(100.0, bl["r"] + 60.0))
-				_covers = keep
-				print("[alertchk] 建築擋視線 穿越=%s 繞過=%s %s" % [thru, side_ok,
-						"OK" if (thru and side_ok) else "FAIL"])
+				var keep_bl := _buildings
+				var one_bd = _buildings[0]
+				_buildings = [one_bd]
+				var bp: Vector2 = one_bd.rect.get_center()
+				var bhw: float = one_bd.rect.size.x * 0.5
+				var bhh: float = one_bd.rect.size.y * 0.5
+				var off_y: float = bhh * 0.55
+				var thru: bool = not _los_clear(bp + Vector2(-bhw - 60.0, off_y),
+						bp + Vector2(bhw + 60.0, off_y))
+				var side_ok: bool = _los_clear(bp + Vector2(-bhw - 100.0, bhh + 80.0),
+						bp + Vector2(bhw + 100.0, bhh + 80.0))
+				_buildings = keep_bl
+				print("[alertchk] 建築擋視線 穿過牆被擋=%s 從旁邊繞過看得到=%s %s"
+						% [thru, side_ok, "OK" if (thru and side_ok) else "FAIL"])
 		# I-0) AI 決策狀態機（GDD/01 §6）：直接驗 _ai_plan 的判斷，純函式不受時序干擾
 		var ai_u = null
 		for x in units:
@@ -902,6 +916,78 @@ func _selftest() -> void:
 			soltk["node"].queue_free()
 			units.erase(soltk)
 			_buildings = keep_bld2
+		# I-4b2) 沙包：既要擋人也要擋子彈（使用者 2026-07-26 三度指正
+		#        「沙包也還沒達到、連子彈也可以穿過這種物體」）。
+		#        ⚠ 沙包的障礙先前根本沒進碰撞表（Fortify.blockers 沒被 Main 併進 _blockers），
+		#        所以走得過去；彈道則是只看建築牆，所以射得過去。兩件都在這裡驗。
+		var sbg = null
+		for bks in _blockers:
+			if String(bks.get("k", "")) == "sandbag":
+				sbg = bks
+				break
+		if sbg == null:
+			print("[sandchk] SKIP 這張圖沒有沙包工事")
+		else:
+			var sb_n: Vector2 = (sbg["b"] - sbg["a"]).orthogonal().normalized()
+			var sb_mid: Vector2 = sbg["m"]
+			# 隔離：只留這道沙包。留著別的障礙會讓人被柵欄擋住而假通過（solidchk 踩過），
+			# 沙包本身的幾何是 Fortify 畫的、不受 _blockers 影響，所以畫面不會說謊。
+			var keep_bld3 := _buildings
+			var keep_blk3 := _blockers
+			_buildings = []
+			_blockers = [sbg]
+			# (1) 擋人：對著沙包走 5 秒
+			var sbu = _deployed[0]
+			var sbu_save := _shield(sbu)
+			sbu["node"].stop()
+			_end_action()
+			cp = 6
+			var sb_p0: Vector2 = sb_mid + sb_n * (5.0 / WORLD_SCALE)
+			sbu["node"].global_position = _to3d(sb_p0.x, sb_p0.y)
+			sbu["wx"] = sb_p0.x
+			sbu["wy"] = sb_p0.y
+			_begin_action(sbu)
+			sbu["ap"] = 300.0
+			sbu["ap_max"] = 300.0
+			cam.tps_yaw = rad_to_deg(atan2(-sb_n.x, -sb_n.y))
+			await get_tree().create_timer(0.5).timeout
+			await _hold_key(KEY_W, 5.0)
+			var sb_now := Vector2(sbu["wx"], sbu["wy"])
+			var sb_proj: float = (sb_now - sb_mid).dot(sb_n) * WORLD_SCALE
+			var sb_walked: float = sb_p0.distance_to(sb_now) * WORLD_SCALE
+			print("[sandchk] 對著沙包走 5 秒：走了 %.2fm、停在沙包前 %.2fm、越過=%s %s"
+					% [sb_walked, sb_proj, sb_proj < 0.0,
+					"OK(沙包是實體)" if (sb_proj > 0.35 and sb_walked > 1.5) else "FAIL(穿過沙包了/沒走到)"])
+			# ⚠ 截圖要拍得出「人貼在沙包前面停住」：第三人稱是從背後看，
+			#   而且人正對著沙包，畫面上只有天空與遠景（第一版拍出來是一片藍天，
+			#   證明不了任何事）。改用側面的戰術鏡頭。
+			# 相機擺在「人這一側」再斜 35 度：正側面會剛好被旁邊的房子擋掉（實拍到），
+			# 沿著沙包方向拍則看不出人與沙包的前後關係。
+			cam.clear_tps()
+			cam.set_follow(null)
+			cam.focus = _to3d(sb_now.x, sb_now.y) + Vector3(0, 0.9, 0)
+			cam.dist = 9.0
+			cam.pitch_deg = 20.0
+			cam.yaw = atan2(sb_n.x, sb_n.y) + deg_to_rad(35.0)
+			await get_tree().create_timer(0.6).timeout
+			await _snap("res://solid_sandbag.png")
+			_end_action()
+			_unshield(sbu, sbu_save)
+			# (2) 擋子彈：純函式驗四種姿勢組合（不受 AI／時序干擾）
+			var sb_a: Vector2 = sb_mid + sb_n * (4.0 / WORLD_SCALE)
+			var sb_b: Vector2 = sb_mid - sb_n * (4.0 / WORLD_SCALE)
+			var sb_h: float = float(sbg["h"])
+			var shot_body: bool = _shot_clear(sb_a, sb_b, 1.32, 1.15)      # 站→站的軀幹
+			var shot_head: bool = _shot_clear(sb_a, sb_b, 1.32, 1.52)      # 站→站的頭
+			var shot_crouch: bool = _shot_clear(sb_a, sb_b, 0.92, 0.78)    # 蹲→蹲
+			var shot_along: bool = _shot_clear(sb_a, sb_a + (sbg["b"] - sbg["a"]).normalized()
+					* (8.0 / WORLD_SCALE), 1.32, 1.15)                        # 沿著沙包同側射
+			print("[sandchk] 沙包高 %.2fm 彈道：站軀幹=%s(應false) 站頭部=%s(應true) 蹲=%s(應false) 同側=%s(應true) %s"
+					% [sb_h, shot_body, shot_head, shot_crouch, shot_along,
+					"OK(擋子彈且瞄頭仍打得到)" if (not shot_body and shot_head and not shot_crouch
+					and shot_along) else "FAIL(子彈穿沙包/沙包變無敵牆)"])
+			_buildings = keep_bld3
+			_blockers = keep_blk3
 		# I-4c) AI 繞開實體障礙（AI09 [navchk]）：直接驗純函式，不受敵方階段時序干擾
 		if _blockers.is_empty():
 			print("[navchk] SKIP 這張圖沒有中景障礙")
@@ -1642,7 +1728,9 @@ func _refresh_visibility() -> void:
 				continue
 			# 視線被牆擋住就看不到（GDD/14 §3-3）：躲在屋裡的人只有從門窗的角度才會被發現——
 			# 這是「進建築」在戰術上真正的價值，不然屋子只是一塊會擋子彈的裝飾。
-			if not _los_clear(Vector2(p["wx"], p["wy"]), Vector2(u["wx"], u["wy"])):
+			# ⚠ 這裡本來只吃 _los_clear（只有建築牆），所以躲在沙包、樹幹、殘骸後面
+			#   等於站在空地上被看光。視線跟彈道吃同一份障礙，只是高度改用眼高。
+			if not _sight_clear(p, u):
 				continue
 			vis = true
 			break
@@ -1669,6 +1757,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			var dpx := Vector2(tgt["wx"] - acting["wx"], tgt["wy"] - acting["wy"]).length()
 			if dpx > float(acting["weapon"].get("range", 200)):
 				ui.flash_msg("超出射程", Color(1.0, 0.7, 0.4))
+				return
+			# 彈道被實體遮住就不能開火（GDD/14 §2）：先前只有建築牆會擋，
+			# 沙包／樹／殘骸／坦克在中間也照打，玩家看到的就是子彈穿過去。
+			if not _any_part_clear(acting, tgt):
+				ui.flash_msg("彈道被遮蔽，換位置或站起來", Color(1.0, 0.7, 0.4))
 				return
 			var sh2 = acting
 			_capture_mouse(false)          # 選部位要用游標
@@ -1755,6 +1848,11 @@ func _click(sp: Vector2) -> void:
 			if dpx > float(sh["weapon"].get("range", 200)):
 				ui.flash_msg("超出射程", Color(1.0, 0.7, 0.4))
 				return
+			# 彈道被實體遮住就不能開火（GDD/14 §2）：先前只有建築牆會擋，
+			# 沙包／樹／殘骸／坦克在中間也照打，玩家看到的就是子彈穿過去。
+			if not _any_part_clear(sh, tg):
+				ui.flash_msg("彈道被遮蔽，換位置或站起來", Color(1.0, 0.7, 0.4))
+				return
 			ui.show_fire_panel(_fire_preview(sh, tg), func(part):
 				ui.hide_fire_panel()
 				if part != "" and acting == sh and not bool(sh.get("fired", false)):
@@ -1798,6 +1896,14 @@ func _fire(shooter, target, part := "body") -> void:
 	shooter["fired"] = true      # 每次行動只能開火一次；CP 在下令時就扣過了（GDD/01 §1-2）
 	ui.update_hud(turn, "player" if st == St.CMD else "enemy", cp)
 	await get_tree().create_timer(0.32).timeout
+	if not shooter["alive"] or not target["alive"]:
+		return
+	# 彈道被實體吃掉＝這一槍打在障礙上（AI 與第三人稱自由射擊都會走到這裡）
+	if not _shot_clear_units(shooter, target, part):
+		if shooter["side"] == player_side:
+			ui.flash_msg("子彈打在掩體上", Color(0.9, 0.8, 0.6))
+		_refresh_visibility()
+		return
 	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
 	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
 	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, part) * (1.0 - cov * 0.6)
@@ -1835,7 +1941,12 @@ func _fire_preview(shooter, target) -> Array:
 	for p in _aim_parts(shooter, target):
 		var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, p["part"]) * (1.0 - cov * 0.6)
 		var dm: int = GameData.damage(_wrap(shooter), _wrap(target), p["part"])
-		out.append({"part": p["part"], "zh": p["zh"], "hit": hc, "dmg": dm})
+		# 彈道被實體擋住的部位直接標 0%：玩家要看得出「軀幹被沙包擋住、只能打頭」
+		var zh: String = p["zh"]
+		if not _shot_clear_units(shooter, target, p["part"]):
+			hc = 0.0
+			zh += "（被遮蔽）"
+		out.append({"part": p["part"], "zh": zh, "hit": hc, "dmg": dm})
 	return out
 
 # GameData 公式吃 .weapon/.cls，包一層
@@ -2131,7 +2242,7 @@ func _enemy_step() -> void:
 				_ai_state = "fire"
 				if tgt != null and not bool(acting.get("fired", false)):
 					var d: float = Vector2(tgt["wx"] - acting["wx"], tgt["wy"] - acting["wy"]).length()
-					if d <= float(acting["weapon"].get("range", 200)) and _los_clear(_live_px(acting), _live_px(tgt)):
+					if d <= float(acting["weapon"].get("range", 200)) and _shot_clear_units(acting, tgt):
 						_fire(acting, tgt)
 						_enemy_t = 1.0        # 等開火動作演完再收尾
 						return
@@ -2403,6 +2514,105 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 				best = t_enter
 	return best
 
+# 彈道是否通暢（GDD/01 §3、GDD/14 §2）。
+# ⚠ 為什麼不能沿用 _los_clear：那支只掃建築牆，於是沙包、樹、護欄、拒馬、磚牆殘段、
+#   卡車殘骸、坦克全都不擋子彈——使用者 2026-07-26 實測「子彈可以穿過這種物體」就是這條。
+# ya/yb＝射出點與命中點的離地高度（公尺）。障礙比該處的彈道低就打得過去：
+#   蹲在沙包（1.33m）後面被打不到，站起來上半身就露出來——這才合理，
+#   而不是「一律擋」（那沙包會變成無敵護盾）或「一律不擋」（現況）。
+# 註：高度一律當成「相對各自腳下地面」，不算地形起伏；戰場坡度緩，這個近似夠用。
+func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
+		ign_a = null, ign_b = null) -> bool:
+	for bd in _buildings:
+		for w in bd.walls:
+			if _seg_hit(a, b, w["a"], w["b"]):
+				return false          # 牆從地板通到屋頂，任何姿勢都擋
+	var d1: Vector2 = b - a
+	var l2: float = d1.length_squared()
+	if l2 < 0.0001:
+		return true
+	var seg_len: float = sqrt(l2)
+	for bk in _blockers:
+		var t: float
+		if bk["t"] == "cir":
+			# 求「射線進入圓」的那個交點，不是最近點（_wall_ray 那條踩過的坑）
+			var c: Vector2 = bk["c"]
+			var rr: float = float(bk["r"])
+			var tc: float = (c - a).dot(d1) / l2
+			var perp: float = (a + d1 * tc).distance_to(c)
+			if perp >= rr:
+				continue
+			t = tc - sqrt(rr * rr - perp * perp) / seg_len
+		else:
+			if a.distance_squared_to(bk["m"]) > pow(float(bk["hl"]) + seg_len + float(bk["r"]), 2.0):
+				continue              # 粗剔除：整條彈道都到不了這段柵欄
+			t = _seg_param(a, b, bk["a"], bk["b"])
+		if t <= 0.001 or t >= 1.0:
+			continue                  # 貼著障礙開火（t≈0）不算被自己的掩體擋住
+		if lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
+			return false
+	# 載具：3m 級的鋼鐵，2.4m 高，任何姿勢的彈道都擋。射手與目標本身要排除。
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	for v in units:
+		if v == ign_a or v == ign_b or not v["alive"] or not Unit.is_vehicle_cls(v["cls"]):
+			continue
+		if not is_instance_valid(v["node"]):
+			continue
+		var vp := Vector2(v["node"].global_position.x / WORLD_SCALE + mw * 0.5,
+				v["node"].global_position.z / WORLD_SCALE + mh * 0.5)
+		var rv: float = VEHICLE_R / WORLD_SCALE
+		var tcv: float = (vp - a).dot(d1) / l2
+		var pv: float = (a + d1 * tcv).distance_to(vp)
+		if pv >= rv:
+			continue
+		var tv: float = tcv - sqrt(rv * rv - pv * pv) / seg_len
+		if tv > 0.001 and tv < 1.0:
+			return false
+	return true
+
+# 兩線段的交點在第一條上的比例（0~1），沒交點回 -1
+func _seg_param(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> float:
+	var d1: Vector2 = p2 - p1
+	var d2: Vector2 = p4 - p3
+	var den: float = d1.cross(d2)
+	if absf(den) < 0.00001:
+		return -1.0
+	var t: float = (p3 - p1).cross(d2) / den
+	var u: float = (p3 - p1).cross(d1) / den
+	return t if (u > 0.0 and u < 1.0) else -1.0
+
+# 兩個單位之間「看不看得到」：同一份障礙，但兩端都用眼睛高度
+func _sight_clear(observer, target) -> bool:
+	var ya: float = 2.20 if Unit.is_vehicle_cls(observer["cls"]) else 1.52
+	var yb: float = 1.60 if Unit.is_vehicle_cls(target["cls"]) else 1.20
+	if not Unit.is_vehicle_cls(observer["cls"]) and is_instance_valid(observer["node"]):
+		ya = observer["node"].eye_height()
+	if not Unit.is_vehicle_cls(target["cls"]) and is_instance_valid(target["node"]):
+		# 被看的一方用「頭頂稍低」的高度：只要頭露出來就會被發現
+		yb = target["node"].eye_height() * 0.95
+	return _shot_clear(_live_px(observer), _live_px(target), ya, yb, observer, target)
+
+# 兩個單位之間的彈道是否通暢：高度自動用雙方姿勢（槍口→被瞄的部位）
+# part＝瞄的部位：瞄頭的彈道比瞄軀幹高，所以「站在沙包後面的人軀幹打不到、頭打得到」，
+# 這正是掩體該有的樣子——不是無敵護盾，也不是裝飾。
+func _shot_clear_units(shooter, target, part := "body") -> bool:
+	# 載具用砲塔／車體高度，不吃姿勢（坦克不會蹲）
+	var ya: float = 1.90 if Unit.is_vehicle_cls(shooter["cls"]) else 1.32
+	var yb: float = 1.40 if Unit.is_vehicle_cls(target["cls"]) else 1.15
+	if not Unit.is_vehicle_cls(shooter["cls"]) and is_instance_valid(shooter["node"]):
+		ya = shooter["node"].muzzle_height()
+	if not Unit.is_vehicle_cls(target["cls"]) and is_instance_valid(target["node"]):
+		yb = target["node"].eye_height() if part == "head" else target["node"].torso_height()
+	return _shot_clear(_live_px(shooter), _live_px(target), ya, yb, shooter, target)
+
+# 這個目標有沒有任何部位打得到（開火入口用）
+func _any_part_clear(shooter, target) -> bool:
+	for p in _aim_parts(shooter, target):
+		if _shot_clear_units(shooter, target, p["part"]):
+			return true
+	return false
+
 func _seg_hit(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> bool:
 	var d1: Vector2 = p2 - p1
 	var d2: Vector2 = p4 - p3
@@ -2614,7 +2824,7 @@ func _intercept_tick(delta: float) -> void:
 			if m["side"] == u["side"]:
 				continue
 			var d: float = up.distance_to(pair[1])
-			if d <= rng and d < bd and _los_clear(up, pair[1]):
+			if d <= rng and d < bd and _shot_clear_units(u, m):
 				bd = d
 				best = m
 		if best == null:
@@ -2779,7 +2989,10 @@ func _build_ground() -> void:
 	var props = PROPS.new()
 	world.add_child(props)
 	props.build(map_data, WORLD_SCALE, terrain)
-	_blockers = props.blockers.duplicate()
+	# ⚠ 2026-07-26：這裡先前只吃 props.blockers，沙包牆（Fortify 產的）從來沒進碰撞表，
+	#   所以上一批宣稱「所有物體都是實體」時，沙包其實還是可以直接走過去（使用者實測抓到）。
+	#   工事的障礙一定要一起併進來。
+	_blockers = props.blockers + fort.blockers
 	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感），樹幹本身也是實體
 	_scatter_trees(mw, mh)
 	# 草最後鋪：禁草區要用建築的實際佔地，樹腳的草也要等樹放好才知道位置
@@ -3044,8 +3257,9 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		if not outside:
 			_covers.append({"wx": px, "wy": py, "r": 34.0 * sc, "val": 0.30, "type": "bush"})
 			_tree_feet.append(tp)
+			# h：樹幹一路擋到上面（不管站著蹲著趴著，彈道都被擋）
 			_blockers.append({"t": "cir", "c": tp,
-					"r": (0.85 if clus else 0.40) * sc / WORLD_SCALE})
+					"r": (0.85 if clus else 0.40) * sc / WORLD_SCALE, "h": 4.2 * sc})
 		placed += 1
 	for mesh_key in xf_by_mesh.keys():
 		var list: Array = xf_by_mesh[mesh_key]

@@ -758,6 +758,15 @@ func move_dir(dir: Vector3, delta: float) -> void:
 func eye_height() -> float:
 	return lerpf(lerpf(1.52, 1.05, clampf(_crouch, 0.0, 1.0)), 0.95, clampf(_prone, 0.0, 1.0))
 
+# 槍口高度（公尺）：彈道從這裡射出。跟眼高不同——出槍的手比眼睛低，
+# 趴姿更明顯（貼地出槍 0.32m），這個差距就是「趴在沙包後面根本射不出去」的來源。
+func muzzle_height() -> float:
+	return lerpf(lerpf(1.32, 0.92, clampf(_crouch, 0.0, 1.0)), 0.32, clampf(_prone, 0.0, 1.0))
+
+# 軀幹中心高度（公尺）：被瞄的點。彈道要打到這個高度才算命中得到。
+func torso_height() -> float:
+	return lerpf(lerpf(1.15, 0.78, clampf(_crouch, 0.0, 1.0)), 0.28, clampf(_prone, 0.0, 1.0))
+
 func move_to(p: Vector3) -> void:
 	if _dead: return
 	_shoot_target = null

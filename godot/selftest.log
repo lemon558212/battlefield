@@ -1,0 +1,159 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+ERROR: Failed loading resource: res://assets/art/title-key-visual.jpg.
+   at: _load (core/io/resource_loader.cpp:317)
+   GDScript backtrace (most recent call first):
+       [0] _load_tex (res://scripts/UI.gd:55)
+       [1] show_menu (res://scripts/UI.gd:239)
+       [2] _open_menu (res://scripts/Main.gd:1383)
+       [3] _ready (res://scripts/Main.gd:128)
+[selftest] saved res://st_menu.png
+[selftest] saved res://st_brief.png
+[selftest] saved res://st_dialogue1.png
+[selftest] saved res://st_dialogue2.png
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_ground (res://scripts/Main.gd:2918)
+       [1] _open_deploy (res://scripts/Main.gd:1421)
+       [2] _selftest (res://scripts/Main.gd:279)
+       [3] _snap (res://scripts/Main.gd:257)
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] finish (res://scripts/Fortify.gd:37)
+       [1] _build_ground (res://scripts/Main.gd:2988)
+       [2] _open_deploy (res://scripts/Main.gd:1421)
+       [3] _selftest (res://scripts/Main.gd:279)
+       [4] _snap (res://scripts/Main.gd:257)
+[rig] mg 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] assault 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] engineer 重定向骨對數=20
+[selftest] saved res://st_deploy.png
+[selftest] saved res://st_battle.png
+[facechk] move=(200,0) 正面與移動夾角=0.0度 OK
+[facechk] move=(-200,0) 正面與移動夾角=0.0度 OK
+[facechk] move=(0,200) 正面與移動夾角=0.1度 OK
+[facechk] move=(0,-200) 正面與移動夾角=0.0度 OK
+[movechk] 合成點擊選取 selected=OK
+[movechk] 點兵後進入第三人稱 OK
+[movechk] 第三人稱前進位移=2.18m OK
+[apchk] 下令扣 CP：本回合上限=6 現在=5 OK
+[apchk] 進入行動模式 acting=有 AP=69/100 OK
+[selftest] saved res://ap_mode.png
+[apchk] AP 上限內移動：可走 10.3m 實走 8.8m 剩餘 AP=0 FAIL
+[apchk] 每次行動只能開火一次 fired=true OK
+[apchk] 重複下令 AP 上限 100→70（應為 0.7 倍） OK
+[apchk] 結束行動 acting=無 OK
+[coverchk] 沙包正面遮蔽=0.55 OK
+[coverchk] 繞背後遮蔽=0.00 OK
+[coverchk] 空曠地遮蔽=0.00 OK
+[coverchk] 掩體旁自動蹲姿 crouch=1.00 OK
+[selftest] saved res://cover_crouch.png
+[coverchk] 移動中站起 crouch=0.00 OK
+[selftest] saved res://close_stand.png
+[selftest] saved res://close_crouch.png
+[pronechk] 兵種=sniper 掩體= want_prone=true OK
+[pronechk] 趴姿混合值=1.00 OK
+[selftest] saved res://close_prone.png
+[pronechk] 解除後起身=0.00 OK
+[selftest] saved res://close_alert.png
+[alertchk] 敵人移動遭迎擊 次數=4 OK
+[alertchk] 迎擊有扣血 120→93 OK
+[alertchk] 狙擊手(sniper,alert=false)不參與警戒 OK
+[alertchk] 建築擋視線 穿過牆被擋=true 從旁邊繞過看得到=true OK
+[aiplanchk] rifleman hp=100% → 推進到射程 0.6 倍 OK
+[aiplanchk] rifleman hp=20% → 殘血撤退 OK
+[aiplanchk] sniper hp=100% → 狙擊手找血最少的 OK
+[aiplanchk] mg hp=100% → 機槍兵佔掩體警戒 OK
+[aiplanchk] at hp=100% → 火箭兵無坦克可打 OK
+[aiplanchk] 狙擊手指名血最少者 是 OK
+[tankchk] 步槍打坦克=1（應為 1 刮漆） OK
+[tankchk] 火箭打坦克=150 步槍打步兵=20 OK
+[tankchk] 火箭打步兵=106（有 ×0.6 濺傷減半） OK
+[tankchk] 坦克下令成本=2 CP OK
+[tankchk] 坦克警戒用 lmg(atk 14) 而非主砲(atk 220) OK
+[selftest] saved res://tank_ingame.png
+[tankchk] 坦克在遊戲內生成並移動 1.8m OK
+[partchk] 頭部命中 95%→52%（應為 0.55 倍） OK
+[partchk] 頭部傷害 83→165（應為 2 倍） OK
+[partchk] 散熱器傷害 150→450（應為 3 倍） OK
+[partchk] 正面可選部位=1 背面=2 OK
+[partchk] 點敵人跳出射擊面板 OK
+[selftest] saved res://fire_panel.png
+[partchk] 點部位後真的開火 fired=true 面板已關=true OK
+[terrainchk] 壕溝內 -1.67m vs 溝外 0.09m（應低於 1m 以上） OK
+[terrainchk] 壕溝登記為掩體 OK
+[terrainchk] 單位在溝內高度 -1.67m（應貼著溝底 -1.67m） OK
+[terrainchk] 溝內自動取得掩體 cover=trench OK
+[selftest] saved res://terrain_trench.png
+[terrainchk] 這張圖(tutorial)沒有 hills 資料，只有基礎起伏
+[fortdiag] 沙包中心 px=(702,476) w=44 h=12
+[selftest] saved res://fort_sandbag.png
+[selftest] saved res://fort_trench.png
+[selftest] saved res://terrain_overview.png
+[buildingchk] 牆段=13 門=1 窗=3 樓層=2 OK
+[buildingchk] 牆擋視線 穿越=true 從旁邊過=true OK
+[buildingchk] 牆推開人 0.42m、門口不推 0.00m OK
+[solidchk] 對著牆走 4 秒：進到室內=false OK(牆是實體)
+[selftest] saved res://solid_wall.png
+[solidchk] 對著門走 4 秒：進到室內=true OK(門是唯一入口)
+[buildingchk] 進屋後屋頂淡出 alpha=0.00 OK
+[selftest] saved res://bld_ingame.png
+[selftest] saved res://bld_ingame_out.png
+[solidchk] 對著障礙走 5 秒：走了 4.54m、停在前方 0.62m、越過=false、剩餘AP=258 OK(擋住了)
+[selftest] saved res://solid_prop.png
+[solidchk] 對著坦克走 5 秒：空地=true 停在車體外 2.02m、剩餘AP=273 OK(載具是實體)
+[selftest] saved res://solid_tank.png
+[sandchk] 對著沙包走 5 秒：走了 4.28m、停在沙包前 0.72m、越過=false OK(沙包是實體)
+[selftest] saved res://solid_sandbag.png
+[sandchk] 沙包高 1.32m 彈道：站軀幹=false(應false) 站頭部=true(應true) 蹲=false(應false) 同側=true(應true) OK(擋子彈且瞄頭仍打得到)
+[navchk] 穿過障礙的直線可行=false（應為 false） OK
+[navchk] 繞路後換了方向=true、新路徑可行=true OK(會繞開)
+[camchk] 貼牆時鏡頭離頭 3.15m、肩側=-1.00（-1=左肩） OK(沒被牆擠到臉上)
+[selftest] saved res://cam_wall.png
+[crawlchk] 測試地點在室內=false OK(在戶外空地)
+[selftest] saved res://crawl_1.png
+[selftest] saved res://crawl_side1.png
+[selftest] saved res://crawl_2.png
+[selftest] saved res://crawl_side2.png
+[selftest] saved res://crawl_3.png
+[selftest] saved res://crawl_side3.png
+[crawlchk] 趴著走 2.1 秒：位移 1.38m、動畫=idle、髖高 0.26m OK(是匍匐不是趴著跑)
+[crawlchk] 膝蓋外張量 0.87/0.49/0.86 m（差 0.38） OK(雙腿在交替蹬地)
+[crawlchk] 膝蓋相對髖部前後 -0.41/-0.14/0.38 m（正=在前方蹬地） OK(膝蓋往前收)
+[crawlchk] 左手前伸距離 0.74/0.54/0.44 m（擺幅 0.30） OK(手在往前撐地拉行)
+[crawlchk] 左膝彎曲角 6/79/160 度（0=伸直，最大 160） OK(膝蓋真的有彎)
+[crawlchk] 每段位移 min=0.047 max=0.193 落差=4.1倍 OK(一蹬一停，不是等速滑行)
+[crawlchk] 連續走 3.5 秒後 趴姿值=0.00、髖高 0.45m（趴著是 0.26） OK(自動起身了)
+[selftest] saved res://crawl_standup.png
+[keychk] 方向鍵↑ 走 1 秒位移 3.01m OK
+[keychk] Q 轉視角 57 度 OK
+[selftest] saved res://key_prone.png
+[keychk] C 蹲=1.00 → Z 趴=1.00 → Space 站起(蹲+趴)=0.00 OK(三個姿勢鍵都有效)
+[selftest] saved res://ai_turn.png
+[aichk] 敵方 CP 起始=6 剩餘=2 OK
+[aichk] 敵方單位真的移動 4 個 OK
+[aichk] 敵方階段結束回到指令模式 st=5 耗時=13.6s OK
+[aichk] 新回合 CP=7 回合數=2 OK
+[selftest] saved res://close_hit.png
+[anichk] 受擊動作 state=hit OK
+[selftest] saved res://close_death.png
+[anichk] 陣亡倒地 頭高 0.34→0.09 OK
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[selftest] saved res://perf16.png
+[perf] units=16 平均幀時=5.9ms (170 FPS) OK
+[selftest] DONE units=16

@@ -86,8 +86,11 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 	# 「任何的物體都是不能穿越的」）。用線段涵蓋整道牆。
 	var half_len: float = length_m * 0.5 / _ws
 	var dpx := Vector2(dir.x, dir.y) * half_len
+	# h＝實際堆到的高度（六層 × 0.22 × 0.92 + 半個袋）：彈道要靠它判斷
+	# 「蹲在沙包後＝擋住、站起來＝上半身露出」，見 Props._blk_seg 的說明。
 	blockers.append({"t": "seg", "a": Vector2(cx, cy) - dpx, "b": Vector2(cx, cy) + dpx,
-			"r": 0.30 / _ws, "m": Vector2(cx, cy), "hl": half_len})
+			"r": 0.30 / _ws, "h": float(rows) * bag_h * 0.92 + bag_h * 0.5, "k": "sandbag",
+			"m": Vector2(cx, cy), "hl": half_len})
 	# 底部泥土堆：物件與地面的過渡，沒有這層就是「硬插進地面」
 	for k2 in 10:
 		var t2: float = rng.randf_range(-length_m * 0.55, length_m * 0.55)
