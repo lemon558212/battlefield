@@ -2,52 +2,18 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>曙光之戰 — 真實軍備戰術遊戲</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="css/style.css?v=20260721p">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>曙光之戰</title>
+<!-- 2026-07-26 根網址改指 Godot 新版。
+     使用者的手機書籤一直是根網址，而根網址掛的是 2026-07 凍結的舊 HTML5 版——
+     連續三輪「全部都沒有變」的回報，就是因為他看的一直是舊版。
+     舊版保留在 legacy.html 當對照組。 -->
+<meta http-equiv="refresh" content="0; url=web/index.html">
+<script>location.replace("web/index.html");</script>
 </head>
-<body>
-<div id="rotateHint">🔄 請將手機橫置<div class="sub">橫向操作畫面更大、更好瞄準</div></div>
-<div id="wrap">
-  <div id="stage">
-    <canvas id="game" width="960" height="600"></canvas>
-    <div id="menu"></div>
-    <div id="aim"></div>
-  </div>
-  <div id="side"></div>
-</div>
-<!-- 載入順序有依賴，勿調換：資料 → 工具 → 規則 → AI → UI → 主體 → 進入點 -->
-<script>window.BUILD="v=20260721p";</script>
-<script src="js/audio.js?v=20260721p"></script>
-<script src="js/data-nations.js?v=20260721p"></script>
-<script src="js/data-maps.js?v=20260721p"></script>
-<script src="js/data-story.js?v=20260721p"></script>
-<script src="js/data-characters.js?v=20260721p"></script>
-<script src="js/units.js?v=20260721p"></script>
-<script src="js/combat.js?v=20260721p"></script>
-<script src="js/fog.js?v=20260721p"></script>
-<script src="js/vendor/three.min.js"></script>
-<script src="js/vendor/GLTFLoader.js"></script>
-<script src="js/vendor/SkeletonUtils.js"></script>
-<!-- 後處理鏈（bloom，r147 examples/js UMD 版；§C③ 2026-07-21） -->
-<script src="js/vendor/CopyShader.js"></script>
-<script src="js/vendor/LuminosityHighPassShader.js"></script>
-<script src="js/vendor/EffectComposer.js"></script>
-<script src="js/vendor/RenderPass.js"></script>
-<script src="js/vendor/ShaderPass.js"></script>
-<script src="js/vendor/MaskPass.js"></script>
-<script src="js/vendor/UnrealBloomPass.js"></script>
-<script src="js/vendor/GammaCorrectionShader.js"></script>
-<script src="js/data-model-assets.js?v=20260721p"></script>
-<script src="js/sprites.js?v=20260721p"></script>
-<script src="js/camera3d.js?v=20260721p"></script>
-<script src="js/render3d.js?v=20260721p"></script>
-<script src="js/engine3d.js?v=20260721p"></script>
-<script src="js/net.js?v=20260721p"></script>
-<script src="js/ai.js?v=20260721p"></script>
-<script src="js/ui.js?v=20260721p"></script>
-<script src="js/game.js?v=20260721p"></script>
-<script src="js/main.js?v=20260721p"></script>
+<body style="background:#0b0e12;color:#dde;font-family:sans-serif;text-align:center;padding-top:20vh">
+正在開啟新版（Godot）…<br>
+<a href="web/index.html" style="color:#ffc14d">沒有自動跳轉請點這裡</a>／
+<a href="legacy.html" style="color:#8ab">舊版（HTML5 對照組）</a>
 </body>
 </html>
