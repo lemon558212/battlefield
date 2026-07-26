@@ -754,25 +754,29 @@ func _selftest() -> void:
 				solu["node"].stop()
 				_end_action()
 				cp = 6
-				var sx: float = seg["m"].x
-				var sy: float = seg["m"].y
-				var start_y: float = sy + 5.0 / WORLD_SCALE
-				solu["node"].global_position = _to3d(sx, start_y)
-				solu["wx"] = sx
-				solu["wy"] = start_y
+				# ⚠ 障礙的角度是任意的（磚牆殘段隨機轉向），不可以寫死「從 +y 往 -y 走」——
+				#   那樣會從旁邊繞過去而誤判成「穿過去了」。要沿牆的法線走，用投影判斷。
+				var sn: Vector2 = (seg["b"] - seg["a"]).orthogonal().normalized()
+				var smid: Vector2 = seg["m"]
+				var sp0: Vector2 = smid + sn * (5.0 / WORLD_SCALE)
+				solu["node"].global_position = _to3d(sp0.x, sp0.y)
+				solu["wx"] = sp0.x
+				solu["wy"] = sp0.y
 				_begin_action(solu)
 				# ★AP 一定要補在 _begin_action 之後：它會依下令次數重算 AP（×0.7^N），
 				#   補在前面會被蓋掉，人走到一半 AP 用盡停下來，看起來就像「被護欄擋住」。
 				#   實拍到畫面上寫著 AP 0/24 才抓到這個假通過（2026-07-26）。
 				solu["ap"] = 300.0
 				solu["ap_max"] = 300.0
-				var from_y: float = solu["wy"]
-				cam.tps_yaw = 180.0                  # 面向 -Z＝往障礙走
+				# 朝 -法線方向走（px 的 x/y 對應世界的 x/z）
+				cam.tps_yaw = rad_to_deg(atan2(-sn.x, -sn.y))
 				await get_tree().create_timer(0.5).timeout
 				await _hold_key(KEY_W, 5.0)
-				var crossed: bool = solu["wy"] < sy
-				var gap: float = (solu["wy"] - sy) * WORLD_SCALE
-				var walked: float = (from_y - solu["wy"]) * WORLD_SCALE
+				var snow := Vector2(solu["wx"], solu["wy"])
+				var proj: float = (snow - smid).dot(sn) * WORLD_SCALE
+				var crossed: bool = proj < 0.0
+				var gap: float = proj
+				var walked: float = sp0.distance_to(snow) * WORLD_SCALE
 				var ap_left: float = float(solu["ap"])
 				print("[solidchk] 對著障礙走 5 秒：走了 %.2fm、停在前方 %.2fm、越過=%s、剩餘AP=%.0f %s"
 						% [walked, gap, crossed, ap_left,
@@ -914,6 +918,12 @@ func _selftest() -> void:
 					in_bld = true
 			print("[crawlchk] 測試地點在室內=%s %s" % [in_bld,
 					"OK(在戶外空地)" if not in_bld else "FAIL(選點又選進屋裡了)"])
+			# ⚠ 測試單位在戰場上走五秒多，會被敵方警戒射擊打死，然後 queue_free
+			#   ——下一行存取 _rig 就炸「previously freed」。驗姿勢的測試不該被戰鬥干擾。
+			var hp_save: int = int(cru["hp"])
+			var hpmax_save: int = int(cru["maxhp"])
+			cru["hp"] = 999999
+			cru["maxhp"] = 999999
 			cru["node"].want_prone = true
 			_begin_action(cru)
 			cru["ap"] = 300.0
@@ -968,6 +978,8 @@ func _selftest() -> void:
 					"OK(自動起身了)" if (up_prone < 0.1 and up_hip > 0.35)
 					else "FAIL(一直趴著爬，跨越戰場會很痛苦)"])
 			await _snap("res://crawl_standup.png")
+			cru["hp"] = hp_save
+			cru["maxhp"] = hpmax_save
 			cru["node"].want_prone = false
 			_end_action()
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
@@ -997,17 +1009,19 @@ func _selftest() -> void:
 		print("[aichk] 新回合 CP=%d 回合數=%d %s" % [cp, turn, "OK" if cp == _turn_cp() and turn == 2 else "FAIL"])
 		# I) 受擊與陣亡：換骨架後這兩支動作也全部改走重定向，不驗等於沒換完
 		#    （判斷用頭部高度：站著約 1.5m，倒地應明顯下降）
-		var head_up: float = u3._rig.bone_pos("Head").y - u3.global_position.y
-		u3.take_hit()
-		await get_tree().create_timer(0.2).timeout    # 受擊動作很短，太晚量會量到已回 idle
-		await _snap("res://close_hit.png")
-		print("[anichk] 受擊動作 state=%s %s" % [u3._state, "OK" if u3._state == "hit" else "FAIL"])
-		u3.die()
-		await get_tree().create_timer(1.8).timeout    # 等倒地動作播完，不然量到半途
-		var head_dn: float = u3._rig.bone_pos("Head").y - u3.global_position.y
-		await _snap("res://close_death.png")
-		print("[anichk] 陣亡倒地 頭高 %.2f→%.2f %s" % [
-			head_up, head_dn, "OK" if head_dn < head_up * 0.6 else "FAIL(沒倒下)"])
+		# ⚠ 前面剛跑完敵方階段，原本挑的單位可能已經陣亡並 queue_free，
+		#   再讀 _rig 會炸「previously freed」。失效就換一個還活著的頂替。
+		if not is_instance_valid(u3) or u3._dead:
+			u3 = null
+			for uu in units:
+				if uu["alive"] and uu["side"] == player_side and is_instance_valid(uu["node"]) 						and not Unit.is_vehicle_cls(uu["cls"]):
+					u3 = uu["node"]
+					break
+		if u3 == null:
+			print("[anichk] SKIP 我方單位在敵方階段全滅，沒有對象可驗")
+			await _snap("res://perf16_pre.png")
+		else:
+			await _anichk(u3)
 		# 效能：GDD/14 §4 的預算是「16 單位 ≥60FPS」，所以要補到 16 個再量，
 		# 只量現場那幾個等於沒驗到預算。
 		var zc := _my_zone()
@@ -2307,6 +2321,20 @@ func _avoid_goal(from_p: Vector3, goal: Vector3, radius: float) -> Vector3:
 			return way
 	return goal
 
+# 受擊與陣亡動作驗收（從 _selftest 抽出來：測試對象可能中途陣亡要換人）
+func _anichk(u3) -> void:
+	var head_up: float = u3._rig.bone_pos("Head").y - u3.global_position.y
+	u3.take_hit()
+	await get_tree().create_timer(0.2).timeout    # 受擊動作很短，太晚量會量到已回 idle
+	await _snap("res://close_hit.png")
+	print("[anichk] 受擊動作 state=%s %s" % [u3._state, "OK" if u3._state == "hit" else "FAIL"])
+	u3.die()
+	await get_tree().create_timer(1.8).timeout    # 等倒地動作播完，不然量到半途
+	var head_dn: float = u3._rig.bone_pos("Head").y - u3.global_position.y
+	await _snap("res://close_death.png")
+	print("[anichk] 陣亡倒地 頭高 %.2f→%.2f %s" % [
+		head_up, head_dn, "OK" if head_dn < head_up * 0.6 else "FAIL(沒倒下)"])
+
 # 找一塊空地（驗收台用）：離建築與所有實體障礙至少 clear_m 公尺。
 # ⚠ 一定要分級放寬：門檻開太高會整張圖找不到，然後退回「地圖中央」——
 #   而地圖中央往往就是一棟房子裡（2026-07-26 實測 FAIL 兩項）。
@@ -2660,42 +2688,119 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			avail.append(t)
 	if avail.is_empty():
 		return
+	var gwp: float = map_data.get("w", 960)
+	var ghp: float = map_data.get("h", 600)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260724
-	for i in 26:
-		var t := (load(avail[i % avail.size()]) as PackedScene).instantiate()
-		world.add_child(t)
-		var dy: float = _fit_prop(t, rng.randf_range(3.0, 5.5))
-		# 邊緣多、中央少（不擋戰場）
-		var gwp: float = map_data.get("w", 960)
-		var ghp: float = map_data.get("h", 600)
-		var tx := 0.0
-		var tz := 0.0
-		# 樹幹是實體，長在門口就把整棟房子廢掉了：撞到建築就重抽位置
-		for _try in 8:
-			var ang := rng.randf() * TAU
-			var r: float = rng.randf_range(0.55, 1.05)
-			tx = cos(ang) * mw * r
-			tz = sin(ang) * mh * r
-			var tp := Vector2(tx / WORLD_SCALE + gwp * 0.5, tz / WORLD_SCALE + ghp * 0.5)
-			var hit := false
-			for bd2 in _buildings:
-				if bd2.rect.grow(3.0 / WORLD_SCALE).has_point(tp):
-					hit = true
-					break
-			if not hit:
+	# ⚠ 一棵樹一個節點＝一次 draw call：26 棵就已經是 26 次，要鋪成森林只能用 MultiMesh。
+	#   先量一棵的體型（沿用 _fit_prop 的邏輯），再把同一份 mesh 實例化幾百次。
+	var xf_by_mesh := {}          # mesh → [Transform3D...]（一個 glb 可能有好幾個 surface 節點）
+	var proto := {}
+	for path in avail:
+		var inst := (load(path) as PackedScene).instantiate()
+		add_child(inst)
+		var h: float = 4.2
+		var dy: float = _fit_prop(inst, h)
+		var parts: Array = []
+		for mi in inst.find_children("*", "MeshInstance3D", true, false):
+			var m3 := mi as MeshInstance3D
+			if m3.mesh == null:
+				continue
+			parts.append([m3.mesh, inst.global_transform.affine_inverse() * m3.global_transform])
+		proto[path] = {"parts": parts, "dy": dy, "h": h}
+		remove_child(inst)
+		inst.queue_free()
+	# 疏密節奏（GDD/14 §0a）：邊緣成林、中央疏開（戰場中央要留得下打法），
+	# 再疊一層低頻雜訊做出林塊與空地，不要平均散佈那種假森林。
+	# 範圍要含「戰場外的地形」：Terrain 在戰場外還鋪了 90m（否則遠鏡頭看到地圖是塊浮空積木），
+	# 那片先前完全光禿——實拍全景時戰場只佔畫面中央一小塊，四周是空綠地。
+	var out_px: float = 88.0 / WORLD_SCALE
+	var want: int = int(clampf((gwp + out_px * 2.0) * (ghp + out_px * 2.0) / 26000.0, 120.0, 900.0))
+	var placed := 0
+	var guard := 0
+	while placed < want and guard < want * 30:
+		guard += 1
+		var px: float = rng.randf_range(-out_px, gwp + out_px)
+		var py: float = rng.randf_range(-out_px, ghp + out_px)
+		var outside: bool = px < 0.0 or py < 0.0 or px > gwp or py > ghp
+		# 戰場內：邊緣多、中央少（中央要留得下打法）；戰場外：成片森林把空曠遮掉。
+		# ⚠ 林塊要用 hash 值雜訊，不可用正弦疊加——那會排成規則格狀，遠鏡頭一眼看破像果園
+		#   （地形雜訊那次的同一個教訓）。
+		var clump: float = terrain._vnoise(px * 0.0035, py * 0.0035) if terrain != null else 0.5
+		clump = clampf((clump - 0.34) * 2.7, 0.0, 1.0)      # 拉開對比：有密林也要有空地
+		var chance: float
+		if outside:
+			chance = 0.12 + 0.88 * clump
+		else:
+			var nx: float = (px / gwp - 0.5) * 2.0
+			var ny: float = (py / ghp - 0.5) * 2.0
+			var edge: float = clampf((sqrt(nx * nx + ny * ny) - 0.30) / 0.85, 0.0, 1.0)
+			chance = edge * (0.15 + 0.85 * clump)
+		if rng.randf() > chance:
+			continue
+		var tp := Vector2(px, py)
+		var blocked := false
+		if outside:
+			var path3: String = avail[rng.randi() % avail.size()]
+			var pr3: Dictionary = proto[path3]
+			var sc3: float = rng.randf_range(0.65, 1.9)
+			var ty3: float = terrain.height_at(px, py) if terrain != null else 0.0
+			var base3 := Transform3D(
+					Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc3),
+					Vector3((px - gwp * 0.5) * WORLD_SCALE,
+							ty3 + float(pr3["dy"]) * sc3, (py - ghp * 0.5) * WORLD_SCALE))
+			for part3 in pr3["parts"]:
+				var k3 = part3[0]
+				if not xf_by_mesh.has(k3):
+					xf_by_mesh[k3] = []
+				xf_by_mesh[k3].append(base3 * (part3[1] as Transform3D))
+			placed += 1
+			continue
+		for bd2 in _buildings:
+			if bd2.rect.grow(5.0 / WORLD_SCALE).has_point(tp):
+				blocked = true
 				break
-		var ty := 0.0
-		if terrain != null:
-			ty = terrain.height_at(tx / WORLD_SCALE + gwp * 0.5, tz / WORLD_SCALE + ghp * 0.5)
-		t.position = Vector3(tx, ty + dy, tz)
-		t.rotation.y = rng.randf() * TAU
-		# 樹叢＝隱蔽（降低被發現距離），不擋子彈
-		var gw: float = map_data.get("w", 960)
-		var gh: float = map_data.get("h", 600)
-		var tpx := Vector2(t.position.x / WORLD_SCALE + gw * 0.5,
-				t.position.z / WORLD_SCALE + gh * 0.5)
-		_covers.append({"wx": tpx.x, "wy": tpx.y, "r": 40.0, "val": 0.30, "type": "bush"})
-		# 樹幹是實體（走得過樹葉、走不過樹幹）。單株用細幹，pinetrees 是一叢＝粗一點。
-		var trunk: float = 0.85 if avail[i % avail.size()].ends_with("pinetrees.glb") else 0.4
-		_blockers.append({"t": "cir", "c": tpx, "r": trunk / WORLD_SCALE})
+		if not blocked and terrain != null and terrain.in_trench(px, py):
+			blocked = true      # 壕溝裡不長樹
+		if not blocked:
+			for bk in _blockers:
+				var cq: Vector2 = bk["c"] if bk["t"] == "cir" 						else Geometry2D.get_closest_point_to_segment(tp, bk["a"], bk["b"])
+				if tp.distance_to(cq) < 2.2 / WORLD_SCALE:
+					blocked = true
+					break
+		if blocked:
+			continue
+		var path2: String = avail[rng.randi() % avail.size()]
+		var pr: Dictionary = proto[path2]
+		var sc: float = rng.randf_range(0.62, 1.6)
+		var ty: float = terrain.height_at(px, py) if terrain != null else 0.0
+		var base := Transform3D(
+				Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc),
+				Vector3((px - gwp * 0.5) * WORLD_SCALE,
+						ty + float(pr["dy"]) * sc, (py - ghp * 0.5) * WORLD_SCALE))
+		for part in pr["parts"]:
+			var key = part[0]
+			if not xf_by_mesh.has(key):
+				xf_by_mesh[key] = []
+			xf_by_mesh[key].append(base * (part[1] as Transform3D))
+		# 樹叢比單株粗；同時登記掩體（樹叢＝隱蔽）
+		var clus: bool = path2.ends_with("pinetrees.glb")
+		# ⚠ 只有戰場內的樹登記掩體與碰撞：背景森林幾百棵，全登記的話
+		#   _resolve_solids 每幀要多跑幾百次，碰撞成本會被背景吃掉。
+		if not outside:
+			_covers.append({"wx": px, "wy": py, "r": 34.0 * sc, "val": 0.30, "type": "bush"})
+			_blockers.append({"t": "cir", "c": tp,
+					"r": (0.85 if clus else 0.40) * sc / WORLD_SCALE})
+		placed += 1
+	for mesh_key in xf_by_mesh.keys():
+		var list: Array = xf_by_mesh[mesh_key]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = mesh_key
+		mm.instance_count = list.size()
+		for k in list.size():
+			mm.set_instance_transform(k, list[k])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Trees"
+		mmi.multimesh = mm
+		world.add_child(mmi)

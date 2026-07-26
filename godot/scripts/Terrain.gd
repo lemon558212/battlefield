@@ -263,7 +263,7 @@ func _scatter_field() -> Array:
 	var xf: Array = []
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260727
-	var step: float = 0.95 / ws
+	var step: float = 0.8 / ws
 	var px := step
 	while px < mw - step:
 		var py := step
@@ -377,10 +377,10 @@ func _tuft_mesh(scale_f: float) -> ArrayMesh:
 	#   地表 shader、地表頂點色之後，這是同一天第三次踩到。
 	var root := Color(0.16, 0.24, 0.09).srgb_to_linear()
 	var tipc := Color(0.40, 0.52, 0.22).srgb_to_linear()
-	for k in 9:
+	for k in 7:
 		var a: float = rng.randf() * TAU
 		var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.38) * scale_f
-		var h: float = rng.randf_range(0.20, 0.52) * scale_f
+		var h: float = rng.randf_range(0.24, 0.60) * scale_f
 		var w: float = rng.randf_range(0.020, 0.032) * scale_f
 		var lean_a: float = rng.randf() * TAU
 		var lean := Vector3(cos(lean_a), 0, sin(lean_a)) * rng.randf_range(0.10, 0.30) * h

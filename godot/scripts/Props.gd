@@ -47,6 +47,10 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"wood": _mat(Color(0.38, 0.28, 0.18), 0.92),
 		"metal": _mat(Color(0.28, 0.29, 0.30), 0.55),
 		"rock": _mat(Color(0.40, 0.39, 0.36), 0.95),
+		"rust": _mat(Color(0.31, 0.20, 0.13), 0.98),
+		"burn": _mat(Color(0.10, 0.09, 0.08), 1.0),
+		"brick": _mat(Color(0.42, 0.30, 0.24), 0.96),
+		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
 	}
 	_roads(map_data)
 	_blocks(map_data)
@@ -54,6 +58,10 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	_fences(map_data)
 	_poles(map_data)
 	_rubble(map_data)
+	_wrecks(map_data)
+	_walls_brick(map_data)
+	_cables(map_data)
+	_scorch(map_data)
 	_flush()
 
 # ---------- 各類物件 ----------
@@ -175,6 +183,117 @@ func _rubble(m: Dictionary) -> void:
 			var sz: float = rng.randf_range(0.18, 0.55)
 			_box("rock", Vector3(sz, sz * rng.randf_range(0.4, 0.8), sz * rng.randf_range(0.7, 1.3)),
 					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(px, py, sz * 0.25)))
+
+# ---------- 戰爭痕跡（GDD/14 §0a：這裡打過仗）----------
+# 車輛殘骸：燒毀的卡車骨架。放在道路旁與彈坑附近——車不會憑空停在草原中間。
+func _wrecks(m: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77120
+	var spots: Array = []
+	for r in m.get("roads", []):
+		var a := Vector2(float(r.get("x1", 0)), float(r.get("y1", 0)))
+		var b := Vector2(float(r.get("x2", 0)), float(r.get("y2", 0)))
+		var dir: Vector2 = (b - a).normalized()
+		var nrm := Vector2(-dir.y, dir.x)
+		var total: float = a.distance_to(b)
+		for t in [0.22, 0.63, 0.88]:
+			spots.append([a + dir * total * t + nrm * float(r.get("w", 40)) * rng.randf_range(0.7, 1.1),
+					atan2(dir.y, dir.x) + rng.randf_range(-0.5, 0.5)])
+	for sp in spots:
+		var p: Vector2 = sp[0]
+		if _off_limits(p):
+			continue
+		var ang: float = sp[1]
+		var b3 := Basis(Vector3.UP, -ang)
+		# 車身（燒穿的貨斗）＋駕駛室＋四個燒剩的輪子，全部低多邊形
+		_box("rust", Vector3(4.6, 0.55, 2.1), Transform3D(b3, _pos(p.x, p.y, 0.62)))
+		_box("rust", Vector3(1.7, 1.25, 2.0), Transform3D(b3, _pos(p.x, p.y, 1.35)
+				+ b3 * Vector3(1.35, 0, 0)))
+		for sx in [-1.5, 1.5]:
+			for sz in [-0.95, 0.95]:
+				_box("burn", Vector3(0.85, 0.85, 0.32),
+						Transform3D(b3, _pos(p.x, p.y, 0.42) + b3 * Vector3(sx, 0, sz)))
+		# 側板歪斜：完好的方盒看起來像停在那裡，不像被打壞的
+		_box("rust", Vector3(3.4, 1.0, 0.12),
+				Transform3D(b3 * Basis(Vector3.FORWARD, deg_to_rad(24.0)),
+				_pos(p.x, p.y, 1.15) + b3 * Vector3(-0.4, 0, 1.0)))
+		_blk_cir(p, 1.5)
+		_scorch_at(p, 3.4)
+
+# 磚牆殘段：城鎮感最便宜的來源，而且是天然掩體
+func _walls_brick(m: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4410
+	for sd in m.get("solids", []):
+		var cx: float = float(sd.get("x", 0)) + float(sd.get("w", 60)) * 0.5
+		var cy: float = float(sd.get("y", 0)) + float(sd.get("h", 60)) * 0.5
+		var rr: float = maxf(float(sd.get("w", 60)), float(sd.get("h", 60))) * 0.9 + 6.0 / _ws
+		for k in 2:
+			var a: float = rng.randf() * TAU
+			var p := Vector2(cx + cos(a) * rr, cy + sin(a) * rr)
+			var ang: float = a + PI * 0.5
+			var segn: int = rng.randi_range(3, 6)
+			var dirv := Vector2(cos(ang), sin(ang))
+			for i in segn:
+				var q: Vector2 = p + dirv * (float(i) - float(segn) * 0.5) * (1.1 / _ws)
+				# 高度往一端遞減＝被炸垮的樣子
+				var hh: float = 1.9 * (1.0 - float(i) / float(segn) * rng.randf_range(0.3, 0.8))
+				if hh < 0.25:
+					continue
+				_box("brick", Vector3(1.15, hh, 0.34),
+						Transform3D(Basis(Vector3.UP, -ang), _pos(q.x, q.y, hh * 0.5)))
+			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
+			_blk_seg(p - half, p + half, 0.20)
+
+# 電線：桿子有了卻沒有線，遠看就是一排孤零零的木頭。線是垂鏈，分段畫。
+func _cables(m: Dictionary) -> void:
+	for r in m.get("roads", []):
+		var a := Vector2(float(r.get("x1", 0)), float(r.get("y1", 0)))
+		var b := Vector2(float(r.get("x2", 0)), float(r.get("y2", 0)))
+		var dir: Vector2 = (b - a).normalized()
+		var nrm := Vector2(-dir.y, dir.x)
+		var total: float = a.distance_to(b)
+		var d := 120.0
+		var prev := Vector2.ZERO
+		var has_prev := false
+		while d < total - 60.0:
+			var p: Vector2 = a + dir * d + nrm * float(r.get("w", 40)) * 1.6
+			if _off_limits(p):
+				has_prev = false
+				d += 260.0
+				continue
+			if has_prev:
+				var span: float = prev.distance_to(p) * _ws
+				var steps := 6
+				for i in steps:
+					var t0: float = float(i) / float(steps)
+					var t1: float = float(i + 1) / float(steps)
+					var m0: Vector2 = prev.lerp(p, (t0 + t1) * 0.5)
+					# 垂鏈：中間下垂最多
+					var sag: float = 0.9 * sin(PI * (t0 + t1) * 0.5)
+					var ang2: float = atan2(p.y - prev.y, p.x - prev.x)
+					_box("cable", Vector3(span / float(steps) + 0.1, 0.06, 0.06),
+							Transform3D(Basis(Vector3.UP, -ang2), _pos(m0.x, m0.y, 5.5 - sag)))
+			prev = p
+			has_prev = true
+			d += 260.0
+
+# 彈坑焦土：彈坑只有形狀沒有痕跡，看起來像天然凹地
+func _scorch(m: Dictionary) -> void:
+	for c in m.get("foxholes", []):
+		_scorch_at(Vector2(float(c.get("x", 0)), float(c.get("y", 0))),
+				float(c.get("r", 36)) * _ws * 1.3)
+
+func _scorch_at(c: Vector2, r_m: float) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(absf(c.x) * 31.0 + absf(c.y))
+	for i in 10:
+		var a: float = rng.randf() * TAU
+		var d: float = sqrt(rng.randf()) * r_m / _ws
+		var sz: float = rng.randf_range(0.5, 1.5)
+		_box("burn", Vector3(sz, 0.04, sz * rng.randf_range(0.6, 1.4)),
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+				_pos(c.x + cos(a) * d, c.y + sin(a) * d, 0.03)))
 
 # ---------- 障礙登記 ----------
 # 半徑參數用公尺（跟建模同一套單位，改的時候不用心算），存進去統一換成 px。
