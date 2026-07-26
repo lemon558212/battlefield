@@ -56,3 +56,6 @@ solid_*.png*
 # （2026-07-26 cam_wall / crawl_* 就是這樣被誤加進版控的）。
 /*.png
 /*.png.import
+
+# Tripo 原始輸出（59MB 未減面，加工後的成品才進版控）
+assets/models/tripo_stage/

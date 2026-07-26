@@ -244,6 +244,15 @@ func _ground_color(v: Vector3) -> Color:
 	var c := grass
 	c = c.lerp(dirt, clampf((sl - 0.25) * 2.2, 0.0, 0.85))      # 斜面＝裸土
 	c = c.lerp(rock, clampf((sl - 0.85) * 1.6, 0.0, 0.6))       # 陡坡＝碎石
+	# 裸土斑塊：只靠坡度分層，平地就是一整片同色的草皮（實拍俯瞰很明顯）。
+	# 真實草地會有踩禿的土、乾掉的枯草塊，用兩層雜訊做出不規則邊界。
+	var pn: float = _vnoise(px * 0.006 + 41.0, py * 0.006 + 17.0)
+	var pn2: float = _vnoise(px * 0.028 + 9.0, py * 0.028 + 3.0)
+	var patch: float = clampf((pn * 0.8 + pn2 * 0.35 - 0.62) * 3.2, 0.0, 1.0)
+	c = c.lerp(dirt.lerp(Color(0.31, 0.26, 0.17), pn2), patch * 0.85)
+	# 枯草：另一組雜訊，偏黃綠，面積小一點
+	var dn: float = clampf((_vnoise(px * 0.013 + 77.0, py * 0.013 + 5.0) - 0.58) * 3.6, 0.0, 1.0)
+	c = c.lerp(Color(0.30, 0.29, 0.13), dn * 0.5)
 	if v.y < -0.25:
 		c = c.lerp(Color(0.26, 0.21, 0.15), clampf(-v.y * 0.55, 0.0, 0.8))   # 溝底/彈坑＝翻起的泥
 	# ⚠ 頂點色會被當成「線性空間」直接用，不轉換就會整片洗白——

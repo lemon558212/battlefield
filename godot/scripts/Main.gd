@@ -1054,6 +1054,50 @@ func _selftest() -> void:
 			_unshield(cu2, cu2_save)
 			_buildings = keep_bld4
 			_blockers = keep_blk4
+		# I-4b4) 物理法則要跟現實一樣（專案鐵律 0，使用者 2026-07-26 核定）。
+		#        這裡驗兩條推論：③離地會落下（不是磁吸慢慢飄下去）④站斜坡腳要貼坡面。
+		var phu = _deployed[0]
+		var phu_save := _shield(phu)
+		phu["node"].stop()
+		_end_action()
+		# ③ 自由落體：抬到地面上方 3m，量落地時間。h=½gt² → 3m 應為 0.78 秒左右。
+		var pg: Vector3 = phu["node"].global_position
+		var g0: float = terrain.height_at_world(pg)
+		phu["node"].global_position = Vector3(pg.x, g0 + 3.0, pg.z)
+		var t_fall := 0.0
+		while t_fall < 3.0:
+			await get_tree().process_frame
+			t_fall += get_process_delta_time()
+			if phu["node"].global_position.y - g0 < 0.05:
+				break
+		var ideal: float = sqrt(2.0 * 3.0 / 9.81)
+		print("[physchk] 從 3m 落地：實測 %.2fs 理論 %.2fs %s" % [t_fall, ideal,
+				"OK(自由落體)" if absf(t_fall - ideal) < 0.25 else "FAIL(不是重力，是磁吸或太慢)"])
+		# ④ 斜坡貼合：找一塊有坡度的地，量模型的 up 軸與坡面法線的夾角
+		var best_slope := 0.0
+		var slope_pos := Vector2.ZERO
+		for i in 400:
+			var sx: float = randf_range(60.0, map_data.get("w", 960) - 60.0)
+			var sy: float = randf_range(60.0, map_data.get("h", 600) - 60.0)
+			var sv: float = terrain.slope_at(sx, sy)
+			if sv > best_slope and not terrain.in_trench(sx, sy):
+				best_slope = sv
+				slope_pos = Vector2(sx, sy)
+		if best_slope < 0.12:
+			print("[physchk] SKIP 這張圖沒有足夠坡度（最陡 %.2f）" % best_slope)
+		else:
+			phu["node"].global_position = _to3d(slope_pos.x, slope_pos.y)
+			phu["node"].want_prone = false
+			await get_tree().create_timer(1.2).timeout
+			var nrm: Vector3 = phu["node"]._ground_normal()
+			var body_up: Vector3 = phu["node"]._model.global_basis.y.normalized()
+			var ang_n: float = rad_to_deg(acos(clampf(nrm.dot(Vector3.UP), -1.0, 1.0)))
+			var ang_b: float = rad_to_deg(acos(clampf(body_up.dot(nrm), -1.0, 1.0)))
+			print("[physchk] 站在 %.0f 度的坡上：身體軸與坡面法線夾角 %.1f 度 %s"
+					% [ang_n, ang_b, "OK(身體跟著坡傾斜)" if ang_b < ang_n * 0.7 + 3.0
+					else "FAIL(還是直挺挺站著)"])
+			await _snap("res://phys_slope.png")
+		_unshield(phu, phu_save)
 		# I-4c) AI 繞開實體障礙（AI09 [navchk]）：直接驗純函式，不受敵方階段時序干擾
 		if _blockers.is_empty():
 			print("[navchk] SKIP 這張圖沒有中景障礙")
@@ -1375,15 +1419,27 @@ func _build_static() -> void:
 	add_child(fill)
 
 	var e := Environment.new()
-	# 程序天空（漸層＋太陽）取代死板純色背景
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.26, 0.45, 0.78)
-	sky_mat.sky_horizon_color = Color(0.68, 0.79, 0.88)
-	sky_mat.ground_bottom_color = Color(0.40, 0.44, 0.38)
-	sky_mat.ground_horizon_color = Color(0.72, 0.78, 0.80)
-	sky_mat.sun_angle_max = 12.0
+	# 天空：漸層＋太陽＋**雲層**（GDD/14 §0a）。
+	# 為什麼要自己寫 shader：ProceduralSkyMaterial 沒有雲，一片乾淨漸層在遠鏡頭下
+	# 佔畫面上半部卻空無一物，是「場景還不像 3A」剩下最大的一塊面積。
+	var sky_mat := ShaderMaterial.new()
+	var sky_sh := Shader.new()
+	sky_sh.code = SKY_SHADER
+	sky_mat.shader = sky_sh
+	sky_mat.set_shader_parameter("top_color", Color(0.20, 0.40, 0.76))
+	sky_mat.set_shader_parameter("horizon_color", Color(0.72, 0.82, 0.90))
+	sky_mat.set_shader_parameter("cloud_color", Color(1.0, 0.99, 0.96))
+	sky_mat.set_shader_parameter("cloud_shadow", Color(0.55, 0.60, 0.68))
+	sky_mat.set_shader_parameter("cloud_cover", 0.52)
+	sky_mat.set_shader_parameter("cloud_sharp", 2.6)
+	sky_mat.set_shader_parameter("drift", 0.004)
+	sky_mat.set_shader_parameter("ground_horizon", Color(0.60, 0.64, 0.58))
+	sky_mat.set_shader_parameter("ground_bottom", Color(0.26, 0.29, 0.25))
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
+	# 天空只當環境光來源，不必每幀重算輻照度（雲飄得很慢）
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -3386,3 +3442,85 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		mmi.name = "Trees"
 		mmi.multimesh = mm
 		world.add_child(mmi)
+
+
+# 天空 shader（雲層）：fbm 雜訊雲＋日盤＋大氣輝光。
+# ⚠ 雲的 UV 要把視線投影到「一個高處的平面」：直接用 EYEDIR.xz 會讓雲在頭頂糊成一團、
+#   地平線附近完全沒有雲。除以 (dir.y + 常數) 才有透視，雲才會往地平線收窄。
+# ⚠ 雲要在地平線淡出（smoothstep），否則雲片會硬切在地平線上像貼紙。
+# ⚠ 太陽在 -LIGHT0_DIRECTION（LIGHT0_DIRECTION 是「光射向哪」，太陽在反方向）。
+const SKY_SHADER := """
+shader_type sky;
+
+uniform vec3 top_color : source_color = vec3(0.20, 0.40, 0.76);
+uniform vec3 horizon_color : source_color = vec3(0.72, 0.82, 0.90);
+uniform vec3 cloud_color : source_color = vec3(1.0, 0.99, 0.96);
+uniform vec3 cloud_shadow : source_color = vec3(0.55, 0.60, 0.68);
+uniform float cloud_cover = 0.42;
+uniform float cloud_sharp = 2.6;
+uniform vec3 ground_horizon : source_color = vec3(0.62, 0.66, 0.62);
+uniform vec3 ground_bottom : source_color = vec3(0.28, 0.31, 0.27);
+uniform float drift = 0.004;
+
+float hash21(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);   // quintic：二階連續，格點邊界才不留菱形硬邊
+	float a = hash21(i);
+	float b = hash21(i + vec2(1.0, 0.0));
+	float c = hash21(i + vec2(0.0, 1.0));
+	float d = hash21(i + vec2(1.0, 1.0));
+	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// ⚠ 每一階都要旋轉座標：value noise 的格點是軸對齊的，直接 p *= 2.0 疊起來會讓
+//   雲出現一格一格的矩形階梯邊（第一版實拍就是滿天的方塊，看起來像壞掉的貼圖）。
+//   旋轉一個非特殊角度就把方向性打散了。
+const mat2 ROT = mat2(vec2(0.8018, 0.5977), vec2(-0.5977, 0.8018));   // 約 36.7 度
+
+float fbm(vec2 p) {
+	float s = 0.0;
+	float amp = 0.5;
+	for (int i = 0; i < 6; i++) {
+		s += vnoise(p) * amp;
+		p = ROT * p * 2.03 + vec2(1.7, -2.3);
+		amp *= 0.5;
+	}
+	return s;
+}
+
+void sky() {
+	vec3 dir = normalize(EYEDIR);
+	float h = clamp(dir.y, 0.0, 1.0);
+	vec3 col = mix(horizon_color, top_color, pow(h, 0.55));
+	// 地平線以下要有地面半球色，否則往下看是天空的淺色，遠景圖裡地圖邊緣會露出白邊
+	if (dir.y < 0.0) {
+		col = mix(ground_horizon, ground_bottom, pow(clamp(-dir.y, 0.0, 1.0), 0.5));
+	}
+	vec3 sun_dir = -LIGHT0_DIRECTION;
+	float sd = max(dot(dir, sun_dir), 0.0);
+	col += LIGHT0_COLOR * pow(sd, 900.0) * 8.0;      // 日盤
+	col += LIGHT0_COLOR * pow(sd, 6.0) * 0.12;       // 大氣輝光
+	if (dir.y > 0.004) {
+		vec2 uv = dir.xz / (dir.y + 0.13) * 0.5 + vec2(TIME * drift, TIME * drift * 0.6);
+		float n1 = fbm(uv * 1.6);
+		float n2 = fbm(uv * 4.1 + 7.0);
+		// fbm 值域大約 0.15~0.85（平均 0.5），所以門檻要落在這個區間裡才有雲。
+		// 域扭曲：把取樣座標本身用另一組雜訊推開，雲的輪廓才不會沿著格線走
+		vec2 warp = vec2(fbm(uv * 0.9 + 3.1), fbm(uv * 0.9 + 8.7)) - 0.5;
+		float n1w = fbm(uv * 1.6 + warp * 1.4);
+		float n = n1w * 0.68 + n2 * 0.32;
+		float thr = mix(0.68, 0.30, clamp(cloud_cover, 0.0, 1.0));
+		// 柔邊要夠寬（0.16）：太窄會把插值的幾何邊直接切出來變成多邊形雲
+		float d = smoothstep(thr, thr + 0.16, n);
+		d *= smoothstep(0.0, 0.18, dir.y);
+		float lit = clamp(n2 * 0.7 + sd * 0.3, 0.0, 1.0);
+		col = mix(col, mix(cloud_shadow, cloud_color, lit), d);
+	}
+	COLOR = col;
+}
+"""

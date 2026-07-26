@@ -718,14 +718,69 @@ func stop() -> void:
 	_move_target = null
 	_shoot_target = null
 
-# 貼地：每幀把腳底對齊地形高度。用 lerp 收斂而不是硬設，走上斜坡才不會一格一格跳。
+# 貼地（依專案鐵律 0「物理法則＝真實世界」重寫）。
+# ⚠ 舊版是「用 lerp 把 y 收斂到地面高度」＝上下都靠磁吸。現實裡人離地會**落下**
+#   （走出壕溝邊、被推離高處），不是慢慢飄下去；而踩上坡是被地面推上去，
+#   有速度上限但不會延遲。所以兩個方向要分開處理。
+const GRAVITY := 9.81          # m/s²，真實重力（鐵律 0：量級用現實值）
+const CLIMB_SPEED := 2.4       # 上坡被地面抬起的速度上限（m/s）
+var _fall_v := 0.0             # 目前垂直速度（往下為負）
+
 func _stick_to_ground(delta: float) -> void:
 	if not ground_sampler.is_valid():
 		return
 	var gy: float = ground_sampler.call(global_position)
-	if absf(global_position.y - gy) < 0.001:
+	var dy: float = global_position.y - gy
+	if dy > 0.02:
+		# 在地面上方＝自由落體
+		_fall_v -= GRAVITY * delta
+		global_position.y += _fall_v * delta
+		if global_position.y <= gy:
+			global_position.y = gy
+			_fall_v = 0.0
+	elif dy < -0.001:
+		# 地面在腳底上方（踩上坡／被推上台階）：限速抬起，不瞬移
+		global_position.y = minf(gy, global_position.y + CLIMB_SPEED * delta)
+		_fall_v = 0.0
+	else:
+		_fall_v = 0.0
+	_tilt_to_slope(delta)
+
+# 站在斜坡上，身體軸線要隨坡面傾斜（鐵律 0 推論④）。
+# ⚠ 只套在站姿與蹲姿：趴姿另有一整套骨骼寫入（見 _aim_pose 的 prone 段），
+#   兩邊搶著寫同一個 transform 會互相抵銷——這是本專案踩過的老坑。
+# ⚠ 傾斜寫在 _model 子節點，不可動 Unit 本體的 rotation（那是朝向，還被 IK 與彈道吃）。
+const MAX_TILT_DEG := 22.0
+func _tilt_to_slope(delta: float) -> void:
+	if _model == null or _dead:
 		return
-	global_position.y = lerpf(global_position.y, gy, clampf(delta * 12.0, 0.0, 1.0))
+	if _prone > 0.05:
+		_model.rotation.x = lerpf(_model.rotation.x, 0.0, clampf(delta * 6.0, 0.0, 1.0))
+		_model.rotation.z = lerpf(_model.rotation.z, 0.0, clampf(delta * 6.0, 0.0, 1.0))
+		return
+	var n: Vector3 = _ground_normal()
+	# 把坡面法線轉到角色的局部座標，才知道要往前後還是左右傾
+	var fwd: Vector3 = facing_dir()
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	var pitch: float = clampf(asin(clampf(n.dot(fwd), -1.0, 1.0)), 
+			-deg_to_rad(MAX_TILT_DEG), deg_to_rad(MAX_TILT_DEG))
+	var roll: float = clampf(asin(clampf(n.dot(right), -1.0, 1.0)),
+			-deg_to_rad(MAX_TILT_DEG), deg_to_rad(MAX_TILT_DEG))
+	var k: float = clampf(delta * 8.0, 0.0, 1.0)
+	_model.rotation.x = lerpf(_model.rotation.x, pitch, k)
+	_model.rotation.z = lerpf(_model.rotation.z, -roll, k)
+
+# 腳下坡面法線：用四點取樣（±0.35m）估斜率，不必動到 Terrain 的介面
+func _ground_normal() -> Vector3:
+	if not ground_sampler.is_valid():
+		return Vector3.UP
+	var d := 0.35
+	var p: Vector3 = global_position
+	var hx1: float = ground_sampler.call(p + Vector3(d, 0, 0))
+	var hx0: float = ground_sampler.call(p - Vector3(d, 0, 0))
+	var hz1: float = ground_sampler.call(p + Vector3(0, 0, d))
+	var hz0: float = ground_sampler.call(p - Vector3(0, 0, d))
+	return Vector3(-(hx1 - hx0) / (2.0 * d), 1.0, -(hz1 - hz0) / (2.0 * d)).normalized()
 
 # 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
 func is_moving() -> bool:
