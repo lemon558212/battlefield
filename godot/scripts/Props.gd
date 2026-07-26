@@ -14,12 +14,33 @@ var _mh := 600.0
 var _terrain = null
 var _batch := {}
 var _mats := {}
+# 實體障礙清單（GDD/14 §2 的「人要跟實體一樣」延伸到中景物件）。
+# 座標一律遊戲 px；兩種形狀：
+#   {"t":"cir","c":Vector2,"r":float}  柱狀物（龍牙、電線桿、樹）
+#   {"t":"seg","a":Vector2,"b":Vector2,"r":float}  牆狀物（護欄、柵欄）
+# ⚠ 只登記「人真的過不去」的東西：路面、瓦礫碎石不登記（那些是跨得過去的）。
+var blockers: Array = []
+var _no_zones: Array[Rect2] = []
+
+# 建築周邊禁區判定（門口不能被自家柵欄堵死）
+func _off_limits(p: Vector2) -> bool:
+	for z in _no_zones:
+		if z.has_point(p):
+			return true
+	return false
 
 func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	_ws = world_scale
 	_mw = float(map_data.get("w", 960))
 	_mh = float(map_data.get("h", 600))
 	_terrain = terrain
+	blockers.clear()
+	# 建築周邊禁區：柵欄長進房子裡、電線桿卡在門口都是明顯的假，
+	# 而且門是唯一入口，門前多一根柱子就等於這棟房子廢了。
+	_no_zones.clear()
+	for s in map_data.get("solids", []):
+		_no_zones.append(Rect2(float(s.get("x", 0)), float(s.get("y", 0)),
+				float(s.get("w", 60)), float(s.get("h", 60))).grow(2.5 / _ws))
 	_mats = {
 		"dirt": _mat(Color(0.34, 0.28, 0.20), 0.98),
 		"concrete": _mat(Color(0.55, 0.54, 0.50), 0.95),
@@ -58,6 +79,9 @@ func _blocks(m: Dictionary) -> void:
 		var cy: float = float(rb.get("y", 0))
 		var w: float = float(rb.get("w", 120)) * _ws
 		var n: int = maxi(2, int(w / 1.6))
+		# 一整排護欄＝一條線段障礙（比逐塊圓形省，而且中間不會有縫可以鑽）
+		var half: float = float(rb.get("w", 120)) * 0.5
+		_blk_seg(Vector2(cx - half, cy), Vector2(cx + half, cy), 0.36)
 		for i in n:
 			var t: float = (float(i) + 0.5) / float(n) - 0.5
 			var px: float = cx + t * float(rb.get("w", 120))
@@ -74,7 +98,11 @@ func _teeth(m: Dictionary) -> void:
 		for i in 6:
 			var px: float = cx + (float(i % 3) - 1.0) * w * 0.34
 			var py: float = cy + (float(i / 3) - 0.5) * h * 0.6
+			if _off_limits(Vector2(px, py)):
+				continue
 			# 龍牙：四角錐用兩個交叉薄箱近似，低多邊形風格夠用
+			# 龍牙本來就是「車過不去、人可以繞」的東西，所以是各自獨立的圓，不連成線
+			_blk_cir(Vector2(px, py), 0.62)
 			_box("concrete", Vector3(0.5, 1.1, 0.5),
 					Transform3D(Basis(Vector3.UP, deg_to_rad(45)).scaled(Vector3(1, 1, 1)), _pos(px, py, 0.55)))
 			_box("concrete", Vector3(0.9, 0.22, 0.9), Transform3D(Basis(), _pos(px, py, 0.11)))
@@ -93,10 +121,15 @@ func _fences(m: Dictionary) -> void:
 			var d := 40.0
 			while d < total - 40.0:
 				var p: Vector2 = a + dir * d + nrm * off * side
+				if _off_limits(p) or _off_limits(p + dir * step):
+					d += step
+					continue
 				if _terrain != null and _terrain.in_trench(p.x, p.y):
 					d += step
 					continue
 				_box("wood", Vector3(0.12, 1.05, 0.12), Transform3D(Basis(), _pos(p.x, p.y, 0.52)))
+				# 柵欄是連續的橫杆，障礙必須是線段——只登記柱子的話人會從兩柱之間穿過去
+				_blk_seg(p, p + dir * step, 0.14)
 				var p2: Vector2 = p + dir * step * 0.5
 				var ang: float = atan2(dir.y, dir.x)
 				for hh in [0.55, 0.9]:
@@ -114,6 +147,10 @@ func _poles(m: Dictionary) -> void:
 		var d := 120.0
 		while d < total - 60.0:
 			var p: Vector2 = a + dir * d + nrm * float(r.get("w", 40)) * 1.6
+			if _off_limits(p):
+				d += 260.0
+				continue
+			_blk_cir(p, 0.32)
 			_box("wood", Vector3(0.22, 6.2, 0.22), Transform3D(Basis(), _pos(p.x, p.y, 3.1)))
 			_box("wood", Vector3(1.6, 0.14, 0.14), Transform3D(Basis(), _pos(p.x, p.y, 5.6)))
 			d += 260.0
@@ -138,6 +175,16 @@ func _rubble(m: Dictionary) -> void:
 			var sz: float = rng.randf_range(0.18, 0.55)
 			_box("rock", Vector3(sz, sz * rng.randf_range(0.4, 0.8), sz * rng.randf_range(0.7, 1.3)),
 					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(px, py, sz * 0.25)))
+
+# ---------- 障礙登記 ----------
+# 半徑參數用公尺（跟建模同一套單位，改的時候不用心算），存進去統一換成 px。
+func _blk_cir(c: Vector2, r_m: float) -> void:
+	blockers.append({"t": "cir", "c": c, "r": r_m / _ws})
+
+func _blk_seg(a: Vector2, b: Vector2, r_m: float) -> void:
+	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
+	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws,
+			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
 
 # ---------- 幾何合併 ----------
 func _pos(px: float, py: float, y_off: float) -> Vector3:

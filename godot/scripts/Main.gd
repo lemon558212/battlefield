@@ -78,6 +78,10 @@ const BUILDING := preload("res://scripts/Building.gd")
 const PROPS := preload("res://scripts/Props.gd")
 var _buildings: Array = []             # 場上所有建築（牆線段＝視線與碰撞的真相）
 var terrain = null                     # 地形高度真相（GDD/14）
+# 中景物件與樹的實體障礙（形狀定義見 Props.blockers），座標為遊戲 px。
+var _blockers: Array = []
+const BODY_R := 0.42                   # 步兵肩寬半徑
+const VEHICLE_R := 1.6                 # 載具車體半徑（坦克 3.1m 寬）
 
 const GROUND_SHADER := """
 shader_type spatial;
@@ -681,6 +685,10 @@ func _selftest() -> void:
 			# 看起來像門進不去（實測兵停在門外 1.25m，其實是被鄰棟擋住）。
 			var keep_b2 := _buildings
 			_buildings = [bd]
+			# 中景物件同理要隔離：這一段驗的是「門是不是唯一入口」，
+			# 被路邊柵欄擋在門外會誤判成「門進不去」（2026-07-26 實測踩到）。
+			var keep_blk0 := _blockers
+			_blockers = []
 			var door_px: Vector2 = bd.doors[0]
 			# (a) 對著實心牆走：門在南牆 32% 處，往旁邊挪 4m 就是牆
 			var wall_x: float = door_px.x + 4.0 / WORLD_SCALE
@@ -707,6 +715,7 @@ func _selftest() -> void:
 			await _hold_key(KEY_W, 4.0)
 			var in_after_door: bool = bd.inside(iu["wx"], iu["wy"])
 			_buildings = keep_b2
+			_blockers = keep_blk0
 			print("[solidchk] 對著門走 4 秒：進到室內=%s %s" % [in_after_door,
 					"OK(門是唯一入口)" if in_after_door else "FAIL(門進不去)"])
 			await get_tree().create_timer(1.2).timeout
@@ -721,6 +730,111 @@ func _selftest() -> void:
 			await get_tree().create_timer(0.6).timeout
 			await _snap("res://bld_ingame_out.png")
 			_end_action()
+		# I-4b) 中景物件與載具也是實體（GDD/14 §2；先前只有建築牆擋人）
+		#      一樣「用走的」驗，不用瞬移——瞬移過去只證明座標能設，不證明擋得住。
+		#      ⚠ 場上障礙全部保留（不像建築那段只留一棟）：清掉別的障礙會讓畫面上
+		#      仍畫著柵欄、人卻站在柵欄裡，拍出來像穿模，而且證明不了真實情況。
+		if _blockers.is_empty():
+			print("[solidchk] SKIP 這張圖沒有中景障礙")
+		else:
+			var keep_bld2 := _buildings
+			var seg = null
+			for bk in _blockers:
+				if bk["t"] == "seg" and (seg == null or float(bk["hl"]) > float(seg["hl"])):
+					seg = bk
+			var solu = _deployed[0]
+			var mwp: float = map_data.get("w", 960)
+			var mhp: float = map_data.get("h", 600)
+			_buildings = []              # 只排除建築，中景障礙照舊全開
+			if seg == null:
+				print("[solidchk] SKIP 這張圖沒有線段型障礙（護欄/柵欄）")
+			else:
+				solu["node"].stop()
+				_end_action()
+				cp = 6
+				var sx: float = seg["m"].x
+				var sy: float = seg["m"].y
+				var start_y: float = sy + 5.0 / WORLD_SCALE
+				solu["node"].global_position = _to3d(sx, start_y)
+				solu["wx"] = sx
+				solu["wy"] = start_y
+				_begin_action(solu)
+				# ★AP 一定要補在 _begin_action 之後：它會依下令次數重算 AP（×0.7^N），
+				#   補在前面會被蓋掉，人走到一半 AP 用盡停下來，看起來就像「被護欄擋住」。
+				#   實拍到畫面上寫著 AP 0/24 才抓到這個假通過（2026-07-26）。
+				solu["ap"] = 300.0
+				solu["ap_max"] = 300.0
+				var from_y: float = solu["wy"]
+				cam.tps_yaw = 180.0                  # 面向 -Z＝往障礙走
+				await get_tree().create_timer(0.5).timeout
+				await _hold_key(KEY_W, 5.0)
+				var crossed: bool = solu["wy"] < sy
+				var gap: float = (solu["wy"] - sy) * WORLD_SCALE
+				var walked: float = (from_y - solu["wy"]) * WORLD_SCALE
+				var ap_left: float = float(solu["ap"])
+				print("[solidchk] 對著障礙走 5 秒：走了 %.2fm、停在前方 %.2fm、越過=%s、剩餘AP=%.0f %s"
+						% [walked, gap, crossed, ap_left,
+						"OK(擋住了)" if (not crossed and walked > 1.5 and ap_left > 1.0) else "FAIL(穿過去了/沒走到/AP用盡)"])
+				await _snap("res://solid_prop.png")
+				_end_action()
+			# 載具：坦克是 3m 級的鋼鐵，人不可能從中間穿過去。
+			# 找一塊「周圍 12m 內沒有任何障礙」的空地，才驗得到是被坦克擋住而不是被柵欄。
+			var spot := Vector2(mwp * 0.5, mhp * 0.5)
+			var clear_r: float = 8.0 / WORLD_SCALE
+			var found_spot := false
+			for gy in range(2, 13):
+				for gx in range(2, 19):
+					var c := Vector2(mwp * float(gx) / 20.0, mhp * float(gy) / 14.0)
+					var ok := true
+					for bk2 in _blockers:
+						var cp2: Vector2 = bk2["c"] if bk2["t"] == "cir" 								else Geometry2D.get_closest_point_to_segment(c, bk2["a"], bk2["b"])
+						if c.distance_to(cp2) < clear_r:
+							ok = false
+							break
+					if ok:
+						for bd3 in keep_bld2:
+							if bd3.rect.grow(clear_r).has_point(c):
+								ok = false
+								break
+					if ok:
+						spot = c
+						found_spot = true
+						break
+				if found_spot:
+					break
+			solu["node"].stop()
+			_end_action()
+			var soltk = _spawn_unit("tank", player_side, spot.x, spot.y, false)
+			var man_y: float = spot.y + 6.0 / WORLD_SCALE
+			solu["node"].global_position = _to3d(spot.x, man_y)
+			solu["wx"] = spot.x
+			solu["wy"] = man_y
+			await get_tree().create_timer(0.4).timeout
+			_begin_action(solu)
+			solu["ap"] = 300.0
+			solu["ap_max"] = 300.0
+			cam.tps_yaw = 180.0
+			await get_tree().create_timer(0.4).timeout
+			await _hold_key(KEY_W, 5.0)
+			var tgap: float = (solu["wy"] - soltk["wy"]) * WORLD_SCALE
+			print("[solidchk] 對著坦克走 5 秒：空地=%s 停在車體外 %.2fm、剩餘AP=%.0f %s"
+					% [found_spot, tgap, float(solu["ap"]),
+					"OK(載具是實體)" if (tgap > VEHICLE_R * 0.9 and tgap < 3.5 and float(solu["ap"]) > 1.0)
+					else "FAIL(穿過去了/沒走到/AP用盡)"])
+			# ⚠ 這張不能用第三人稱拍：鏡頭會直接埋進車體，整張圖是一片灰＝沒有佐證力
+			#   （2026-07-26 實拍到）。切回俯瞰、框住人與坦克，才看得出人停在車體外。
+			_end_action()
+			cam.clear_tps()
+			cam.set_follow(null)
+			cam.focus = _to3d(spot.x, spot.y + 3.0 / WORLD_SCALE) + Vector3(0, 1.0, 0)
+			cam.dist = 14.0
+			cam.pitch_deg = 22.0
+			await get_tree().create_timer(0.6).timeout
+			await _snap("res://solid_tank.png")
+			soltk["alive"] = false
+			soltk["node"].queue_free()
+			units.erase(soltk)
+			_buildings = keep_bld2
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -1138,10 +1252,10 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
 	node.shot_fired.connect(_on_shot)
-	# 生成點若壓在牆上就先推出去：兵不該從牆裡冒出來
-	if not _buildings.is_empty():
-		var fx: Vector3 = _resolve_walls(node.global_position,
-				1.6 if Unit.is_vehicle_cls(cls) else 0.42)
+	# 生成點若壓在牆上／護欄上就先推出去：兵不該從實體裡冒出來
+	if not _buildings.is_empty() or not _blockers.is_empty():
+		var fx: Vector3 = _resolve_solids(node.global_position,
+				VEHICLE_R if Unit.is_vehicle_cls(cls) else BODY_R, null)
 		node.global_position = Vector3(fx.x, node.global_position.y, fx.z)
 	# 抵達目的地才重算掩體：原本玩家移動後從沒更新過 cover，
 	# 走到沙包後面也不會蹲下、迎擊減傷也算不到（2026-07-25 補齊全動作時發現）。
@@ -1496,14 +1610,14 @@ func _process(delta: float) -> void:
 #   甚至測試把兵直接放進屋裡都能穿牆——牆等於只對玩家有效。
 #   人要跟實體一樣，就不能有任何一條路徑可以繞過碰撞。
 func _solid_bodies() -> void:
-	if _buildings.is_empty():
+	if _buildings.is_empty() and _blockers.is_empty():
 		return
 	for u in units:
 		if not u["alive"] or not is_instance_valid(u["node"]):
 			continue
 		var node = u["node"]
-		var r: float = 1.6 if Unit.is_vehicle_cls(u["cls"]) else 0.42   # 載具體積大得多
-		var fixed: Vector3 = _resolve_walls(node.global_position, r)
+		var r: float = VEHICLE_R if Unit.is_vehicle_cls(u["cls"]) else BODY_R
+		var fixed: Vector3 = _resolve_solids(node.global_position, r, u)
 		if fixed.distance_squared_to(node.global_position) > 0.000001:
 			node.global_position = Vector3(fixed.x, node.global_position.y, fixed.z)
 			var p := _live_px(u)
@@ -1594,7 +1708,8 @@ func _tps_control(delta: float) -> void:
 	var before: Vector3 = node.global_position
 	node.move_dir(dir, delta)
 	# 邊界與 AP 上限：走到夾限外就把人推回來（AP 由 _action_tick 依實際位移扣）
-	var clamped: Vector3 = _clamp_to_map(_resolve_walls(node.global_position))
+	var clamped: Vector3 = _clamp_to_map(_resolve_solids(node.global_position,
+			VEHICLE_R if Unit.is_vehicle_cls(acting["cls"]) else BODY_R, acting))
 	node.global_position = Vector3(clamped.x, node.global_position.y, clamped.z)
 	if before.distance_to(node.global_position) < 0.0001:
 		return
@@ -1923,6 +2038,11 @@ func _resolve_walls(pos: Vector3, radius := 0.42) -> Vector3:
 	var mh: float = map_data.get("h", 600)
 	var p := Vector2(pos.x / WORLD_SCALE + mw * 0.5, pos.z / WORLD_SCALE + mh * 0.5)
 	var r_px: float = radius / WORLD_SCALE
+	p = _push_walls_px(p, r_px)
+	return Vector3((p.x - mw * 0.5) * WORLD_SCALE, pos.y, (p.y - mh * 0.5) * WORLD_SCALE)
+
+func _push_walls_px(p_in: Vector2, r_px: float) -> Vector2:
+	var p := p_in
 	for bd in _buildings:
 		if not bd.rect.grow(r_px + 20.0).has_point(p):
 			continue
@@ -1939,6 +2059,44 @@ func _resolve_walls(pos: Vector3, radius := 0.42) -> Vector3:
 				p = closest + away / d * r_px          # 推出去
 			elif d <= 0.0001:
 				p = closest + ab.orthogonal().normalized() * r_px
+	return p
+
+# 完整實體解算＝建築牆 ＋ 中景物件／樹（Props.blockers）＋ 載具本身。
+# ⚠ 2026-07-26 只做了建築牆，結果護欄、拒馬、電線桿、樹、坦克全都能直接穿過去，
+#   在第三人稱裡看起來就是「這些東西是畫上去的」。障礙的真相要跟畫出來的一致。
+# ignore＝要略過的單位（算自己時不能被自己推）。
+func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p := Vector2(pos.x / WORLD_SCALE + mw * 0.5, pos.z / WORLD_SCALE + mh * 0.5)
+	var r_px: float = radius / WORLD_SCALE
+	if not _buildings.is_empty():
+		p = _push_walls_px(p, r_px)
+	for bk in _blockers:
+		var need: float = r_px + float(bk["r"])
+		var closest: Vector2
+		if bk["t"] == "cir":
+			closest = bk["c"]
+		else:
+			# 粗剔除：離線段中點超過（半長＋需要距離）就不可能碰到
+			if p.distance_squared_to(bk["m"]) > pow(float(bk["hl"]) + need, 2.0):
+				continue
+			closest = Geometry2D.get_closest_point_to_segment(p, bk["a"], bk["b"])
+		var away: Vector2 = p - closest
+		var d: float = away.length()
+		if d < need:
+			p = closest + (away / d if d > 0.0001 else Vector2.RIGHT) * need
+	# 載具＝3m 級的鋼鐵，人不可能從中間穿過去（被撞的一方是人，坦克不讓路）
+	for v in units:
+		if v == ignore or not Unit.is_vehicle_cls(v["cls"]) or not is_instance_valid(v["node"]):
+			continue
+		var vp := Vector2(v["node"].global_position.x / WORLD_SCALE + mw * 0.5,
+				v["node"].global_position.z / WORLD_SCALE + mh * 0.5)
+		var need_v: float = r_px + VEHICLE_R / WORLD_SCALE
+		var away_v: Vector2 = p - vp
+		var dv: float = away_v.length()
+		if dv < need_v:
+			p = vp + (away_v / dv if dv > 0.0001 else Vector2.RIGHT) * need_v
 	return Vector3((p.x - mw * 0.5) * WORLD_SCALE, pos.y, (p.y - mh * 0.5) * WORLD_SCALE)
 
 func _intercept_tick(delta: float) -> void:
@@ -2076,6 +2234,7 @@ func _build_ground() -> void:
 	# 建築（GDD/14 §2）：程式生成模組化建築，每棟都有真正的室內空間。
 	# 舊做法是擺現成模型的實心外殼＋一個圓形掩體，玩家進不去、視線也只能用圓近似。
 	_buildings = []
+	_blockers = []          # 重建場景時一定要清，否則上一張地圖的障礙會留在新戰場上
 	var solids = map_data.get("solids", [])
 	if solids is Array:
 		var i := 0
@@ -2115,7 +2274,8 @@ func _build_ground() -> void:
 	var props = PROPS.new()
 	world.add_child(props)
 	props.build(map_data, WORLD_SCALE, terrain)
-	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感）
+	_blockers = props.blockers.duplicate()
+	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感），樹幹本身也是實體
 	_scatter_trees(mw, mh)
 
 	# 我方部署藍框（開戰後隱藏）
@@ -2273,12 +2433,24 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		world.add_child(t)
 		var dy: float = _fit_prop(t, rng.randf_range(3.0, 5.5))
 		# 邊緣多、中央少（不擋戰場）
-		var ang := rng.randf() * TAU
-		var r: float = rng.randf_range(0.55, 1.05)
-		var tx: float = cos(ang) * mw * r
-		var tz: float = sin(ang) * mh * r
 		var gwp: float = map_data.get("w", 960)
 		var ghp: float = map_data.get("h", 600)
+		var tx := 0.0
+		var tz := 0.0
+		# 樹幹是實體，長在門口就把整棟房子廢掉了：撞到建築就重抽位置
+		for _try in 8:
+			var ang := rng.randf() * TAU
+			var r: float = rng.randf_range(0.55, 1.05)
+			tx = cos(ang) * mw * r
+			tz = sin(ang) * mh * r
+			var tp := Vector2(tx / WORLD_SCALE + gwp * 0.5, tz / WORLD_SCALE + ghp * 0.5)
+			var hit := false
+			for bd2 in _buildings:
+				if bd2.rect.grow(3.0 / WORLD_SCALE).has_point(tp):
+					hit = true
+					break
+			if not hit:
+				break
 		var ty := 0.0
 		if terrain != null:
 			ty = terrain.height_at(tx / WORLD_SCALE + gwp * 0.5, tz / WORLD_SCALE + ghp * 0.5)
@@ -2287,6 +2459,9 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		# 樹叢＝隱蔽（降低被發現距離），不擋子彈
 		var gw: float = map_data.get("w", 960)
 		var gh: float = map_data.get("h", 600)
-		_covers.append({"wx": t.position.x / WORLD_SCALE + gw * 0.5,
-				"wy": t.position.z / WORLD_SCALE + gh * 0.5,
-				"r": 40.0, "val": 0.30, "type": "bush"})
+		var tpx := Vector2(t.position.x / WORLD_SCALE + gw * 0.5,
+				t.position.z / WORLD_SCALE + gh * 0.5)
+		_covers.append({"wx": tpx.x, "wy": tpx.y, "r": 40.0, "val": 0.30, "type": "bush"})
+		# 樹幹是實體（走得過樹葉、走不過樹幹）。單株用細幹，pinetrees 是一叢＝粗一點。
+		var trunk: float = 0.85 if avail[i % avail.size()].ends_with("pinetrees.glb") else 0.4
+		_blockers.append({"t": "cir", "c": tpx, "r": trunk / WORLD_SCALE})
