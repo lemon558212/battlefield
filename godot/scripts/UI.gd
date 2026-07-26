@@ -128,6 +128,28 @@ func flash_msg(txt: String, col := Color(1, 1, 1)) -> void:
 	_flash.modulate.a = 1.0
 	_flash_t = 1.4
 
+# ---------- 小地圖 ----------
+const MINIMAP := preload("res://scripts/Minimap.gd")
+var _minimap: Control = null
+
+func show_minimap(provider: Callable) -> void:
+	if is_instance_valid(_minimap):
+		return
+	var m := Control.new()
+	m.set_script(MINIMAP)
+	m.name = "Minimap"
+	m.size = Vector2(200, 145)
+	var vp := get_viewport().get_visible_rect().size
+	m.position = Vector2(vp.x - 216, 16)
+	m.provider = provider
+	root.add_child(m)
+	_minimap = m
+
+func hide_minimap() -> void:
+	if is_instance_valid(_minimap):
+		_minimap.queue_free()
+	_minimap = null
+
 # ---------- 準心（第三人稱行動模式）----------
 var _cross: Control = null
 

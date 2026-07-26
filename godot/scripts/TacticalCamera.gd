@@ -18,6 +18,11 @@ var tps_dist := 3.1
 const TPS_SHOULDER := 0.62        # 過肩偏移：角色不擋準心
 const TPS_EYE := 1.52
 var mouse_sens := 0.14
+# 鏡頭碰撞用的回呼（由 Main 注入，因為牆與地形的真相在 Main/Terrain 那邊）：
+#   wall_probe.call(from, to) -> float  最近命中比例 0~1（1＝沒撞到）
+#   ground_probe.call(pos) -> float     該點的地面高度
+var wall_probe: Callable = Callable()
+var ground_probe: Callable = Callable()
 
 func set_tps(n: Node3D) -> void:
 	tps_node = n
@@ -97,6 +102,15 @@ func _apply_tps(delta: float) -> void:
 	var right := Vector3(fwd.z, 0, -fwd.x)
 	var head: Vector3 = tps_node.global_position + Vector3(0, TPS_EYE, 0)
 	var want: Vector3 = head - fwd * tps_dist * cos(pr) + right * TPS_SHOULDER 			- Vector3(0, sin(pr), 0) * tps_dist
+	# 鏡頭碰撞：牆擋住就把鏡頭拉近。不做這個，第三人稱一貼牆就會看穿牆壁，臨場感全毀。
+	if wall_probe.is_valid():
+		var k: float = float(wall_probe.call(head, want))
+		if k < 1.0:
+			want = head.lerp(want, maxf(k - 0.12, 0.06))
+	if ground_probe.is_valid():
+		var gy: float = float(ground_probe.call(want)) + 0.45
+		if want.y < gy:
+			want.y = gy                     # 鏡頭不鑽進地面/壕溝壁
 	global_position = global_position.lerp(want, 1.0 - exp(-14.0 * delta))
 	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * 0.5
 	look_at(look_at_p, Vector3.UP)

@@ -730,7 +730,16 @@ func _selftest() -> void:
 		await _snap("res://close_death.png")
 		print("[anichk] 陣亡倒地 頭高 %.2f→%.2f %s" % [
 			head_up, head_dn, "OK" if head_dn < head_up * 0.6 else "FAIL(沒倒下)"])
-		# 效能：每單位每幀都在做重定向＋雙手 IK＋手指，換骨架後必須實測
+		# 效能：GDD/14 §4 的預算是「16 單位 ≥60FPS」，所以要補到 16 個再量，
+		# 只量現場那幾個等於沒驗到預算。
+		var zc := _my_zone()
+		while units.size() < 16:
+			_spawn_unit("rifleman", 1 - player_side,
+					float(zc.get("x", 100)) + randf_range(200.0, 700.0),
+					float(zc.get("y", 250)) + randf_range(-200.0, 400.0), false)
+		_refresh_visibility()
+		await get_tree().create_timer(0.8).timeout
+		await _snap("res://perf16.png")
 		var t0 := Time.get_ticks_usec()
 		for i in 60:
 			await get_tree().process_frame
@@ -1074,6 +1083,7 @@ func _start_battle() -> void:
 	if is_instance_valid(_zone_mesh):
 		_zone_mesh.visible = false        # 開戰後收起部署藍框
 	ui.show_hud()
+	ui.show_minimap(func(): return _minimap_data())
 	ui.update_hud(turn, "player", cp)
 	_refresh_visibility()
 	# 相機框住我方部隊重心
@@ -1159,9 +1169,14 @@ func _refresh_visibility() -> void:
 					var hiding: bool = is_instance_valid(u["node"]) and u["node"]._crouch > 0.5 							and not bool(u.get("fired", false))
 					sight = SIGHT * (0.3 if hiding else 0.5)
 					break
-			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() <= sight:
-				vis = true
-				break
+			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() > sight:
+				continue
+			# 視線被牆擋住就看不到（GDD/14 §3-3）：躲在屋裡的人只有從門窗的角度才會被發現——
+			# 這是「進建築」在戰術上真正的價值，不然屋子只是一塊會擋子彈的裝飾。
+			if not _los_clear(Vector2(p["wx"], p["wy"]), Vector2(u["wx"], u["wy"])):
+				continue
+			vis = true
+			break
 		if u["alive"]:                    # 陣亡者交給 die() 淡出，別強制隱藏
 			u["node"].visible = vis
 
@@ -1461,6 +1476,32 @@ func _roof_fade(delta: float) -> void:
 		cur = move_toward(cur, want, delta * 3.5)
 		_roof_a[i] = cur
 		bd.set_roof_alpha(cur)
+
+# 小地圖資料（GDD/13）：只給「玩家看得見」的敵人，小地圖不能變成透視外掛。
+func _minimap_data() -> Dictionary:
+	var us: Array = []
+	for u in units:
+		if not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		if u["side"] != player_side and not u["node"].visible:
+			continue
+		var p := _live_px(u)
+		us.append([p.x, p.y, 0 if u["side"] == player_side else 1])
+	var trs: Array = []
+	for t in map_data.get("trenches", []):
+		trs.append(t.get("pts", []))
+	var bls: Array = []
+	for bd in _buildings:
+		bls.append([bd.rect.position.x, bd.rect.position.y, bd.rect.size.x, bd.rect.size.y])
+	var act = null
+	if acting != null and is_instance_valid(acting["node"]):
+		var ap := _live_px(acting)
+		var yaw: float = acting["node"].rotation.y
+		if cam.is_tps():
+			yaw = deg_to_rad(cam.tps_yaw)
+		act = [ap.x, ap.y, yaw]
+	return {"mw": float(map_data.get("w", 960)), "mh": float(map_data.get("h", 600)),
+			"units": us, "trenches": trs, "buildings": bls, "acting": act}
 
 # 滑鼠鎖定：第三人稱要自由轉視角就得鎖游標；但一開面板/回指令模式就要放開，否則點不到 UI。
 func _capture_mouse(on: bool) -> void:
@@ -1784,6 +1825,31 @@ func _los_clear(a: Vector2, b: Vector2) -> bool:
 				return false
 	return true
 
+# 從 a 打一條線到 b，回傳最近的牆命中比例（0~1，1＝沒撞到）。鏡頭碰撞用。
+# 只看牆的水平投影：牆是落地到頂的，垂直方向不必算。
+func _wall_ray(a: Vector3, b: Vector3) -> float:
+	if _buildings.is_empty():
+		return 1.0
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p1 := Vector2(a.x / WORLD_SCALE + mw * 0.5, a.z / WORLD_SCALE + mh * 0.5)
+	var p2 := Vector2(b.x / WORLD_SCALE + mw * 0.5, b.z / WORLD_SCALE + mh * 0.5)
+	var best := 1.0
+	var d1: Vector2 = p2 - p1
+	for bd in _buildings:
+		for w in bd.walls:
+			var p3: Vector2 = w["a"]
+			var p4: Vector2 = w["b"]
+			var d2: Vector2 = p4 - p3
+			var den: float = d1.cross(d2)
+			if absf(den) < 0.00001:
+				continue
+			var t: float = (p3 - p1).cross(d2) / den
+			var u: float = (p3 - p1).cross(d1) / den
+			if t > 0.0 and t < best and u > 0.0 and u < 1.0:
+				best = t
+	return best
+
 func _seg_hit(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> bool:
 	var d1: Vector2 = p2 - p1
 	var d2: Vector2 = p4 - p3
@@ -1936,6 +2002,9 @@ func _build_ground() -> void:
 	world.add_child(terrain)
 	terrain.build(map_data, WORLD_SCALE)
 	Unit.ground_sampler = func(p: Vector3) -> float: return terrain.height_at_world(p)
+	# 鏡頭碰撞：把「牆」與「地面」的查詢注入相機（真相在這邊，相機只負責用）
+	cam.wall_probe = func(a: Vector3, b: Vector3) -> float: return _wall_ray(a, b)
+	cam.ground_probe = func(p: Vector3) -> float: return terrain.height_at_world(p)
 	# 地表顏色改走頂點色（見 Terrain._ground_color），材質只要最單純的一顆
 	var sm := StandardMaterial3D.new()
 	sm.vertex_color_use_as_albedo = true
