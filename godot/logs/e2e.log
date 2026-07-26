@@ -19,11 +19,16 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [e2e] 7 選兵 → 點地面移動
 [e2e]   選取=OK
 [e2e]   第三人稱=OK
-[e2e]   位移=1.27m OK
+[e2e]   位移=1.25m OK
 [sinkchk] 靜止 3 秒的垂直漂移：身體 +0.000m 模型 +0.000m 鏡頭 +0.000m OK(沒有下沉)
 [selftest] saved res://qa/e2e_battle.png
 [selftest] saved res://qa/e2e_hero_idle.png
+[selftest] saved res://qa/e2e_hero_crouchwalk.png
 [selftest] saved res://qa/e2e_hero_run.png
+[selftest] saved res://qa/crawl_move_0.png
+[selftest] saved res://qa/crawl_move_1.png
+[selftest] saved res://qa/crawl_move_2.png
+[selftest] saved res://qa/crawl_move_3.png
 [selftest] saved res://qa/e2e_hero_prone_side.png
 [selftest] saved res://qa/e2e_hero_prone_front.png
 [bonechk] cls=sniper 骨數=62 找不到的骨=["Wrist.R"]

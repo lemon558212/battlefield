@@ -77,6 +77,11 @@ const FREEHAND_STATES := ["fix", "capture", "idle_relaxed", "death"]
 # 只放左手：右手仍握著槍、槍維持低姿預備，左手去拿彈匣／護住傷處——
 # 換彈若雙手全放，長槍會被舉成一根直挺挺的旗杆（2026-07-25 實拍發現）。
 const LEFTHAND_FREE := ["reload", "hit"]
+# 匍匐（蛙式）的角度規格——使用者 2026-07-26 親自給的：髖外展 30~45 度、屈膝 30~45 度
+const PRONE_ABD_MIN := 12.0
+const PRONE_ABD_MAX := 42.0
+const PRONE_KNEE_MIN := 8.0
+const PRONE_KNEE_MAX := 44.0
 # 會循環播放的動作（其餘播一次就回 idle）
 const LOOP_KEYS := ["idle", "idle_relaxed", "walk", "run", "sprint", "aim", "crouch", "crouch_walk", "fix"]
 
@@ -806,7 +811,8 @@ func move_dir(dir: Vector3, delta: float) -> void:
 		#   往前衝，收腿時幾乎不動。速度必須跟著蹬地相位走，腳才不會在地上打滑。
 		#   |sin| 的平均值是 2/π≈0.637，除掉它才能維持設定的平均速度。
 		_crawl += delta * CRAWL_RATE
-		var thrust: float = (0.12 + 0.88 * absf(sin(_crawl))) / 0.667
+		# 左右腿交替蹬地＝一個週期推進兩次；|sin| 的平均是 2/π≈0.637
+		var thrust: float = (0.08 + 0.92 * absf(sin(_crawl))) / 0.665
 		global_position += d * PRONE_SPEED * thrust * delta
 		_prone_hold += delta        # 持續走就會超過門檻，_update_crouch 會讓他起身
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
@@ -1154,50 +1160,32 @@ func _aim_pose() -> void:
 			_rig.add_world_rotation("Abdomen", Vector3.UP, deg_to_rad(-6.0) * sin(_crawl) * _crawl_amt)
 			# 上身在蹬地瞬間撐起、收腿時放低（跟 bob 同相位）：肘撐的動作感
 			_rig.add_world_rotation("Abdomen", rgt, deg_to_rad(-7.0) * sin(_crawl * 2.0) * _crawl_amt)
-		# ★腿：依美軍 STP 21-1-SMCT（Warrior Skills Level 1）的 low crawl 定義重寫。
-		#   文件原文的動作循環是：
-		#     (a) Push both arms forward while pulling your right leg forward.
-		#     (b) Then pull with both arms while pushing with your right leg.
-		#   關鍵三點，先前全做錯：
-		#     ① 推進只用**單邊腿**（右腿），不是雙腿交替。雙腿交替＝游泳，不是匍匐。
-		#     ② 左腿幾乎不動，伸直拖在身後（只被身體帶著滑）。
-		#     ③ 手臂**兩隻同相位**（一起前推、一起後拉），不是左右交替。
-		#   相位定義：ph=0 收腿伸手（蓄力），ph=π 蹬地拉手（前進）。
-		var ph: float = _crawl
-		var draw: float = maxf(sin(ph), 0.0) * _crawl_amt          # 收腿：右膝屈起外頂
-		var push: float = maxf(-sin(ph), 0.0) * _crawl_amt         # 蹬地：右腿伸直
+		# ★腿：蛙式（使用者 2026-07-26 親自定義的規格）
+		#   「膝蓋彎曲 30-45 度，胯下整個向外 30-45 度，然後身體向前，再換腳」
+		#   先前是大腿方向從正後方擺到正前方＝**鐘擺**，側視就是腿在地上前後掃。
+		#   蛙式是：大腿在**水平面上向外張開**（髖外展），膝同時彎、小腿收向中線，
+		#   蹬完伸直收回，換另一腿。角度直接用度數算，不再用向量係數硬湊
+		#   （湊出來的角度沒人知道實際幾度，也就無法對照使用者給的規格）。
 		for sd in ["L", "R"]:
 			var sgn: float = -1.0 if sd == "L" else 1.0
-			var is_drive: bool = (sd == "R")                        # 只有右腿是動力腿
+			# 左右腿相位差半圈＝交替（使用者：「再換腳」）
+			var ph: float = _crawl + (0.0 if sd == "L" else PI)
+			var ab: float = maxf(sin(ph), 0.0) * _crawl_amt      # 0=併攏 1=張到最開
 			_rig.place_bone("UpperLeg." + sd,
-					hips + rgt * sgn * (0.07 + (0.13 * draw if is_drive else 0.0)) - fwd * 0.02,
-					_prone)
-			if is_drive:
-				# 動力腿：收腿時膝往「側前方」頂出（往前才拉得到地），蹬完回到伸直朝後
-				# 基礎（draw=0）要幾乎水平：0.22 的向下分量會讓大腿斜插進地面、
-				# 小腿被頂到半空（實拍抓到）。改 0.06。
-				var up_dir: Vector3 = (fwd * (-0.99 + 2.10 * draw)
-						+ rgt * sgn * (-0.06 + 0.60 * draw)
-						- Vector3.UP * (0.06 + 0.10 * draw)).normalized()
-				_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir, _prone)
-				# 小腿與大腿反向＝屈膝；蹬地那半波要伸直（kn 回到 0）
-				var kn: float = draw
-				var lo_dir: Vector3 = (-fwd * (0.997 - 0.30 * kn) - rgt * sgn * (0.04 + 0.46 * kn)
-						- Vector3.UP * (0.05 - 0.02 * kn)).normalized()
-				_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir, _prone)
-			else:
-				# 拖行腿：伸直、併攏、**平貼地面**。
-				# ⚠ 實拍（玩家視角側面近照）發現雙腿在半空中彎著、腳掌朝天——
-				#   那正是使用者連續四輪指的「剪刀腳」。真實臥姿是整條腿貼在地上、
-				#   腳尖朝外貼地。所以大腿與小腿都要幾乎水平（只留很小的向下分量
-				#   讓它壓在地面上），而且**腳掌也要壓平**，不能讓它翹起來。
-				var trail: float = 0.03 * sin(ph * 2.0) * _crawl_amt
-				var up_dir2: Vector3 = (-fwd * 0.995 + rgt * sgn * (0.05 + trail)
-						- Vector3.UP * 0.06).normalized()
-				_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir2, _prone)
-				var lo_dir2: Vector3 = (-fwd * 0.997 - rgt * sgn * 0.04
-						- Vector3.UP * 0.05).normalized()
-				_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir2, _prone)
+					hips + rgt * sgn * (0.07 + 0.06 * ab) - fwd * 0.02, _prone)
+			# 大腿：由「正後方」在水平面往外轉（髖外展 12°→42°），全程貼地
+			var abd: float = deg_to_rad(PRONE_ABD_MIN
+					+ (PRONE_ABD_MAX - PRONE_ABD_MIN) * ab)
+			var thigh: Vector3 = (-fwd).rotated(Vector3.UP, abd * sgn)
+			thigh = (thigh - Vector3.UP * 0.06).normalized()
+			_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, thigh, _prone)
+			# 小腿：由大腿再往身體中線轉＝屈膝。與大腿的夾角就是膝角度（8°→44°），
+			# 所以「膝蓋彎 30-45 度」是寫死的規格，不是湊出來的。
+			var knee: float = deg_to_rad(PRONE_KNEE_MIN
+					+ (PRONE_KNEE_MAX - PRONE_KNEE_MIN) * ab)
+			var shin: Vector3 = thigh.rotated(Vector3.UP, -knee * sgn)
+			shin = (shin - Vector3.UP * 0.05).normalized()
+			_rig.point_bone("LowerLeg." + sd, "Foot." + sd, shin, _prone)
 		# 腳掌壓平：趴著的人腳背貼地、腳尖朝後外側。先前沒管腳掌，它跟著小腿翹向天空。
 		for sd2 in ["L", "R"]:
 			var fi: int = sk.find_bone("Foot." + sd2)

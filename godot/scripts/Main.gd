@@ -262,12 +262,25 @@ func _e2e() -> void:
 	var hero = _deployed[0]
 	cam.clear_tps()
 	cam.set_follow(null)
+	# ⚠ QA 反驗證抓到：狙擊手在空地會自動趴下，所以這張「待機」拍到的是趴姿，
+	#   整條「站姿手臂」的證據線是空的。要拍站姿就得先關掉自動趴姿並等它站起來。
+	hero["node"].want_prone = false
+	hero["node"].want_cover = false
+	hero["node"].stop()
+	await get_tree().create_timer(1.4).timeout
 	cam.focus = hero["node"].global_position + Vector3(0, 1.1, 0)
 	cam.dist = 3.2
 	cam.pitch_deg = 8.0
 	cam.yaw = deg_to_rad(35.0)
-	await get_tree().create_timer(0.6).timeout
+	await get_tree().create_timer(0.4).timeout
 	await _snap("res://e2e_hero_idle.png")
+	# 蹲姿移動（使用者 2026-07-26：「連蹲姿移動也是，連手上武器也不見」）
+	hero["node"].want_cover = true
+	hero["node"].move_to(hero["node"].global_position + hero["node"].facing_dir() * 5.0)
+	await get_tree().create_timer(0.8).timeout
+	cam.focus = hero["node"].global_position + Vector3(0, 0.9, 0)
+	await _snap("res://e2e_hero_crouchwalk.png")
+	hero["node"].want_cover = false
 	hero["node"].move_to(hero["node"].global_position + hero["node"].facing_dir() * 6.0)
 	await get_tree().create_timer(0.7).timeout
 	cam.focus = hero["node"].global_position + Vector3(0, 1.1, 0)
@@ -276,6 +289,20 @@ func _e2e() -> void:
 	hero["node"].stop()
 	hero["node"].want_prone = true
 	await get_tree().create_timer(1.6).timeout
+	# ★移動中的匍匐連拍（QA 反驗證指出：先前的 crawl_side*.png 都拍在放開 W 之後，
+	#   拍到的是靜止趴姿，根本無法回答「像不像在移動」）。
+	#   這裡先把鏡頭擺好，再一邊移動一邊每 0.25 秒拍一張。
+	var cf: Vector3 = hero["node"].facing_dir()
+	cam.dist = 4.0
+	cam.pitch_deg = 6.0
+	cam.yaw = atan2(cf.z, cf.x)
+	hero["node"].move_to(hero["node"].global_position + cf * 8.0)
+	for ci in 4:
+		await get_tree().create_timer(0.25).timeout
+		cam.focus = hero["node"].global_position + Vector3(0, 0.45, 0)
+		await _snap("res://crawl_move_%d.png" % ci)
+	hero["node"].stop()
+	await get_tree().create_timer(0.4).timeout
 	var hp0: Vector3 = hero["node"].global_position
 	var hf: Vector3 = hero["node"].facing_dir()
 	cam.focus = hp0 + Vector3(0, 0.5, 0)
