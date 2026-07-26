@@ -91,7 +91,7 @@ func _pose(breath: float, lean: float, recoil: float, shake: float, fall: float)
 
 func _snap(p: String) -> void:
 	await RenderingServer.frame_post_draw
-	get_viewport().get_texture().get_image().save_png(p)
+	get_viewport().get_texture().get_image().save_png(_qa_path(p))
 	print("[lp] saved ", p)
 
 func _run() -> void:
@@ -113,3 +113,10 @@ func _run() -> void:
 	await _snap("res://lp_death.png")
 	print("[lp] DONE")
 	get_tree().quit(0)
+
+# 截圖統一收進 res://qa/（專案根目錄不再堆截圖）。呼叫端照舊給 "res://xxx.png"。
+func _qa_path(p: String) -> String:
+	if not p.begins_with("res://") or p.trim_prefix("res://").contains("/"):
+		return p
+	DirAccess.make_dir_recursive_absolute("res://qa/")
+	return "res://qa/" + p.trim_prefix("res://")

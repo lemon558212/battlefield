@@ -69,7 +69,7 @@ func _run() -> void:
 			_cam.look_at(Vector3(0, 0.9, 0), Vector3.UP)
 			await get_tree().process_frame
 			await RenderingServer.frame_post_draw
-			get_viewport().get_texture().get_image().save_png("res://p_%s_%s.png" % [clip, shot[0]])
+			get_viewport().get_texture().get_image().save_png(_qa_path("res://p_%s_%s.png" % [clip, shot[0]]))
 		print("[probe] shot ", clip)
 	print("[probe] DONE")
 	get_tree().quit(0)
@@ -119,3 +119,10 @@ func _dump_rest() -> void:
 		var dw: Transform3D = _dsk.global_transform * _dsk.get_bone_global_rest(di)
 		print("[probe] %s src_org=%s src_y=%s | dst_org=%s dst_y=%s" % [
 			pair[0], sw.origin, sw.basis.y.normalized(), dw.origin, dw.basis.y.normalized()])
+
+# 截圖統一收進 res://qa/（專案根目錄不再堆截圖）。呼叫端照舊給 "res://xxx.png"。
+func _qa_path(p: String) -> String:
+	if not p.begins_with("res://") or p.trim_prefix("res://").contains("/"):
+		return p
+	DirAccess.make_dir_recursive_absolute("res://qa/")
+	return "res://qa/" + p.trim_prefix("res://")

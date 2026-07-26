@@ -1,11 +1,11 @@
 .godot/
 *.tmp
-selftest_*.png
-selftest_*.png.import
-st_*.png
-st_*.png.import
-aniprobe.gd*
-boneprobe.gd*
+qa/selfteqa/st_*.png
+qa/selfteqa/st_*.png.import
+qa/st_*.png
+qa/st_*.png.import
+probes/*
+logs/*.log
 
 # --- 2026-07-25 持槍/動作素材線 ---
 # 原始素材壓縮包與解壓目錄（約 1.1GB，不進版控；使用的檔案已複製到 assets/models/）

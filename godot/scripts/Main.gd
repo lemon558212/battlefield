@@ -130,6 +130,8 @@ func _ready() -> void:
 		_e2e()
 	elif "selftest" in OS.get_cmdline_user_args():
 		_selftest()
+	elif "shotseq" in OS.get_cmdline_user_args():
+		_shotseq()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -148,6 +150,15 @@ func _click_btn(txt: String) -> bool:
 	_send_click(b.get_global_rect().get_center())
 	await get_tree().create_timer(0.35).timeout
 	return true
+
+# 連拍模式（`-- shotseq`）：啟動後依時間序拍幾張，專門抓「畫面上有東西一直在動」
+# 這種肉眼才看得到、數值驗證抓不到的問題（使用者 2026-07-26：「啟動遊戲有一直往下拉」）。
+func _shotseq() -> void:
+	for i in 5:
+		await get_tree().create_timer(1.2).timeout
+		await _snap("res://seq_%d.png" % i)
+		print("[shotseq] seq_%d st=%d" % [i, st])
+	get_tree().quit(0)
 
 func _e2e() -> void:
 	await get_tree().create_timer(0.6).timeout
@@ -198,6 +209,22 @@ func _e2e() -> void:
 	await _hold_key(KEY_W, 1.5)
 	var moved: float = before.distance_to(pu["node"].global_position)
 	print("[e2e]   位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	# 站著不動不可以往下沉（鐵律 0：重力只作用到落地為止，不是無止盡下拉）。
+	# 使用者 2026-07-26 回報「啟動遊戲有一直往下拉」——加重力那批的回歸，量得出來。
+	var sink_u = _deployed[0]
+	sink_u["node"].stop()
+	await get_tree().create_timer(0.4).timeout
+	var y0: float = sink_u["node"].global_position.y
+	var my0: float = sink_u["node"]._model.position.y
+	var cy0: float = cam.global_position.y
+	await get_tree().create_timer(3.0).timeout
+	var dy_body: float = sink_u["node"].global_position.y - y0
+	var dy_model: float = sink_u["node"]._model.position.y - my0
+	var dy_cam: float = cam.global_position.y - cy0
+	print("[sinkchk] 靜止 3 秒的垂直漂移：身體 %+.3fm 模型 %+.3fm 鏡頭 %+.3fm %s"
+			% [dy_body, dy_model, dy_cam,
+			"OK(沒有下沉)" if (absf(dy_body) < 0.05 and absf(dy_model) < 0.05
+			and absf(dy_cam) < 0.20) else "FAIL(一直往下拉)"])
 	await _snap("res://e2e_battle.png")
 	print("[e2e] DONE")
 	get_tree().quit(0)
@@ -250,11 +277,21 @@ func _hold_key_sampled(code: Key, secs: float, n: int, node: Node3D) -> Array:
 	await get_tree().process_frame
 	return out
 
+# 驗收台截圖一律收進 res://qa/（使用者 2026-07-26：檔案要歸類，別散在專案根目錄）。
+# 呼叫端照舊寫 "res://xxx.png"，這裡統一改寫路徑，不必動幾十處呼叫。
+const QA_DIR := "res://qa/"
+func _qa_path(p: String) -> String:
+	if not p.begins_with("res://") or p.trim_prefix("res://").contains("/"):
+		return p
+	DirAccess.make_dir_recursive_absolute(QA_DIR)
+	return QA_DIR + p.trim_prefix("res://")
+
 func _snap(p: String) -> void:
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()
-	img.save_png(p)
-	print("[selftest] saved ", p)
+	var out := _qa_path(p)
+	img.save_png(out)
+	print("[selftest] saved ", out)
 
 func _selftest() -> void:
 	await get_tree().create_timer(0.5).timeout

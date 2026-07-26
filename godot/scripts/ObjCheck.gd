@@ -29,6 +29,13 @@ func _run() -> void:
 		await get_tree().process_frame
 		await get_tree().process_frame
 		await RenderingServer.frame_post_draw
-		get_viewport().get_texture().get_image().save_png("res://objchk_%s.png" % v[0])
+		get_viewport().get_texture().get_image().save_png(_qa_path("res://objchk_%s.png" % v[0]))
 		print("[obj] saved ", v[0])
 	get_tree().quit(0)
+
+# 截圖統一收進 res://qa/（專案根目錄不再堆截圖）。呼叫端照舊給 "res://xxx.png"。
+func _qa_path(p: String) -> String:
+	if not p.begins_with("res://") or p.trim_prefix("res://").contains("/"):
+		return p
+	DirAccess.make_dir_recursive_absolute("res://qa/")
+	return "res://qa/" + p.trim_prefix("res://")

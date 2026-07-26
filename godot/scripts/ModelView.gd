@@ -36,7 +36,7 @@ func _run() -> void:
 		_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
 		await get_tree().process_frame
 		await RenderingServer.frame_post_draw
-		get_viewport().get_texture().get_image().save_png("res://cat_%s.png" % cls)
+		get_viewport().get_texture().get_image().save_png(_qa_path("res://cat_%s.png" % cls))
 		print("[cat] ", cls)
 		u.queue_free()
 		await get_tree().process_frame
@@ -51,3 +51,10 @@ func _aabb(node: Node) -> AABB:
 		if first: out = b; first = false
 		else: out = out.merge(b)
 	return out
+
+# 截圖統一收進 res://qa/（專案根目錄不再堆截圖）。呼叫端照舊給 "res://xxx.png"。
+func _qa_path(p: String) -> String:
+	if not p.begins_with("res://") or p.trim_prefix("res://").contains("/"):
+		return p
+	DirAccess.make_dir_recursive_absolute("res://qa/")
+	return "res://qa/" + p.trim_prefix("res://")

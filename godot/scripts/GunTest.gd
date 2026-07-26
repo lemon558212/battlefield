@@ -54,7 +54,7 @@ func _run() -> void:
 				_cam.look_at(Vector3(0, 0.95, 0), Vector3.UP)
 				await get_tree().process_frame
 				await RenderingServer.frame_post_draw
-				get_viewport().get_texture().get_image().save_png("res://u_%s_%s_%s.png" % [cls, stance, shot[0]])
+				get_viewport().get_texture().get_image().save_png(_qa_path("res://u_%s_%s_%s.png" % [cls, stance, shot[0]]))
 			_dump(u, cls, stance)
 			print("[u] shot ", cls, " ", stance)
 		u.queue_free()
@@ -76,3 +76,10 @@ func _dump(u: Unit, cls: String, stance: String) -> void:
 	print("[dump] %s/%s 髖y=%.2f 胸y=%.2f 頭y=%.2f 膝y=%.2f 腳y=%.2f 大腿仰角=%.0f°" % [
 		cls, stance, p["Hips"].y, p["Chest"].y, p["Head"].y, p["LowerLeg.L"].y, p["Foot.L"].y,
 		rad_to_deg(asin(clampf(thigh.normalized().y, -1.0, 1.0)))])
+
+# 截圖統一收進 res://qa/（專案根目錄不再堆截圖）。呼叫端照舊給 "res://xxx.png"。
+func _qa_path(p: String) -> String:
+	if not p.begins_with("res://") or p.trim_prefix("res://").contains("/"):
+		return p
+	DirAccess.make_dir_recursive_absolute("res://qa/")
+	return "res://qa/" + p.trim_prefix("res://")
