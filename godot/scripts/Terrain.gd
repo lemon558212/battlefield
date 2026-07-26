@@ -24,6 +24,7 @@ var _craters: Array = []
 var _trenches: Array = []         # 每筆 {pts:[Vector2(px)], hw:半寬(px)}
 var _grass_zones: Array = []
 var _no_grass: Array[Rect2] = []      # 建築佔地（室內不長草）
+var _grass_mat: ShaderMaterial = null
 
 # ---------- 建置 ----------
 func build(map_data: Dictionary, world_scale: float) -> void:
@@ -246,9 +247,38 @@ func _ground_color(v: Vector3) -> Color:
 	#   跟地表 shader 那次是同一個坑（GDD/10「sRGB 洗白」，2026-07-26 第二次踩到）。
 	return c.srgb_to_linear()
 
-# ---------- 草叢（MultiMesh，一次繪製）----------
+# ---------- 草（MultiMesh，一次繪製）----------
+# 兩層：全地圖鋪一層稀疏矮草（先前只有 bushes 區有草，其餘地面光禿禿），
+# bushes 區再鋪一層密集高草＝真正能藏人的草叢。
 func _build_grass() -> void:
-	var tuft := _tuft_mesh()
+	_grass_mat = ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = GRASS_SHADER
+	_grass_mat.shader = sh
+	_grass_layer(_tuft_mesh(1.0), _scatter_field(), 55.0, "GrassField")
+	_grass_layer(_tuft_mesh(1.5), _scatter_bushes(), 70.0, "GrassBush")
+
+# 全地圖稀疏矮草：間距約 3.6m，避開建築、壕溝與陡坡（陡坡是裸土碎石）
+func _scatter_field() -> Array:
+	var xf: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260727
+	var step: float = 0.95 / ws
+	var px := step
+	while px < mw - step:
+		var py := step
+		while py < mh - step:
+			var jx: float = px + rng.randf_range(-step * 0.49, step * 0.49)
+			var jy: float = py + rng.randf_range(-step * 0.49, step * 0.49)
+			py += step
+			if _indoors(jx, jy) or slope_at(jx, jy) > 0.7:
+				continue
+			xf.append(_tuft_xf(jx, jy, rng, 0.7, 1.05))
+		px += step
+	return xf
+
+# 草叢區：密集、較高，這才是 GDD/01 §5a 的隱蔽來源
+func _scatter_bushes() -> Array:
 	var xf: Array = []
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260726
@@ -256,23 +286,31 @@ func _build_grass() -> void:
 		var cx: float = float(z.get("x", 0))
 		var cy: float = float(z.get("y", 0))
 		var r: float = float(z.get("r", 60))
-		var n: int = clampi(int(r * r * 0.02), 20, 260)
+		var n: int = clampi(int(r * r * 0.06), 40, 700)
 		for i in n:
 			var a: float = rng.randf() * TAU
 			var d: float = sqrt(rng.randf()) * r
-			var px: float = cx + cos(a) * d
-			var py: float = cy + sin(a) * d
-			var indoors := false
-			for nz in _no_grass:
-				if nz.has_point(Vector2(px, py)):
-					indoors = true
-					break
-			if indoors:
+			var gx: float = cx + cos(a) * d
+			var gy: float = cy + sin(a) * d
+			if _indoors(gx, gy):
 				continue
-			var pos := Vector3((px - mw * 0.5) * ws, height_at(px, py) - 0.05, (py - mh * 0.5) * ws)
-			var b := Basis().rotated(Vector3.UP, rng.randf() * TAU).scaled(
-					Vector3.ONE * rng.randf_range(0.8, 1.35))
-			xf.append(Transform3D(b, pos))
+			xf.append(_tuft_xf(gx, gy, rng, 0.85, 1.3))
+	return xf
+
+func _indoors(px: float, py: float) -> bool:
+	for nz in _no_grass:
+		if nz.has_point(Vector2(px, py)):
+			return true
+	return false
+
+func _tuft_xf(px: float, py: float, rng: RandomNumberGenerator, s0: float, s1: float) -> Transform3D:
+	var pos := Vector3((px - mw * 0.5) * ws, height_at(px, py) - 0.04, (py - mh * 0.5) * ws)
+	var b := Basis().rotated(Vector3.UP, rng.randf() * TAU).scaled(
+			Vector3.ONE * rng.randf_range(s0, s1))
+	return Transform3D(b, pos)
+
+# 遠處的草看不清楚卻照樣要畫：用 visibility_range 讓它淡出，戰術俯瞰時不必付這筆錢。
+func _grass_layer(tuft: ArrayMesh, xf: Array, vis_end: float, nm: String) -> void:
 	if xf.is_empty():
 		return
 	var mm := MultiMesh.new()
@@ -282,8 +320,13 @@ func _build_grass() -> void:
 	for i in xf.size():
 		mm.set_instance_transform(i, xf[i])
 	var mmi := MultiMeshInstance3D.new()
-	mmi.name = "Grass"
+	mmi.name = nm
 	mmi.multimesh = mm
+	mmi.material_override = _grass_mat
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.visibility_range_end = vis_end
+	mmi.visibility_range_end_margin = vis_end * 0.25
+	mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(mmi)
 
 # 遠景山脈剪影：戰場外圍一圈低多邊形山，讓地圖不再像一塊有邊界的積木。
@@ -322,26 +365,70 @@ func _build_backdrop() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 
-# 一叢草：三片交叉的窄面片，低多邊形風格下比一堆方塊自然，也只有 6 個三角形
-func _tuft_mesh() -> ArrayMesh:
+# 一叢草（2026-07-26 重做）：原本是三片交叉的大三角形（0.95m 高、0.34m 寬），
+# 第三人稱趴下來近看就是三片塑膠片。改成多根細葉，每根兩段、往上收尖並朝隨機方向彎。
+# 頂點色 alpha 存「離地權重」給風擺動用（0=根、1=尖）；材質不透明，alpha 不影響顯示。
+func _tuft_mesh(scale_f: float) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var h := 0.95
-	var w := 0.34
-	for k in 3:
-		var a: float = float(k) * PI / 3.0
-		var dir := Vector3(cos(a), 0, sin(a)) * w
-		var tip := Vector3(cos(a), 0, sin(a)) * (w * 0.35)
-		st.set_color(Color(0.20, 0.32, 0.12))
-		st.add_vertex(-dir)
-		st.set_color(Color(0.20, 0.32, 0.12))
-		st.add_vertex(dir)
-		st.set_color(Color(0.46, 0.62, 0.28))
-		st.add_vertex(tip + Vector3(0, h, 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 424242
+	# ⚠ 頂點色會被當成線性空間直接用，不轉就整片偏亮——GDD/10「sRGB 洗白」，
+	#   地表 shader、地表頂點色之後，這是同一天第三次踩到。
+	var root := Color(0.16, 0.24, 0.09).srgb_to_linear()
+	var tipc := Color(0.40, 0.52, 0.22).srgb_to_linear()
+	for k in 9:
+		var a: float = rng.randf() * TAU
+		var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.38) * scale_f
+		var h: float = rng.randf_range(0.20, 0.52) * scale_f
+		var w: float = rng.randf_range(0.020, 0.032) * scale_f
+		var lean_a: float = rng.randf() * TAU
+		var lean := Vector3(cos(lean_a), 0, sin(lean_a)) * rng.randf_range(0.10, 0.30) * h
+		var side := Vector3(-sin(a), 0, cos(a))
+		# 兩段：0→0.55h→h，寬度往上收，位移沿 lean 二次曲線（草是彎的不是直的）
+		var p0: Vector3 = off
+		var p1: Vector3 = off + Vector3(0, h * 0.55, 0) + lean * 0.30
+		var p2: Vector3 = off + Vector3(0, h, 0) + lean
+		_blade_seg(st, p0, p1, side * w, side * w * 0.6, root, root.lerp(tipc, 0.55))
+		_blade_seg(st, p1, p2, side * w * 0.6, side * w * 0.08, root.lerp(tipc, 0.55), tipc)
 	st.generate_normals()
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.roughness = 0.95
-	st.set_material(mat)
 	return st.commit()
+
+# 一段草葉＝一個四邊形（兩個三角形），兩面都畫。alpha 存離地權重。
+func _blade_seg(st: SurfaceTool, a: Vector3, b: Vector3, wa: Vector3, wb: Vector3,
+		ca: Color, cb: Color) -> void:
+	var quad := [[a - wa, ca], [a + wa, ca], [b + wb, cb], [b - wb, cb]]
+	for tri in [[0, 1, 2], [0, 2, 3], [2, 1, 0], [3, 2, 0]]:
+		for idx in tri:
+			var v: Vector3 = quad[idx][0]
+			var c: Color = quad[idx][1]
+			c.a = clampf(v.y / 0.6, 0.0, 1.0)
+			st.set_color(c)
+			st.add_vertex(v)
+
+# 草的風擺動：頂點著色器，成本幾乎為零（草的頂點總數才幾萬）。
+# 相位取實例的世界座標，整片草才不會同手同腳一起晃。
+const GRASS_SHADER := """
+shader_type spatial;
+render_mode cull_disabled, diffuse_burley;
+uniform float wind_t = 0.0;
+uniform float wind_amp = 0.10;
+varying vec3 vcol;
+void vertex() {
+	float ph = MODEL_MATRIX[3].x * 0.7 + MODEL_MATRIX[3].z * 0.45;
+	float w = COLOR.a;
+	float gust = sin(wind_t * 0.37 + ph * 0.11) * 0.5 + 0.75;
+	VERTEX.x += sin(wind_t * 2.1 + ph) * wind_amp * w * gust;
+	VERTEX.z += cos(wind_t * 1.55 + ph * 1.3) * wind_amp * 0.6 * w * gust;
+	vcol = COLOR.rgb;
+}
+void fragment() {
+	ALBEDO = vcol;
+	ROUGHNESS = 0.94;
+	SPECULAR = 0.05;
+}
+"""
+
+func _process(_delta: float) -> void:
+	if _grass_mat != null:
+		_grass_mat.set_shader_parameter("wind_t", float(Time.get_ticks_msec()) * 0.001)
