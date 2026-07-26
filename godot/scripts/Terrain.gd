@@ -401,6 +401,26 @@ func _indoors(px: float, py: float) -> bool:
 			return true
 	return in_water(px, py)      # 水裡不長草（實拍海灘的草長在水面下）
 
+# 水面高度（公尺）。Main._build_water 畫水面時用同一個值，兩邊不可各寫各的，
+# 否則「畫出來的水面」和「算出來的水深」會對不起來。
+const WATER_SURFACE_Y := -0.30
+
+# 這個點的水深（公尺，不在水裡回 0）＝水面高度減地面高度。
+# 鐵律 0⑤：人在及腰的水裡不可能維持 3m/s 行軍。先前 waters/shallows 只是一張
+# 半透明貼圖，不減速也不淹沒——這支就是把「畫出來的水」變成真的水。
+func water_depth(px: float, py: float) -> float:
+	var inside := false
+	for w in _waters:
+		if (w["r"] as Rect2).has_point(Vector2(px, py)):
+			inside = true
+			break
+	if not inside:
+		return 0.0
+	return maxf(0.0, WATER_SURFACE_Y - height_at(px, py))
+
+func water_depth_world(pos: Vector3) -> float:
+	return water_depth(pos.x / ws + mw * 0.5, pos.z / ws + mh * 0.5)
+
 # 這個點在不在水域（含淺水）：樹、巨石、電線桿的散佈都要避開
 func in_water(px: float, py: float) -> bool:
 	for w in _waters:

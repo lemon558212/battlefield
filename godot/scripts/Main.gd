@@ -83,6 +83,24 @@ var _buildings: Array = []             # 場上所有建築（牆線段＝視線
 var terrain = null                     # 地形高度真相（GDD/14）
 # 中景物件與樹的實體障礙（形狀定義見 Props.blockers），座標為遊戲 px。
 var _blockers: Array = []
+# 矮到「現實裡是踩上去、不是繞過去」的障礙（鐵律 0①＋③）。
+# ⚠ 先前全場障礙一律水平推開，沒有任何東西有頂面：0.22m 的沙包會把人往旁邊推，
+#   而畫出來卻沒進碰撞表的東西（散落袋、泥土堆）則直接被穿過去——
+#   同一批物件「有的擋有的不擋」，這就是使用者說的不一致。
+const STEP_UP := 0.5                   # 一步跨得上去的高度（真實約半公尺）
+var _low_blk: Array = []               # _blockers 裡 h ≤ STEP_UP 的那些（頂面可站）
+# 深水圍欄。⚠ 必須另外存：_build_water() 跑在 _build_ground 前段，而後面那句
+#   `_blockers = []`（重建場景用）會把它整個清掉——所以深水從來沒有真的擋過人，
+#   畫面上是海、走過去像草地。這是「畫出來的東西沒有碰撞」的又一例。
+var _water_blk: Array = []
+# 支撐面查詢的粗剔除框（px）。⚠ _ground_height 每幀被呼叫 5 次×單位數
+#   （_stick_to_ground 1 次＋_ground_normal 取樣 4 次），沒有粗剔除的話
+#   16 單位就是每幀幾千次的建築＋矮障礙迴圈，實測幀時 5.9→10.9ms。
+#   矮障礙（含散落瓦礫）會鋪滿全圖，用「聯集外框」剔除等於沒剔除，
+#   所以改成空間格網：查詢只掃自己那一格。
+const LOWGRID_PX := 100.0            # 格子邊長（px）＝5m
+var _low_grid := {}                  # Vector2i(格) -> Array[矮障礙]
+var _has_support := false
 var _tree_feet: Array = []             # 樹腳位置（px）：Terrain 在樹底補草做過渡
 const BODY_R := 0.42                   # 步兵肩寬半徑
 const VEHICLE_R := 1.6                 # 載具車體半徑（坦克 3.1m 寬）
@@ -1242,13 +1260,231 @@ func _selftest() -> void:
 					% [ang_n, ang_b, "OK(身體跟著坡傾斜)" if ang_b < ang_n * 0.7 + 3.0
 					else "FAIL(還是直挺挺站著)"])
 			await _snap("res://phys_slope.png")
+			# ④b 趴在斜坡上也要貼坡（使用者 2026-07-27 指正：趴著是水平浮著）。
+			#     身體有 1.9m 長，取樣基線跟著加長，量的才是他實際躺著的那片坡。
+			phu["node"].stance_cmd = "prone"
+			await get_tree().create_timer(1.4).timeout
+			var pnrm: Vector3 = phu["node"]._ground_normal(0.95)
+			var pbody: Vector3 = phu["node"]._model.global_basis.y.normalized()
+			var pang_n: float = rad_to_deg(acos(clampf(pnrm.dot(Vector3.UP), -1.0, 1.0)))
+			var pang_b: float = rad_to_deg(acos(clampf(pbody.dot(pnrm), -1.0, 1.0)))
+			print("[physchk] 趴在 %.0f 度的坡上：身體軸與坡面法線夾角 %.1f 度 %s"
+					% [pang_n, pang_b, "OK(趴著也貼坡)" if pang_b < pang_n * 0.7 + 3.0
+					else "FAIL(趴著是水平浮著)"])
+			await _snap("res://phys_slope_prone.png")
+			phu["node"].stance_cmd = ""
 		_unshield(phu, phu_save)
+		# I-4b5) 人也是固體：站著的人擋得住彈道，趴下就讓出火線（鐵律 0①）。
+		#        ⚠ 先前隔著幾個人也打得到最後一個，卻又宣稱 1.32m 的沙包擋得住——
+		#          同一條「固體不可互穿」，沙包算人不算，這就是使用者說的「有的有有的沒有」。
+		if _deployed.size() < 3:
+			print("[bodychk] SKIP 這張圖部署不到 3 人")
+		else:
+			var bk_bld := _buildings
+			var bk_blk := _blockers
+			_buildings = []
+			_blockers = []          # 只驗人體，別讓路邊柵欄先把彈道吃掉
+			var sh = _deployed[0]
+			var midu = _deployed[1]
+			var tg = _deployed[2]
+			var bsaves := [_shield(sh), _shield(midu), _shield(tg)]
+			var bhome := [sh["node"].global_position, midu["node"].global_position,
+					tg["node"].global_position]                   # 同上：三個人都要送回原位
+			var org := Vector2(map_data.get("w", 960) * 0.5, map_data.get("h", 600) * 0.5)
+			var step: float = 2.0 / WORLD_SCALE          # 三人一直線，間距 2m
+			for pair in [[sh, 0.0], [midu, 1.0], [tg, 2.0]]:
+				pair[0]["node"].stop()
+				pair[0]["node"].want_prone = false
+				pair[0]["node"].stance_cmd = "stand"
+				pair[0]["node"].global_position = _to3d(org.x + step * float(pair[1]), org.y)
+				var pq := _live_px(pair[0])
+				pair[0]["wx"] = pq.x
+				pair[0]["wy"] = pq.y
+			await get_tree().create_timer(1.0).timeout
+			var blocked_by_body: bool = not _shot_clear_units(sh, tg)
+			# 中間那個趴下＝讓出火線（趴姿全高 0.55m，彈道從 1.32m 出膛）
+			midu["node"].stance_cmd = "prone"
+			await get_tree().create_timer(1.6).timeout
+			var clear_after_prone: bool = _shot_clear_units(sh, tg)
+			print("[bodychk] 中間站一個人 擋住彈道=%s(應true)；他趴下後 通了=%s(應true) %s"
+					% [blocked_by_body, clear_after_prone,
+					"OK(人是固體，趴下讓火線)" if (blocked_by_body and clear_after_prone)
+					else "FAIL(人不擋子彈，或趴下也讓不出火線)"])
+			midu["node"].stance_cmd = ""
+			for bi in 3:
+				# ⚠ stance_cmd 是「玩家按鍵指定的姿勢」，留著不清會讓後面的 [crawlchk]
+				#   永遠趴不下去（本輪實際踩到，三項假 FAIL）。測試改過的狀態一律還原。
+				_deployed[bi]["node"].stance_cmd = ""
+				_deployed[bi]["node"].global_position = bhome[bi]
+				var bpx := _live_px(_deployed[bi])
+				_deployed[bi]["wx"] = bpx.x
+				_deployed[bi]["wy"] = bpx.y
+			await get_tree().create_timer(0.4).timeout
+			for bi2 in 3:
+				_unshield(_deployed[bi2], bsaves[bi2])
+			_buildings = bk_bld
+			_blockers = bk_blk
+		# I-4b6) 涉水（鐵律 0⑤）：水深要真的拖慢人。用「走的」量距離，不看係數。
+		var wet := Vector2.ZERO
+		var wet_d := 0.0
+		var dry := Vector2.ZERO
+		for wi in 900:
+			var wx2: float = randf_range(40.0, map_data.get("w", 960) - 40.0)
+			var wy2: float = randf_range(40.0, map_data.get("h", 600) - 40.0)
+			var dep: float = terrain.water_depth(wx2, wy2)
+			if dep > wet_d:
+				wet_d = dep
+				wet = Vector2(wx2, wy2)
+			elif dep <= 0.0 and dry == Vector2.ZERO and terrain.slope_at(wx2, wy2) < 0.12:
+				dry = Vector2(wx2, wy2)
+		if wet_d < 0.25 or dry == Vector2.ZERO:
+			print("[wadechk] SKIP 這張圖沒有可涉的水（最深 %.2fm）" % wet_d)
+		else:
+			var wu = _deployed[0]
+			var wsave := _shield(wu)
+			var whome: Vector3 = wu["node"].global_position   # ⚠ 測完一定要送回原位：
+			# 後面的 [crawlchk] 用同一個人，把他留在水裡會讓那組整組假 FAIL（本輪實際踩到）
+			wu["node"].stop()
+			wu["node"].want_prone = false
+			wu["node"].stance_cmd = "stand"
+			var legs := {}
+			for leg in [["land", dry], ["water", wet]]:
+				wu["node"].global_position = _to3d((leg[1] as Vector2).x, (leg[1] as Vector2).y)
+				await get_tree().create_timer(0.6).timeout
+				var p0: Vector3 = wu["node"].global_position
+				var tw := 0.0
+				while tw < 1.2:
+					await get_tree().process_frame
+					var dtw: float = get_process_delta_time()
+					tw += dtw
+					wu["node"].move_dir(Vector3(1, 0, 0), dtw)
+				var wmoved: Vector3 = wu["node"].global_position - p0
+				legs[leg[0]] = Vector2(wmoved.x, wmoved.z).length()
+			var wratio: float = float(legs["water"]) / maxf(0.01, float(legs["land"]))
+			print("[wadechk] 水深 %.2fm：陸上走 %.2fm、水裡走 %.2fm（剩 %.0f%%） %s"
+					% [wet_d, legs["land"], legs["water"], wratio * 100.0,
+					"OK(水真的拖慢人)" if wratio < 0.85 else "FAIL(水只是一張半透明貼圖)"])
+			wu["node"].stance_cmd = "prone"
+			await get_tree().create_timer(1.4).timeout
+			var pval: float = wu["node"]._prone
+			print("[wadechk] 在 %.2fm 深的水裡按趴下：趴姿值=%.2f %s" % [wet_d, pval,
+					"OK(水裡趴不下去)" if pval < 0.2 else "FAIL(臉泡在水裡還能趴)"])
+			wu["node"].stance_cmd = ""
+			wu["node"].stance_cmd = ""
+			wu["node"].global_position = whome
+			var wpx := _live_px(wu)
+			wu["wx"] = wpx.x
+			wu["wy"] = wpx.y
+			await get_tree().create_timer(0.4).timeout
+			_unshield(wu, wsave)
+		# I-4b7) 樓板是實體（鐵律 0③）：走樓梯上二樓，量他站的高度是不是二樓地板。
+		#        ⚠ 先前二樓地板只是畫出來的：站上去高度照 terrain 算＝整個人陷在一樓。
+		var mb = null
+		for bd2 in _buildings:
+			if bd2.floors > 1:
+				mb = bd2
+				break
+		if mb == null:
+			print("[floorchk] SKIP 這張圖沒有兩層以上的建築")
+		else:
+			var fu = _deployed[0]
+			var fsave := _shield(fu)
+			var fhome: Vector3 = fu["node"].global_position   # 同上：測完要回原位
+			fu["node"].stop()
+			fu["node"].want_prone = false
+			fu["node"].stance_cmd = "stand"
+			var bhalf := Vector2(mb.rect.size.x * WORLD_SCALE * 0.5,
+					mb.rect.size.y * WORLD_SCALE * 0.5)
+			# 樓梯底端（_stairs 的幾何：局部 x = half.x-0.8，沿 +z 往上爬）
+			fu["node"].global_position = mb.position + Vector3(bhalf.x - 0.8, 0.0, -bhalf.y + 0.5)
+			await get_tree().create_timer(0.8).timeout
+			var y_before: float = fu["node"].global_position.y - mb.position.y
+			var tf := 0.0
+			while tf < 4.0:
+				await get_tree().process_frame
+				var dtf: float = get_process_delta_time()
+				tf += dtf
+				fu["node"].move_dir(Vector3(0, 0, 1), dtf)
+			var y_after: float = fu["node"].global_position.y - mb.position.y
+			print("[floorchk] 沿樓梯往上走 4 秒：離一樓地板 %.2fm → %.2fm（樓高 %.2fm） %s"
+					% [y_before, y_after, mb.FLOOR_H,
+					"OK(真的走上二樓)" if y_after > mb.FLOOR_H * 0.75 else "FAIL(樓梯爬不上去)"])
+			var terr_y: float = terrain.height_at_world(fu["node"].global_position)
+			var sup_y: float = _ground_height(fu["node"].global_position)
+			print("[floorchk] 二樓腳下支撐面 %.2fm vs 地形高度 %.2fm %s" % [sup_y, terr_y,
+					"OK(樓板撐住了)" if sup_y > terr_y + 1.0 else "FAIL(人陷在一樓地面)"])
+			await _snap("res://phys_floor2.png")
+			fu["node"].stance_cmd = ""
+			fu["node"].global_position = fhome
+			var fpx := _live_px(fu)
+			fu["wx"] = fpx.x
+			fu["wy"] = fpx.y
+			await get_tree().create_timer(0.4).timeout
+			_unshield(fu, fsave)
+		# I-4b8) 跑動中手臂與武器不可以消失（使用者 2026-07-27 截圖：畫面上只剩身體）。
+		#        真因是 IK 在手臂折疊時算出 NaN 四元數，寫進骨架後整條手臂的蒙皮塌陷。
+		#        NaN 不會噴任何錯誤訊息，只能靠「量骨頭座標是不是有限值」抓。
+		var au = _deployed[0]
+		var asave := _shield(au)
+		var ahome: Vector3 = au["node"].global_position
+		au["node"].stop()
+		au["node"].stance_cmd = ""
+		var asks: Array = au["node"]._model.find_children("*", "Skeleton3D", true, false)
+		if asks.is_empty():
+			print("[armchk] SKIP 這個模型沒有骨架")
+		else:
+			var ask: Skeleton3D = asks[0]
+			var hbi: int = ask.find_bone("Hand.R")
+			var sbi: int = ask.find_bone("Shoulder.R")
+			if hbi < 0 or sbi < 0:
+				print("[armchk] SKIP 找不到 Hand.R/Shoulder.R")
+			else:
+				var nan_frames := 0
+				var reach_min := 9.9
+				var reach_max := 0.0
+				var ta := 0.0
+				var spin := 0.0
+				while ta < 3.0:
+					await get_tree().process_frame
+					var dta: float = get_process_delta_time()
+					ta += dta
+					spin += dta * 2.2                     # 邊跑邊轉向，逼 IK 走過各種角度
+					au["node"].move_dir(Vector3(cos(spin), 0, sin(spin)), dta)
+					var hp: Vector3 = ask.get_bone_global_pose(hbi).origin
+					var sp: Vector3 = ask.get_bone_global_pose(sbi).origin
+					if not (is_finite(hp.x) and is_finite(hp.y) and is_finite(hp.z)):
+						nan_frames += 1
+						continue
+					# 用「相對於整條手臂 rest 長度」的比例，這個骨架的骨長是 0.001 量級，
+					# 寫死公尺級門檻會永遠通過（本專案踩過兩次的坑）。
+					var rest_len: float = ask.get_bone_rest(hbi).origin.length() + 0.000001
+					var rel: float = sp.distance_to(hp) / maxf(rest_len, 0.000001)
+					reach_min = minf(reach_min, rel)
+					reach_max = maxf(reach_max, rel)
+				print("[armchk] 邊跑邊轉 3 秒：NaN 幀=%d、手到肩距離(相對骨長) %.2f~%.2f %s"
+						% [nan_frames, reach_min, reach_max,
+						"OK(手臂一直在)" if (nan_frames == 0 and reach_min > 0.2 and reach_max < 40.0)
+						else "FAIL(手臂算出 NaN 或被拉爆＝畫面上會整條消失)"])
+				var gun_ok: bool = au["node"]._gun_node == null or au["node"]._gun_node.visible
+				print("[armchk] 跑動後武器仍在場上=%s %s" % [gun_ok,
+						"OK" if gun_ok else "FAIL(槍不見了)"])
+				await _snap("res://phys_arm_run.png")
+		au["node"].global_position = ahome
+		var apx := _live_px(au)
+		au["wx"] = apx.x
+		au["wy"] = apx.y
+		await get_tree().create_timer(0.4).timeout
+		_unshield(au, asave)
 		# I-4c) AI 繞開實體障礙（AI09 [navchk]）：直接驗純函式，不受敵方階段時序干擾
 		if _blockers.is_empty():
 			print("[navchk] SKIP 這張圖沒有中景障礙")
 		else:
 			var nseg = null
 			for bk3 in _blockers:
+				# ⚠ 排除深水圍欄：它是「地圖邊界」不是「繞得過去的障礙」，
+				#   而且是全場最長的線段——不排除的話 navchk 等於在要求 AI 繞過整片海。
+				if String(bk3.get("k", "")) == "deepwater":
+					continue
 				if bk3["t"] == "seg" and (nseg == null or float(bk3["hl"]) > float(nseg["hl"])):
 					nseg = bk3
 			if nseg == null:
@@ -2897,29 +3133,93 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 			continue                  # 貼著障礙開火（t≈0）不算被自己的掩體擋住
 		if lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
 			return false
-	# 載具：3m 級的鋼鐵，2.4m 高，任何姿勢的彈道都擋。射手與目標本身要排除。
+	# 單位本身也是固體（鐵律 0①）。射手與目標本身要排除。
+	# 載具＝3m 級的鋼鐵、2.4m 高，任何姿勢的彈道都擋。
+	# ⚠ 步兵先前完全不擋彈道，於是隔著三個人也打得到最後一個——這和「1.32m 的沙包擋得住」
+	#   直接矛盾（沙包是固體、人不是？）。人一樣看高度：站著擋到 1.75m、蹲 1.22m、
+	#   趴 0.55m，所以「隊友趴下讓出火線」在規則層是真的成立，不是演出。
+	#   敵我同一條規則——物理不看陣營。
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
 	for v in units:
-		if v == ign_a or v == ign_b or not v["alive"] or not Unit.is_vehicle_cls(v["cls"]):
+		if v == ign_a or v == ign_b or not v["alive"] or not is_instance_valid(v["node"]):
 			continue
-		if not is_instance_valid(v["node"]):
-			continue
+		var is_veh: bool = Unit.is_vehicle_cls(v["cls"])
 		var vp := Vector2(v["node"].global_position.x / WORLD_SCALE + mw * 0.5,
 				v["node"].global_position.z / WORLD_SCALE + mh * 0.5)
-		var rv: float = VEHICLE_R / WORLD_SCALE
+		var rv: float = (VEHICLE_R if is_veh else BODY_R) / WORLD_SCALE
 		var tcv: float = (vp - a).dot(d1) / l2
 		var pv: float = (a + d1 * tcv).distance_to(vp)
 		if pv >= rv:
 			continue
 		var tv: float = tcv - sqrt(rv * rv - pv * pv) / seg_len
-		if tv > 0.001 and tv < 1.0:
+		if tv <= 0.001 or tv >= 1.0:
+			continue
+		if is_veh:
+			return false
+		if lerpf(ya, yb, tv) < v["node"].body_top():
 			return false
 	return true
 
 # 實體射線：從 a 到 b，回傳最近命中比例（0~1，1＝沒撞到）。牆一律擋；中景障礙
 # 只有「比射線在該點的離地高度還高」才擋（槍口 1.3m 高本來就該越過 1.05m 的柵欄）。
 # 給 Unit.solid_probe 用（貼牆抬槍）。
+# 腳下支撐面（地形 ∪ 建築樓板）。Unit.ground_sampler 走這裡。
+# 支撐面粗剔除框＝所有建築與矮障礙的聯集外框。戰場上絕大多數取樣點都在框外，
+# 一次 Rect2.has_point 就能省掉整個迴圈。
+func _rebuild_support_box() -> void:
+	_low_grid = {}
+	_has_support = not _buildings.is_empty()
+	for bk in _low_blk:
+		var r: float = float(bk["r"])
+		var bb: Rect2
+		if bk["t"] == "cir":
+			bb = Rect2(bk["c"] - Vector2(r, r), Vector2(r, r) * 2.0)
+		else:
+			bb = Rect2(bk["a"], Vector2.ZERO).expand(bk["b"]).grow(r)
+		var x0: int = int(floor(bb.position.x / LOWGRID_PX))
+		var x1: int = int(floor(bb.end.x / LOWGRID_PX))
+		var y0: int = int(floor(bb.position.y / LOWGRID_PX))
+		var y1: int = int(floor(bb.end.y / LOWGRID_PX))
+		for gx in range(x0, x1 + 1):
+			for gy in range(y0, y1 + 1):
+				var key := Vector2i(gx, gy)
+				if not _low_grid.has(key):
+					_low_grid[key] = []
+				(_low_grid[key] as Array).append(bk)
+		_has_support = true
+
+func _ground_height(p: Vector3) -> float:
+	var g: float = terrain.height_at_world(p) if terrain != null else 0.0
+	if not _has_support:
+		return g
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var px: float = p.x / WORLD_SCALE + mw * 0.5
+	var py: float = p.z / WORLD_SCALE + mh * 0.5
+
+	for bd in _buildings:
+		var f: float = bd.floor_at(px, py, p.y)
+		if f > g:
+			g = f
+	# 矮障礙的頂面：踩在 0.22m 的沙包上，腳就在 0.22m，不是穿過去也不是被彈開。
+	# 只掃 _low_blk（少數幾個），全表掃會被每幀 5 次的取樣成本吃掉幀時。
+	var q := Vector2(px, py)
+	var cell: Array = _low_grid.get(Vector2i(int(floor(px / LOWGRID_PX)),
+			int(floor(py / LOWGRID_PX))), [])
+	for bk in cell:
+		var inside := false
+		if bk["t"] == "cir":
+			inside = q.distance_squared_to(bk["c"]) < pow(float(bk["r"]), 2.0)
+		else:
+			inside = Geometry2D.get_closest_point_to_segment(q, bk["a"], bk["b"]).distance_squared_to(q) 					< pow(float(bk["r"]), 2.0)
+		if not inside:
+			continue
+		var top: float = (terrain.height_at(px, py) if terrain != null else 0.0) + float(bk.get("h", 0.2))
+		if top > g:
+			g = top
+	return g
+
 func _solid_ray(a: Vector3, b: Vector3) -> float:
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
@@ -3057,6 +3357,10 @@ func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 	if not _buildings.is_empty():
 		p = _push_walls_px(p, r_px)
 	for bk in _blockers:
+		# ⚠ 深水圍欄的 h 登記成 0.0（它不擋子彈），但它擋人——不能被當成「矮到可以踩過去」。
+		#   高度欄位在這裡有兩種語意，必須用 k 區分，否則新規則會把海當平地。
+		if float(bk.get("h", 1.2)) <= STEP_UP and String(bk.get("k", "")) != "deepwater":
+			continue          # 矮障礙用「踩上去」處理（_ground_height），不水平推
 		var need: float = r_px + float(bk["r"])
 		var closest: Vector2
 		if bk["t"] == "cir":
@@ -3299,7 +3603,10 @@ func _build_ground() -> void:
 	terrain.build(map_data, WORLD_SCALE)
 	_apply_sky(str(map_data.get("sky", "day")))
 	_build_water()
-	Unit.ground_sampler = func(p: Vector3) -> float: return terrain.height_at_world(p)
+	# 腳下高度的唯一真相＝地形高度與建築樓板取高者（鐵律 0③）。
+	# ⚠ 先前只問地形，站在二樓的人高度照一樓地面算＝整個人陷進樓板裡。
+	Unit.ground_sampler = _ground_height
+	Unit.water_sampler = func(p: Vector3) -> float: return terrain.water_depth_world(p)
 	# 槍口不可以插進固體（使用者 2026-07-26 第二次指正）：把「實體射線」交給 Unit，
 	# 它在瞄準時自己判斷要不要抬槍。見 Unit.solid_probe。
 	Unit.solid_probe = func(a: Vector3, b: Vector3) -> float: return _solid_ray(a, b)
@@ -3324,6 +3631,9 @@ func _build_ground() -> void:
 	# 舊做法是擺現成模型的實心外殼＋一個圓形掩體，玩家進不去、視線也只能用圓近似。
 	_buildings = []
 	_blockers = []          # 重建場景時一定要清，否則上一張地圖的障礙會留在新戰場上
+	_low_blk = []
+	_low_grid = {}
+	_has_support = false
 	_tree_feet = []
 	var solids = map_data.get("solids", [])
 	if solids is Array:
@@ -3402,7 +3712,12 @@ func _build_ground() -> void:
 	# ⚠ 2026-07-26：這裡先前只吃 props.blockers，沙包牆（Fortify 產的）從來沒進碰撞表，
 	#   所以上一批宣稱「所有物體都是實體」時，沙包其實還是可以直接走過去（使用者實測抓到）。
 	#   工事的障礙一定要一起併進來。
-	_blockers = props.blockers + fort.blockers
+	_blockers = props.blockers + fort.blockers + _water_blk
+	_low_blk = []
+	for bk0 in _blockers:
+		if float(bk0.get("h", 1.2)) <= STEP_UP and String(bk0.get("k", "")) != "deepwater":
+			_low_blk.append(bk0)
+	_rebuild_support_box()
 	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感），樹幹本身也是實體
 	_scatter_trees(mw, mh)
 	# 草最後鋪：禁草區要用建築的實際佔地，樹腳的草也要等樹放好才知道位置
@@ -3621,6 +3936,7 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 # 水面（海灘/海峽/港口）：一片起伏的半透明水色平面蓋在水域上。
 # 深水對步兵不可通行（鐵律 0：人不會走進兩公尺深的海裡打仗），登記成線段圍欄。
 func _build_water() -> void:
+	_water_blk = []
 	var rects: Array = []
 	for wkey in ["waters", "deepwaters", "shallows"]:
 		for wr in map_data.get(wkey, []):
@@ -3648,7 +3964,7 @@ func _build_water() -> void:
 		mi.material_override = wmat
 		var c: Vector2 = r.get_center()
 		# 淺水面略低：三種水域矩形會重疊，同高度會疊出過亮的白片（實拍）
-		var wy: float = -0.30 - (0.06 if pair[1] == "shallows" else 0.0)
+		var wy: float = BattleTerrain.WATER_SURFACE_Y - (0.06 if pair[1] == "shallows" else 0.0)
 		mi.position = Vector3((c.x - map_data.get("w", 960) * 0.5) * WORLD_SCALE, wy,
 				(c.y - map_data.get("h", 600) * 0.5) * WORLD_SCALE)
 		world.add_child(mi)
@@ -3660,8 +3976,9 @@ func _build_water() -> void:
 			for i in 4:
 				var a2: Vector2 = corners[i]
 				var b2: Vector2 = corners[(i + 1) % 4]
-				_blockers.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
-						"h": 0.0, "m": (a2 + b2) * 0.5, "hl": a2.distance_to(b2) * 0.5})
+				_water_blk.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
+						"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
+						"hl": a2.distance_to(b2) * 0.5})
 
 # 水面 shader：兩層正弦波起伏＋菲涅耳反光。刻意簡單——手機 WebGL2 也要跑得動。
 const WATER_SHADER := """

@@ -75,6 +75,10 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 			var tilt: float = rng.randf_range(-0.10, 0.10)
 			_bag(Vector2(cx, cy), pos, Vector3(bag_l, bag_h, bag_w), yaw, tilt, rng)
 	# 幾個掉在地上的袋子：整齊排列看起來像新品，戰場上的工事不會是新的
+	# ⚠ 這幾個袋子先前是純視覺，沒有進碰撞表——使用者 2026-07-27 截圖裡「腿插進沙包」
+	#   就是踩到它們。畫得出來的東西一定要有碰撞（鐵律 0①）。
+	#   它們只有 0.22m 高，現實裡是**踩上去**不是繞過去，所以登記成矮障礙
+	#   （h ≤ 0.5m），由 Main._ground_height 給頂面支撐、_resolve_solids 不水平推。
 	for k in 3:
 		var off := Vector3(dir.x * rng.randf_range(-length_m * 0.6, length_m * 0.6)
 				+ rng.randf_range(-0.5, 0.5), bag_h * 0.45,
@@ -82,6 +86,8 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 				+ rng.randf_range(0.5, 1.1))
 		_bag(Vector2(cx, cy), off, Vector3(bag_l, bag_h, bag_w),
 				rng.randf() * TAU, rng.randf_range(-0.5, 0.5), rng)
+		blockers.append({"t": "cir", "c": Vector2(cx, cy) + Vector2(off.x, off.z) / _ws,
+				"r": bag_l * 0.5 / _ws, "h": bag_h, "k": "sandbag_loose"})
 	# 實體：沙包牆是一道牆，人不可能從中間穿過去（使用者 2026-07-26 指正
 	# 「任何的物體都是不能穿越的」）。用線段涵蓋整道牆。
 	var half_len: float = length_m * 0.5 / _ws

@@ -147,7 +147,15 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	var dir := to_t.normalized()
 
 	# 1) 先讓整條手臂指向目標
-	_rotate_bone(ui, Quaternion((c - a).normalized(), dir))
+	# ⚠⚠ 這裡曾經是「跑步時手臂與武器整個消失」的真兇（使用者 2026-07-27 截圖）：
+	#   手臂完全折疊時 c（手）會落回 a（肩）附近，(c-a).normalized() 變成零向量，
+	#   Quaternion(零向量, dir) 產出 NaN → 骨骼 global pose 變 NaN →
+	#   蒙皮頂點跑到無限遠＝**整條手臂連同掛在手上的槍一起從畫面上消失**（身體還在）。
+	#   NaN 一旦寫進骨架就會沿著子骨傳下去，所以退化情況一定要在寫入前擋掉。
+	var arm_vec: Vector3 = c - a
+	if arm_vec.length() < eps:
+		return false
+	_rotate_bone(ui, Quaternion(arm_vec.normalized(), dir))
 	b = _dst.get_bone_global_pose(li).origin
 	c = _dst.get_bone_global_pose(hi).origin
 
@@ -184,6 +192,10 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 
 # 對骨骼疊加一段「骨架空間」的旋轉（換算成該骨相對父骨的 local 姿勢）
 func _rotate_bone(bi: int, q: Quaternion) -> void:
+	# 最後一道防線：非有限的四元數（NaN/inf）絕不可以寫進骨架——
+	# 寫進去之後整條骨鏈的蒙皮會塌陷成看不見，而且不會有任何錯誤訊息。
+	if not (is_finite(q.x) and is_finite(q.y) and is_finite(q.z) and is_finite(q.w)):
+		return
 	var g := _dst.get_bone_global_pose(bi).basis.get_rotation_quaternion()
 	var p := _dst.get_bone_parent(bi)
 	var pq := Quaternion.IDENTITY

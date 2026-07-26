@@ -232,6 +232,38 @@ func _stairs(half: Vector2, mat: BaseMaterial3D) -> void:
 				Transform3D(Basis(), Vector3(half.x - 0.8, float(i) * (FLOOR_H / float(n)),
 						-half.y + 0.5 + float(i) * 0.28)))
 
+# 腳下的支撐面（鐵律 0③：有重量的東西會停在最近的支撐面上，不會沉到地形高度）。
+# ⚠ 先前二樓地板只是畫出來的：站在二樓的人高度照 terrain.height_at() 算，
+#   等於整個人陷在一樓的地面上——樓層根本不存在。
+# 回傳世界 y；這個點沒有支撐（不在建築範圍內）回 -INF，呼叫端自己退回地形高度。
+# y＝查詢者目前的腳底高度：只有「在腳下、或差一階以內」的樓板才撐得住，
+# 否則站在一樓會被二樓的樓板吸上去。
+const STEP_TOL := 0.35        # 一階台階的容差（樓梯每階 0.26m，抓 0.35 剛好）
+func floor_at(px: float, py: float, y: float) -> float:
+	if not rect.has_point(Vector2(px, py)):
+		return -INF
+	var lp3: Vector3 = _px_to_local(Vector2(px, py))     # 既有工具：px → 建築局部座標
+	var lp := Vector2(lp3.x, lp3.z)
+	var ly: float = y - position.y            # 查詢高度換成「相對一樓地板」
+	var best := -INF
+	# 樓梯斜面：幾何是 12 塊階梯箱，但支撐面用一道連續斜面近似——
+	# 逐階判定會讓人每 0.26m 掉一次、走起來像在抽搐。
+	if floors > 1:
+		var half := Vector2(rect.size.x * _ws * 0.5, rect.size.y * _ws * 0.5)
+		var z0: float = -half.y + 0.36
+		var run: float = 12.0 * 0.28
+		if absf(lp.x - (half.x - 0.8)) <= 0.75 and lp.y >= z0 and lp.y <= z0 + run:
+			var ramp: float = clampf((lp.y - z0) / run, 0.0, 1.0) * FLOOR_H
+			if ramp <= ly + STEP_TOL:
+				best = maxf(best, ramp)
+	for f in floors:
+		var surf: float = float(f) * FLOOR_H
+		if surf <= ly + STEP_TOL:
+			best = maxf(best, surf)
+	if best == -INF:
+		return -INF
+	return position.y + best
+
 # 這個點是不是在建築室內（含牆內側）
 func inside(px: float, py: float) -> bool:
 	return rect.grow(-6.0).has_point(Vector2(px, py))

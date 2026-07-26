@@ -759,11 +759,11 @@ const MAX_TILT_DEG := 22.0
 func _tilt_to_slope(delta: float) -> void:
 	if _model == null or _dead:
 		return
-	if _prone > 0.05:
-		_model.rotation.x = lerpf(_model.rotation.x, 0.0, clampf(delta * 6.0, 0.0, 1.0))
-		_model.rotation.z = lerpf(_model.rotation.z, 0.0, clampf(delta * 6.0, 0.0, 1.0))
-		return
-	var n: Vector3 = _ground_normal()
+	# ⚠ 舊版一遇趴姿就把傾斜歸零＝人趴在斜坡上是水平浮著（使用者 2026-07-27 指正）。
+	#   當初關掉是怕跟趴姿骨骼互相抵銷，但趴姿寫的是**骨骼**、這裡寫的是**模型節點**，
+	#   兩者不同層，不會打架。真正要改的是取樣尺度：站著只佔一個腳掌，
+	#   趴著身體有 1.9m 長，靠 ±0.35m 取樣量不出他實際躺在什麼坡面上。
+	var n: Vector3 = _ground_normal(lerpf(0.35, 0.95, clampf(_prone, 0.0, 1.0)))
 	# 把坡面法線轉到角色的局部座標，才知道要往前後還是左右傾
 	var fwd: Vector3 = facing_dir()
 	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
@@ -776,16 +776,33 @@ func _tilt_to_slope(delta: float) -> void:
 	_model.rotation.z = lerpf(_model.rotation.z, -roll, k)
 
 # 腳下坡面法線：用四點取樣（±0.35m）估斜率，不必動到 Terrain 的介面
-func _ground_normal() -> Vector3:
+func _ground_normal(d := 0.35) -> Vector3:
 	if not ground_sampler.is_valid():
 		return Vector3.UP
-	var d := 0.35
 	var p: Vector3 = global_position
 	var hx1: float = ground_sampler.call(p + Vector3(d, 0, 0))
 	var hx0: float = ground_sampler.call(p - Vector3(d, 0, 0))
 	var hz1: float = ground_sampler.call(p + Vector3(0, 0, d))
 	var hz0: float = ground_sampler.call(p - Vector3(0, 0, d))
 	return Vector3(-(hx1 - hx0) / (2.0 * d), 1.0, -(hz1 - hz0) / (2.0 * d)).normalized()
+
+# 涉水（鐵律 0⑤：尺寸、速度一律真實量級）。
+# ⚠ 先前 waters/shallows 只是一張半透明貼圖：人沉在 1.2m 深的水裡，照 3m/s 行軍、
+#   姿勢不變、也不會被拖慢。deepwaters 有圍欄擋著，可涉的水反而完全沒有物理。
+# 實測量級（美軍徒涉資料）：及膝 0.4m 約剩七成、及腰 0.9m 約剩四成、
+# 及胸 1.3m 幾乎走不動。深過 0.35m 也不可能維持匍匐——臉會泡在水裡。
+static var water_sampler: Callable = Callable()
+
+func water_depth() -> float:
+	if not water_sampler.is_valid() or _is_vehicle:
+		return 0.0        # 載具涉水另有規則（履帶車可涉 1m），目前不套
+	return float(water_sampler.call(global_position))
+
+func wade_mul() -> float:
+	var dep: float = water_depth()
+	if dep <= 0.05:
+		return 1.0
+	return clampf(1.0 - dep * 0.63, 0.18, 1.0)
 
 # 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
 func is_moving() -> bool:
@@ -813,11 +830,11 @@ func move_dir(dir: Vector3, delta: float) -> void:
 		_crawl += delta * CRAWL_RATE
 		# 左右腿交替蹬地＝一個週期推進兩次；|sin| 的平均是 2/π≈0.637
 		var thrust: float = (0.08 + 0.92 * absf(sin(_crawl))) / 0.665
-		global_position += d * PRONE_SPEED * thrust * delta
+		global_position += d * PRONE_SPEED * thrust * wade_mul() * delta
 		_prone_hold += delta        # 持續走就會超過門檻，_update_crouch 會讓他起身
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
 		return
-	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul)
+	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) * wade_mul()
 	global_position += d * spd * delta
 	if _crouch > 0.5 and anim_names.has("crouch_walk"):
 		_play("crouch_walk")
@@ -848,6 +865,12 @@ func muzzle_height() -> float:
 # 軀幹中心高度（公尺）：被瞄的點。彈道要打到這個高度才算命中得到。
 func torso_height() -> float:
 	return lerpf(lerpf(1.15, 0.78, clampf(_crouch, 0.0, 1.0)), 0.28, clampf(_prone, 0.0, 1.0))
+
+# 身體最高點（公尺）＝頭頂。彈道要「比這個高」才飛得過這個人的頭上（鐵律 0①：
+# 人也是固體，不會讓子彈穿過去）。趴著的人只有 0.55m，站著擋到 1.75m——
+# 所以「隊友趴下讓火線」在這裡是真的成立的，不是演出。
+func body_top() -> float:
+	return lerpf(lerpf(1.75, 1.22, clampf(_crouch, 0.0, 1.0)), 0.55, clampf(_prone, 0.0, 1.0))
 
 func move_to(p: Vector3) -> void:
 	if _dead: return
@@ -956,6 +979,10 @@ func _update_crouch(delta: float) -> void:
 	elif stance_cmd == "":
 		ptarget = 1.0 if (want_prone and not _dead and _move_target == null
 				and _prone_hold < PRONE_BREAK_T) else 0.0
+	# 水深過腳踝就趴不下去：臉會泡在水裡（鐵律 0：現實怎樣就怎樣）。
+	# 這條凌駕玩家按鍵——按 Z 也趴不進 0.5m 的水裡，這不是操作限制是物理。
+	if water_depth() > 0.35:
+		ptarget = 0.0
 	_prone = move_toward(_prone, ptarget, delta * 2.4)
 	# 掩體區內小幅移動＝蹲行（真人在掩體後不會站起來走）；長距離移動才站起來跑。
 	var short_hop: bool = _move_target != null and global_position.distance_to(_move_target) < CROUCH_WALK_MAX
@@ -1047,7 +1074,7 @@ func _process(delta: float) -> void:
 		if ang > 0.6:
 			_play("idle")        # 還沒轉正：原地轉身
 		else:
-			global_position += d.normalized() * (WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul)) * delta
+			global_position += d.normalized() * (WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) * wade_mul()) * delta
 			if _crouch > 0.5 and anim_names.has("crouch_walk"):
 				_play("crouch_walk")              # 蹲行：掩體後移動不站起來
 			elif speed_mul > 1.5 and anim_names.has("sprint"):
