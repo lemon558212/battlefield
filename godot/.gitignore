@@ -51,3 +51,8 @@ terrain_*.png*
 bld_*.png*
 perf16.png*
 solid_*.png*
+# 驗收台輸出一律不進版控（總規則）：godot/ 根目錄下的 png 都是截圖產物，
+# 真正的美術資產在 assets/ 底下。先前逐個檔名列舉，每加一個新驗收台就漏一次
+# （2026-07-26 cam_wall / crawl_* 就是這樣被誤加進版控的）。
+/*.png
+/*.png.import
