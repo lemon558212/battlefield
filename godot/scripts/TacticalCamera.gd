@@ -18,6 +18,7 @@ var tps_dist := 3.1
 const TPS_SHOULDER := 0.62        # 過肩偏移：角色不擋準心
 const TPS_EYE := 1.52
 var mouse_sens := 0.14
+var _shoulder := 1.0              # 目前在哪一側肩膀（1＝右、-1＝左，換肩時平滑過渡）
 # 鏡頭碰撞用的回呼（由 Main 注入，因為牆與地形的真相在 Main/Terrain 那邊）：
 #   wall_probe.call(from, to) -> float  最近命中比例 0~1（1＝沒撞到）
 #   ground_probe.call(pos) -> float     該點的地面高度
@@ -101,19 +102,34 @@ func _apply_tps(delta: float) -> void:
 	var fwd := Vector3(sin(yr), 0, cos(yr))
 	var right := Vector3(fwd.z, 0, -fwd.x)
 	var head: Vector3 = tps_node.global_position + Vector3(0, TPS_EYE, 0)
-	var want: Vector3 = head - fwd * tps_dist * cos(pr) + right * TPS_SHOULDER 			- Vector3(0, sin(pr), 0) * tps_dist
+	# 自動換肩（GDD/07）：貼著牆往右靠時，右肩鏡頭會被牆推到臉前、畫面整片牆。
+	# 主流 TPS 的解法不是硬拉近，而是換到另一邊肩膀——那邊通常是空的。
+	var k_r := 1.0
+	var k_l := 1.0
+	if wall_probe.is_valid():
+		k_r = float(wall_probe.call(head, _tps_want(head, fwd, right, pr, 1.0)))
+		k_l = float(wall_probe.call(head, _tps_want(head, fwd, right, pr, -1.0)))
+	# 右肩優先：只有明顯比較差才換過去，否則鏡頭會在兩肩之間來回搖
+	var side_want: float = 1.0 if k_r >= k_l - 0.18 else -1.0
+	_shoulder = move_toward(_shoulder, side_want, delta * 3.0)
+	var want: Vector3 = _tps_want(head, fwd, right, pr, _shoulder)
 	# 鏡頭碰撞：牆擋住就把鏡頭拉近。不做這個，第三人稱一貼牆就會看穿牆壁，臨場感全毀。
+	# 下限 0.06 太近＝鏡頭黏在後腦杓上，畫面被牆佔滿；換肩之後這裡只需要輕微修正。
 	if wall_probe.is_valid():
 		var k: float = float(wall_probe.call(head, want))
 		if k < 1.0:
-			want = head.lerp(want, maxf(k - 0.12, 0.06))
+			want = head.lerp(want, clampf(k - 0.10, 0.30, 1.0))
 	if ground_probe.is_valid():
 		var gy: float = float(ground_probe.call(want)) + 0.45
 		if want.y < gy:
 			want.y = gy                     # 鏡頭不鑽進地面/壕溝壁
 	global_position = global_position.lerp(want, 1.0 - exp(-14.0 * delta))
-	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * 0.5
+	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * _shoulder * 0.5
 	look_at(look_at_p, Vector3.UP)
+
+# 某一側肩膀的鏡頭位置（side: 1＝右肩、-1＝左肩，中間值是換肩過程）
+func _tps_want(head: Vector3, fwd: Vector3, right: Vector3, pr: float, side: float) -> Vector3:
+	return head - fwd * tps_dist * cos(pr) + right * TPS_SHOULDER * side 			- Vector3(0, sin(pr), 0) * tps_dist
 
 func _apply() -> void:
 	var pr := deg_to_rad(pitch_deg)

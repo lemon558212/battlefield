@@ -861,6 +861,35 @@ func _selftest() -> void:
 						"OK" if not straight else "FAIL(障礙沒擋住路徑判定)"])
 				print("[navchk] 繞路後換了方向=%s、新路徑可行=%s %s" % [turned, alt_ok,
 						"OK(會繞開)" if (turned and alt_ok) else "FAIL(繞不出去)"])
+		# I-4d) 貼牆時的第三人稱鏡頭（GDD/07 [camchk]）：牆在右手邊時要自動換到左肩，
+		#      不然鏡頭被牆推到後腦杓、整個畫面都是牆，等於瞎著打。
+		if _buildings.is_empty():
+			print("[camchk] SKIP 這張圖沒有建築")
+		else:
+			var cbd = _buildings[0]
+			var cu = _deployed[0]
+			cu["node"].stop()
+			_end_action()
+			cp = 6
+			var cwx: float = cbd.rect.get_center().x
+			var cwy: float = cbd.rect.position.y - 4.0 / WORLD_SCALE   # 北牆外 4m
+			cu["node"].global_position = _to3d(cwx, cwy)
+			cu["wx"] = cwx
+			cu["wy"] = cwy
+			_begin_action(cu)
+			cu["ap"] = 300.0
+			cu["ap_max"] = 300.0
+			cam.tps_yaw = 0.0                    # 面向 +Z＝朝北牆走
+			await get_tree().create_timer(0.5).timeout
+			await _hold_key(KEY_W, 3.5)          # 用走的貼到牆邊
+			cam.tps_yaw = -90.0                  # 轉成沿牆走：牆落在右手邊
+			await get_tree().create_timer(1.5).timeout
+			var chead: Vector3 = cu["node"].global_position + Vector3(0, 1.52, 0)
+			var cdist: float = cam.global_position.distance_to(chead)
+			print("[camchk] 貼牆時鏡頭離頭 %.2fm、肩側=%+.2f（-1=左肩） %s" % [cdist, cam._shoulder,
+					"OK(沒被牆擠到臉上)" if cdist > 1.5 else "FAIL(鏡頭被壓到後腦杓)"])
+			await _snap("res://cam_wall.png")
+			_end_action()
 		# I) 敵方階段：AI 是否吃 CP/AP、是否真的用走的（不是瞬移）、會不會結束回合
 		var epos := {}
 		for x in units:
@@ -2037,7 +2066,7 @@ func _los_clear(a: Vector2, b: Vector2) -> bool:
 # 從 a 打一條線到 b，回傳最近的牆命中比例（0~1，1＝沒撞到）。鏡頭碰撞用。
 # 只看牆的水平投影：牆是落地到頂的，垂直方向不必算。
 func _wall_ray(a: Vector3, b: Vector3) -> float:
-	if _buildings.is_empty():
+	if _buildings.is_empty() and _blockers.is_empty():
 		return 1.0
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
@@ -2057,6 +2086,23 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 			var u: float = (p3 - p1).cross(d1) / den
 			if t > 0.0 and t < best and u > 0.0 and u < 1.0:
 				best = t
+	# 中景物件也要擋鏡頭：不然人躲在樹後面，鏡頭卻穿過樹幹看得一清二楚。
+	# 只算夠高、擋得住視線的（護欄 0.9m 高、瓦礫不在清單裡），矮的不擋鏡頭。
+	for bk in _blockers:
+		var c: Vector2
+		var rr: float = float(bk["r"])
+		if bk["t"] == "cir":
+			c = bk["c"]
+		else:
+			c = Geometry2D.get_closest_point_to_segment(p1, bk["a"], bk["b"])
+		# 圓與射線求交：先取射線上離圓心最近的點
+		var l2: float = d1.length_squared()
+		if l2 < 0.0001:
+			continue
+		var tt: float = clampf((c - p1).dot(d1) / l2, 0.0, 1.0)
+		var near: Vector2 = p1 + d1 * tt
+		if near.distance_to(c) < rr and tt > 0.0 and tt < best:
+			best = tt
 	return best
 
 func _seg_hit(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2) -> bool:
