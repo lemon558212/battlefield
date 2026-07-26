@@ -131,12 +131,19 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	var c: Vector3 = _dst.get_bone_global_pose(hi).origin
 	var l1 := a.distance_to(b)
 	var l2 := b.distance_to(c)
-	if l1 < 0.0001 or l2 < 0.0001:
+	# ⚠⚠ 容差一律用「相對骨長」，不可寫死公尺級常數（2026-07-26 使用者指正
+	#   「跑步兩隻手不見」的真因就在這裡）：hr_ 骨架的手臂 rest 長度只有 0.001~0.003
+	#   （骨架空間被放大約 1000 倍），寫死的 0.001 等於整條手臂的 33%。
+	#   於是餘弦定理的 d 被夾成垃圾值 → 肘角亂算 → 上臂被亂轉到蒙皮塌陷，
+	#   畫面上是「手貼在槍上、上臂整條消失」（手還對得上，是因為最後一步又把前臂指回目標）。
+	var reach: float = l1 + l2
+	if reach < 0.000001:
 		return false
+	var eps: float = reach * 0.002
 	var to_t: Vector3 = target - a
-	var d: float = clampf(to_t.length(), absf(l1 - l2) + 0.001, l1 + l2 - 0.001)
-	if to_t.length() < 0.0001:
+	if to_t.length() < eps:
 		return false
+	var d: float = clampf(to_t.length(), absf(l1 - l2) + reach * 0.02, reach * 0.98)
 	var dir := to_t.normalized()
 
 	# 1) 先讓整條手臂指向目標
@@ -147,12 +154,13 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	# 2) 依餘弦定理把肘彎到該有的角度，彎曲平面由 pole 決定
 	var want := acos(clampf((l1 * l1 + d * d - l2 * l2) / (2.0 * l1 * d), -1.0, 1.0))
 	var cur := acos(clampf((b - a).normalized().dot(dir), -1.0, 1.0))
+	# 同上：叉積的量級跟骨長成正比，門檻也要相對化
 	var axis: Vector3 = dir.cross(b - a)
-	if axis.length() < 0.0001:
+	if axis.length() < eps * 0.01:
 		axis = dir.cross(pole)
-	if axis.length() < 0.0001:
+	if axis.length() < eps * 0.01:
 		axis = dir.cross(Vector3.UP)
-	if axis.length() < 0.0001:
+	if axis.length() < eps * 0.01:
 		return false
 	_rotate_bone(ui, Quaternion(axis.normalized(), want - cur))
 	b = _dst.get_bone_global_pose(li).origin
@@ -161,7 +169,7 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	# 少了這步，肘會停在數學上任意的一側——外觀就是手臂扭轉一圈、蒙皮塌成細長條。
 	var e_perp: Vector3 = (b - a) - dir * (b - a).dot(dir)
 	var p_perp: Vector3 = pole - dir * pole.dot(dir)
-	if e_perp.length() > 0.0001 and p_perp.length() > 0.0001:
+	if e_perp.length() > eps * 0.01 and p_perp.length() > 0.0001:
 		e_perp = e_perp.normalized()
 		p_perp = p_perp.normalized()
 		var ang := atan2(e_perp.cross(p_perp).dot(dir), e_perp.dot(p_perp))
@@ -170,7 +178,7 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	c = _dst.get_bone_global_pose(hi).origin
 
 	# 3) 前臂補齊，讓手落在目標
-	if (c - b).length() > 0.0001 and (target - b).length() > 0.0001:
+	if (c - b).length() > eps * 0.01 and (target - b).length() > eps * 0.01:
 		_rotate_bone(li, Quaternion((c - b).normalized(), (target - b).normalized()))
 	return true
 
@@ -395,3 +403,17 @@ func _broken_parent(src: Skeleton3D, dst: Skeleton3D, si: int, di: int) -> bool:
 	if sp < 0 or dp < 0:
 		return false
 	return dst.get_bone_name(dp) == "Root" and src.get_bone_name(sp) != "root"
+
+# 把指定骨頭的姿勢重置回 rest（用於「IK 前先清乾淨」）。
+# ⚠ 為什麼需要：ik_two_bone 是「在當下姿勢上疊加旋轉」。動畫（例如跑步擺臂）本身已經
+#   把上臂繞自身軸扭轉了一大角度，IK 再疊上去，最終 local 旋轉極端到蒙皮塌陷——
+#   畫面上就是「手臂整條消失、只剩一小截手浮在槍上」（使用者 2026-07-26 指正
+#   「跑步兩隻手不見」，實拍發現待機也一樣）。
+func reset_bones(names: Array) -> void:
+	if _dst == null:
+		return
+	for n in names:
+		var bi: int = _dst.find_bone(String(n))
+		if bi < 0:
+			continue
+		_dst.set_bone_pose_rotation(bi, _dst.get_bone_rest(bi).basis.get_rotation_quaternion())

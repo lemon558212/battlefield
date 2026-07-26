@@ -1276,10 +1276,17 @@ func _aim_pose() -> void:
 	var b := Basis(aim * _gun_len_scale, y_axis * _gun_len_scale, z_axis * _gun_len_scale) * _gun_axis_fix
 	var xf := Transform3D(b, pocket + aim * 0.02 - b * _gun_stock)
 	# 3) 兩手抓上槍（右手握把、左手前護木）＋手指握攏
+	# ★先把手臂鏈重置回 rest：IK 是疊加式的，直接疊在動畫的擺臂扭轉上會讓上臂
+	#   local 旋轉極端到蒙皮塌陷（畫面上手臂整條消失，只剩一小截手浮在槍上）。
+	# ⚠ 不要重置 Shoulder：上臂的蒙皮權重有一部分綁在肩骨上，把肩骨拉回 rest
+	#   會讓上臂網格留在原處、只有前臂跟著 IK 跑，看起來就是「上臂消失」。
+	_rig.reset_bones(["UpperArm.R", "LowerArm.R", _hand_r])
+	if not (_state in LEFTHAND_FREE):
+		_rig.reset_bones(["UpperArm.L", "LowerArm.L", _hand_l])
 	# 肘部極向量：兩肘都朝下外側，這是持槍的自然姿勢；沒有約束會扭成怪解
 	var down := -Vector3.UP
 	var rightv := global_basis.x.normalized()
-	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.85 + rightv * 0.5).normalized())
+	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.7 + rightv * 0.62).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
 	# 匍匐時左手離開前護木，往前撐地拉行（右手仍握把把槍拖著走）。
 	# ★這是趴姿唯一「看得見」的推進動作——腿在身體後方被身體與草擋住，
@@ -1295,7 +1302,11 @@ func _aim_pose() -> void:
 				(down * 0.55 - rightv * 0.8).normalized())
 		_rig.curl_fingers(".L", 0, 30.0, 20.0)
 	elif not (_state in LEFTHAND_FREE):
-		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore, (down * 0.9 + rightv * 0.28).normalized())
+		# ⚠ 左臂的肘部極向量必須朝「左外側」（-rightv）。原本寫成 +rightv＝往身體內側，
+		#   左肘被夾進胸口、上臂整段藏進軀幹剪影裡，看起來就是「手臂不見了」
+		#   （使用者 2026-07-26 指正）。右臂朝右外側，兩邊是鏡像。
+		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore,
+				(down * 0.75 - rightv * 0.45).normalized())
 		_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf
