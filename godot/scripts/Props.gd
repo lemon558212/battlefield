@@ -183,9 +183,13 @@ func _rubble(m: Dictionary) -> void:
 			var dd: float = sqrt(rng.randf()) * float(sp[2])
 			var px: float = float(sp[0]) + cos(ang) * dd
 			var py: float = float(sp[1]) + sin(ang) * dd
-			var sz: float = rng.randf_range(0.18, 0.55)
+			var sz: float = rng.randf_range(0.14, 0.42)
+			# 埋 1/3 進土＋隨機傾倒：正擺在地表的方塊像垃圾桶蓋（實拍），
+			# 真實碎石是半埋而且歪的（鐵律 0：有重量的東西會沉進軟土）
 			_box("rock", Vector3(sz, sz * rng.randf_range(0.4, 0.8), sz * rng.randf_range(0.7, 1.3)),
-					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(px, py, sz * 0.25)))
+					Transform3D(Basis(Vector3.UP, rng.randf() * TAU)
+					* Basis(Vector3(1, 0, 0), rng.randf_range(-0.3, 0.3)),
+					_pos(px, py, sz * 0.12)))
 			# 大塊的瓦礫也要擋人（小碎石仍可跨過）
 			if sz > 0.36:
 				_blk_cir(Vector2(px, py), sz * 0.5, sz * 0.6)

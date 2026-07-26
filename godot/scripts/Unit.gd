@@ -1136,14 +1136,22 @@ func _aim_pose() -> void:
 		var hips: Vector3 = _rig.bone_pos("Hips")
 		# 軀幹：脊椎方向指向前上方（臥射是上身微抬、以雙肘撐地，不是整個人壓平）
 		_rig.point_bone("Hips", "Abdomen", (fwd * 0.92 + Vector3.UP * 0.39).normalized(), _prone)
+		# 頭抬起來看前方（鐵律 0：人在匍匐時要觀察前方，不是把臉埋進土裡——實拍抓到）
+		_rig.add_world_rotation("Neck", rgt, deg_to_rad(-24.0) * _prone)
+		_rig.add_world_rotation("Head", rgt, deg_to_rad(-20.0) * _prone)
 		# 匍匐擺動（2026-07-26）：靜止臥射時 sw 全為 0＝原本的姿勢，一動才擺。
 		# 匍匐的辨識特徵是「一腿屈膝外張蹬地、身體隨之側滾」，不是雙腿一起划。
 		var crawling: float = 1.0 if (is_moving() and _prone > 0.5) else 0.0
 		_crawl_amt = move_toward(_crawl_amt, crawling, 0.06)      # 起停要漸進，否則會抽一下
 		if _crawl_amt > 0.001:
 			# 身體隨著蹬地的那一腿側滾——這是匍匐看起來「有在使力」的來源
-			_rig.add_world_rotation("Hips", fwd, deg_to_rad(9.0) * sin(_crawl) * _crawl_amt)
-			_rig.add_world_rotation("Abdomen", fwd, deg_to_rad(5.0) * sin(_crawl) * _crawl_amt)
+			_rig.add_world_rotation("Hips", fwd, deg_to_rad(11.0) * sin(_crawl) * _crawl_amt)
+			_rig.add_world_rotation("Abdomen", fwd, deg_to_rad(6.0) * sin(_crawl) * _crawl_amt)
+			# ★骨盆偏擺（蛇行）：收右腿時骨盆往右轉、蹬地時轉回——真實匍匐的軀幹是
+			#   S 形蠕動，不是一塊硬板往前滑（實拍側視三格全程僵直，這是「像被拖著走」
+			#   剩下的最大原因；膝蓋動作在身體另一側，側視根本看不到）。
+			_rig.add_world_rotation("Hips", Vector3.UP, deg_to_rad(10.0) * sin(_crawl) * _crawl_amt)
+			_rig.add_world_rotation("Abdomen", Vector3.UP, deg_to_rad(-6.0) * sin(_crawl) * _crawl_amt)
 			# 上身在蹬地瞬間撐起、收腿時放低（跟 bob 同相位）：肘撐的動作感
 			_rig.add_world_rotation("Abdomen", rgt, deg_to_rad(-7.0) * sin(_crawl * 2.0) * _crawl_amt)
 		# ★腿：依美軍 STP 21-1-SMCT（Warrior Skills Level 1）的 low crawl 定義重寫。

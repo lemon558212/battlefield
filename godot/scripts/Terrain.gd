@@ -244,15 +244,27 @@ func _ground_color(v: Vector3) -> Color:
 	var c := grass
 	c = c.lerp(dirt, clampf((sl - 0.25) * 2.2, 0.0, 0.85))      # 斜面＝裸土
 	c = c.lerp(rock, clampf((sl - 0.85) * 1.6, 0.0, 0.6))       # 陡坡＝碎石
+	# 彈坑焦痕：直接烤進地表頂點色。先前是 Props 擺一堆懸空的黑色薄板（burn box），
+	# 在彈坑斜壁上會翹起、懸空——燒焦是「地表本身變黑」，不是一種物體（鐵律 0）。
+	for cr2 in _craters:
+		var dcr: float = Vector2(px - float(cr2.get("x", 0)), py - float(cr2.get("y", 0))).length()
+		var rcr: float = float(cr2.get("r", 36)) * 1.55
+		if dcr < rcr:
+			var kk: float = 1.0 - dcr / rcr
+			# 邊緣參差：疊雜訊讓焦痕不是正圓
+			kk *= clampf(0.55 + _vnoise(px * 0.05, py * 0.05) * 0.9, 0.0, 1.0)
+			# 上限 0.55：0.85 疊上黃昏陰影後彈坑變成看不見底的黑洞（實拍），
+			# 燒焦的土在現實裡仍反光，是深炭褐不是純黑
+			c = c.lerp(Color(0.16, 0.13, 0.10), clampf(kk * 1.1, 0.0, 0.55))
 	# 裸土斑塊：只靠坡度分層，平地就是一整片同色的草皮（實拍俯瞰很明顯）。
 	# 真實草地會有踩禿的土、乾掉的枯草塊，用兩層雜訊做出不規則邊界。
 	var pn: float = _vnoise(px * 0.006 + 41.0, py * 0.006 + 17.0)
 	var pn2: float = _vnoise(px * 0.028 + 9.0, py * 0.028 + 3.0)
 	var patch: float = clampf((pn * 0.8 + pn2 * 0.35 - 0.62) * 3.2, 0.0, 1.0)
-	c = c.lerp(dirt.lerp(Color(0.31, 0.26, 0.17), pn2), patch * 0.85)
+	c = c.lerp(dirt.lerp(Color(0.33, 0.27, 0.17), pn2), patch * 0.55)
 	# 枯草：另一組雜訊，偏黃綠，面積小一點
 	var dn: float = clampf((_vnoise(px * 0.013 + 77.0, py * 0.013 + 5.0) - 0.58) * 3.6, 0.0, 1.0)
-	c = c.lerp(Color(0.30, 0.29, 0.13), dn * 0.5)
+	c = c.lerp(Color(0.31, 0.30, 0.12), dn * 0.32)
 	if v.y < -0.25:
 		c = c.lerp(Color(0.26, 0.21, 0.15), clampf(-v.y * 0.55, 0.0, 0.8))   # 溝底/彈坑＝翻起的泥
 	# ⚠ 頂點色會被當成「線性空間」直接用，不轉換就會整片洗白——
@@ -387,9 +399,9 @@ func _build_backdrop() -> void:
 	# 三層：近山深而細、遠山淡而高大（遠山要更高才看得到，被近山擋掉一半）
 	# [半徑倍率, 高度下限, 高度上限, 顏色, 雜訊頻率, 段數]
 	var layers := [
-		[1.00, 26.0, 62.0, Color(0.32, 0.38, 0.43), 3.1, 92],
-		[1.55, 48.0, 108.0, Color(0.46, 0.54, 0.62), 2.3, 74],
-		[2.30, 82.0, 170.0, Color(0.60, 0.70, 0.80), 1.7, 58],
+		[1.00, 26.0, 62.0, Color(0.26, 0.31, 0.28), 3.1, 92],
+		[1.55, 48.0, 108.0, Color(0.40, 0.45, 0.50), 2.3, 74],
+		[2.30, 82.0, 170.0, Color(0.55, 0.62, 0.72), 1.7, 58],
 	]
 	# 太陽在西南（跟 Main 的主光一致）：那一側的坡面亮
 	var sun_dir := Vector2(-0.6, -0.8).normalized()
@@ -467,7 +479,7 @@ func _tuft_mesh(scale_f: float, blades := 7) -> ArrayMesh:
 	# ⚠ 頂點色會被當成線性空間直接用，不轉就整片偏亮——GDD/10「sRGB 洗白」，
 	#   地表 shader、地表頂點色之後，這是同一天第三次踩到。
 	var root := Color(0.16, 0.24, 0.09).srgb_to_linear()
-	var tipc := Color(0.40, 0.52, 0.22).srgb_to_linear()
+	var tipc := Color(0.48, 0.60, 0.24).srgb_to_linear()
 	for k in blades:
 		var a: float = rng.randf() * TAU
 		var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.38) * scale_f

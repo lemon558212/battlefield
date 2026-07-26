@@ -1435,9 +1435,9 @@ func _selftest() -> void:
 func _build_static() -> void:
 	# 太陽：暖色、柔邊陰影、角度更斜（拉長影子＝立體感）
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-46, 128, 0)
-	sun.light_color = Color(1.0, 0.94, 0.84)
-	sun.light_energy = 1.0
+	sun.rotation_degrees = Vector3(-26, 142, 0)   # 黃昏斜射：影子拉長＝體積感（正午頂光是死白的主因）
+	sun.light_color = Color(1.0, 0.87, 0.68)      # 金黃色溫
+	sun.light_energy = 1.35
 	sun.shadow_enabled = true
 	sun.shadow_blur = 1.0
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
@@ -1454,7 +1454,7 @@ func _build_static() -> void:
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-28, -50, 0)
 	fill.light_color = Color(0.72, 0.80, 0.95)
-	fill.light_energy = 0.16     # Forward+ 的天空環境光比 compat 強很多，補光要跟著收
+	fill.light_energy = 0.22     # Forward+ 的天空環境光比 compat 強很多，補光要跟著收
 	fill.shadow_enabled = false
 	add_child(fill)
 
@@ -1466,12 +1466,12 @@ func _build_static() -> void:
 	var sky_sh := Shader.new()
 	sky_sh.code = SKY_SHADER
 	sky_mat.shader = sky_sh
-	sky_mat.set_shader_parameter("top_color", Color(0.20, 0.40, 0.76))
-	sky_mat.set_shader_parameter("horizon_color", Color(0.72, 0.82, 0.90))
-	sky_mat.set_shader_parameter("cloud_color", Color(1.0, 0.99, 0.96))
-	sky_mat.set_shader_parameter("cloud_shadow", Color(0.55, 0.60, 0.68))
+	sky_mat.set_shader_parameter("top_color", Color(0.22, 0.38, 0.66))
+	sky_mat.set_shader_parameter("horizon_color", Color(0.92, 0.82, 0.66))   # 地平線帶金
+	sky_mat.set_shader_parameter("cloud_color", Color(1.0, 0.93, 0.82))
+	sky_mat.set_shader_parameter("cloud_shadow", Color(0.52, 0.50, 0.56))
 	sky_mat.set_shader_parameter("cloud_cover", 0.52)
-	sky_mat.set_shader_parameter("cloud_sharp", 2.6)
+	sky_mat.set_shader_parameter("cloud_sharp", 1.6)   # 邊緣更軟：2.6 的雲邊還是切得出多邊形
 	sky_mat.set_shader_parameter("drift", 0.004)
 	sky_mat.set_shader_parameter("ground_horizon", Color(0.60, 0.64, 0.58))
 	sky_mat.set_shader_parameter("ground_bottom", Color(0.26, 0.29, 0.25))
@@ -1485,7 +1485,7 @@ func _build_static() -> void:
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	# ⚠ 2026-07-26 換 Forward+ 後整個場景被洗白（GDD/10 五大事故的「sRGB 洗白」重演）：
 	#   compat 時代調的 0.9 環境光在 Forward+ 是過曝的。天空環境光要大幅收斂。
-	e.ambient_light_energy = 0.32
+	e.ambient_light_energy = 0.24     # 環境光再收：亮部靠太陽、暗部靠補光，對比才出得來
 	# 環境光遮蔽：物件接地處自然變暗，最有效的「不假」來源
 	e.ssao_enabled = true
 	e.ssao_radius = 1.2
@@ -1494,7 +1494,7 @@ func _build_static() -> void:
 	e.ssao_light_affect = 0.15
 	# 遠景霧氣：拉出空間深度
 	e.fog_enabled = true
-	e.fog_light_color = Color(0.58, 0.66, 0.74)
+	e.fog_light_color = Color(0.76, 0.72, 0.62)   # 黃昏霾是暖灰，不是冷藍
 	e.fog_density = 0.00045      # 0.0010 在遠鏡頭把整片戰場壓成灰綠（實拍），對比全失
 	e.fog_sky_affect = 0.0        # 霧吃到天空會把整片天壓成灰色（實拍發現）
 	e.fog_aerial_perspective = 0.30   # 遠景要褪成天空色，山脈才有距離感
@@ -1519,15 +1519,15 @@ func _build_static() -> void:
 	e.volumetric_fog_ambient_inject = 0.5
 	e.volumetric_fog_sky_affect = 0.0      # 同 fog_sky_affect：吃到天空會把整片天壓灰
 	e.tonemap_mode = Environment.TONE_MAPPER_ACES
-	e.tonemap_exposure = 0.92
+	e.tonemap_exposure = 1.0
 	e.tonemap_white = 4.0
 	e.glow_enabled = true
 	e.glow_intensity = 0.22
 	e.glow_bloom = 0.11
 	e.glow_hdr_threshold = 0.95
 	e.adjustment_enabled = true
-	e.adjustment_saturation = 1.10
-	e.adjustment_contrast = 1.14
+	e.adjustment_saturation = 1.22    # 飽和拉上去：灰綠地面與淡藍遠山是「洗白感」主因
+	e.adjustment_contrast = 1.10
 	var we := WorldEnvironment.new()
 	we.environment = e
 	add_child(we)
@@ -3570,7 +3570,7 @@ void sky() {
 	col += LIGHT0_COLOR * pow(sd, 900.0) * 8.0;      // 日盤
 	col += LIGHT0_COLOR * pow(sd, 6.0) * 0.12;       // 大氣輝光
 	if (dir.y > 0.004) {
-		vec2 uv = dir.xz / (dir.y + 0.13) * 0.5 + vec2(TIME * drift, TIME * drift * 0.6);
+		vec2 uv = dir.xz / (dir.y + 0.30) * 0.42 + vec2(TIME * drift, TIME * drift * 0.6);   // 分母加大：天頂的雲不再被投影擠成銳角多邊形
 		float n1 = fbm(uv * 1.6);
 		float n2 = fbm(uv * 4.1 + 7.0);
 		// fbm 值域大約 0.15~0.85（平均 0.5），所以門檻要落在這個區間裡才有雲。
