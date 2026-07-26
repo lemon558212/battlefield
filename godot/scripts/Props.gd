@@ -158,7 +158,7 @@ func _poles(m: Dictionary) -> void:
 		var d := 120.0
 		while d < total - 60.0:
 			var p: Vector2 = a + dir * d + nrm * float(r.get("w", 40)) * 1.6
-			if _off_limits(p):
+			if _off_limits(p) or (_terrain != null and _terrain.in_water(p.x, p.y)):
 				d += 260.0
 				continue
 			_blk_cir(p, 0.32, 6.2)
@@ -278,22 +278,29 @@ func _cables(m: Dictionary) -> void:
 		var has_prev := false
 		while d < total - 60.0:
 			var p: Vector2 = a + dir * d + nrm * float(r.get("w", 40)) * 1.6
-			if _off_limits(p):
+			if _off_limits(p) or (_terrain != null and _terrain.in_water(p.x, p.y)):
 				has_prev = false
 				d += 260.0
 				continue
 			if has_prev:
 				var span: float = prev.distance_to(p) * _ws
 				var steps := 6
+				# ⚠ 高度要沿「兩根桿子的桿頂」內插，不可每段各自取腳下地形高——
+				#   地形一起伏，每段基準高度都不同，電線就斷成一節節懸空黑棒
+				#   （QA 反驗證實拍抓到：forest/beach/desert 人眼視角天上飄黑槓）。
+				var h0: float = _terrain.height_at(prev.x, prev.y) if _terrain != null else 0.0
+				var h1: float = _terrain.height_at(p.x, p.y) if _terrain != null else 0.0
 				for i in steps:
 					var t0: float = float(i) / float(steps)
 					var t1: float = float(i + 1) / float(steps)
-					var m0: Vector2 = prev.lerp(p, (t0 + t1) * 0.5)
-					# 垂鏈：中間下垂最多
-					var sag: float = 0.9 * sin(PI * (t0 + t1) * 0.5)
+					var tm: float = (t0 + t1) * 0.5
+					var m0: Vector2 = prev.lerp(p, tm)
+					var sag: float = 0.9 * sin(PI * tm)      # 垂鏈：中間下垂最多
+					var hm: float = _terrain.height_at(m0.x, m0.y) if _terrain != null else 0.0
 					var ang2: float = atan2(p.y - prev.y, p.x - prev.x)
 					_box("cable", Vector3(span / float(steps) + 0.1, 0.06, 0.06),
-							Transform3D(Basis(Vector3.UP, -ang2), _pos(m0.x, m0.y, 5.5 - sag)))
+							Transform3D(Basis(Vector3.UP, -ang2),
+							_pos(m0.x, m0.y, lerpf(h0, h1, tm) + 5.5 - sag - hm)))
 			prev = p
 			has_prev = true
 			d += 260.0

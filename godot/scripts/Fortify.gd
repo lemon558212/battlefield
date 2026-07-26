@@ -34,7 +34,7 @@ func finish() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 0.97
-	mat.specular = 0.02
+	mat.metallic_specular = 0.02   # Godot 4 的名字；寫 specular 會刷 SpatialMaterial 警告
 	_st.set_material(mat)
 	var mi := MeshInstance3D.new()
 	mi.name = "Fortify"

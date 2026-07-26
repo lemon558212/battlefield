@@ -6,17 +6,6 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [e2e] 2 章節 01
 [e2e] 3 簡報 → 出擊
 [e2e] 4 對話：連點推進 (st=3)
-WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
-   at: _set (scene/resources/material.cpp:4096)
-   GDScript backtrace (most recent call first):
-       [0] finish (res://scripts/Fortify.gd:37)
-       [1] _build_ground (res://scripts/Main.gd:3221)
-       [2] _open_deploy (res://scripts/Main.gd:1583)
-       [3] <anonymous lambda> (res://scripts/Main.gd:1573)
-       [4] _dlg_step (res://scripts/UI.gd:388)
-       [5] _input (res://scripts/UI.gd:507)
-       [6] _send_click (res://scripts/Main.gd:239)
-       [7] _e2e (res://scripts/Main.gd:177)
 [rig] mg 重定向骨對數=20
 [rig] at 重定向骨對數=20
 [rig] sniper 重定向骨對數=20
@@ -33,4 +22,9 @@ WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
 [e2e]   位移=1.27m OK
 [sinkchk] 靜止 3 秒的垂直漂移：身體 +0.000m 模型 +0.000m 鏡頭 +0.000m OK(沒有下沉)
 [selftest] saved res://qa/e2e_battle.png
+[selftest] saved res://qa/e2e_hero_idle.png
+[selftest] saved res://qa/e2e_hero_run.png
+[bonechk] cls=sniper 骨數=62 找不到的骨=["Wrist.R"]
+[bonechk] 前 20 根骨名=["Root", "Hips", "Abdomen", "Torso", "Chest", "Neck", "Head", "Head_end", "Shoulder.L", "UpperArm.L", "LowerArm.L", "Hand.L", "Index2.L", "Index3.L", "Index4.L", "Index4.L_end", "Middle2.L", "Middle3.L", "Middle4.L", "Middle4.L_end"]
+[bonechk] want_prone=true _prone=0.00
 [e2e] DONE

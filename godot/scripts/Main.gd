@@ -257,6 +257,41 @@ func _e2e() -> void:
 			"OK(沒有下沉)" if (absf(dy_body) < 0.05 and absf(dy_model) < 0.05
 			and absf(dy_cam) < 0.20) else "FAIL(一直往下拉)"])
 	await _snap("res://e2e_battle.png")
+	# ★玩家視角近照：ActionTest 用的是通用測試模型，遊戲裡是英雄模型（骨架不同）。
+	#   驗證台過不等於遊戲裡對——使用者連續回報「手臂還是不見」，要用這張圖對質。
+	var hero = _deployed[0]
+	cam.clear_tps()
+	cam.set_follow(null)
+	cam.focus = hero["node"].global_position + Vector3(0, 1.1, 0)
+	cam.dist = 3.2
+	cam.pitch_deg = 8.0
+	cam.yaw = deg_to_rad(35.0)
+	await get_tree().create_timer(0.6).timeout
+	await _snap("res://e2e_hero_idle.png")
+	hero["node"].move_to(hero["node"].global_position + hero["node"].facing_dir() * 6.0)
+	await get_tree().create_timer(0.7).timeout
+	cam.focus = hero["node"].global_position + Vector3(0, 1.1, 0)
+	await _snap("res://e2e_hero_run.png")
+	# 英雄模型的骨架名單：趴姿/IK 都用 hr_ 骨名（Hips/UpperLeg.L/Shoulder.R…），
+	# 英雄若是別套骨架（Mixamo 41 骨）就會整段安靜失效＝畫面上人被扭成一根管子。
+	var hsk: Array = hero["node"].find_children("*", "Skeleton3D", true, false)
+	if hsk.is_empty():
+		print("[bonechk] 英雄沒有骨架！")
+	else:
+		var sk2: Skeleton3D = hsk[0]
+		var miss: Array = []
+		for bn in ["Hips", "Abdomen", "Torso", "Chest", "Neck", "Head",
+				"Shoulder.R", "UpperArm.R", "LowerArm.R", "Hand.R", "Wrist.R",
+				"UpperLeg.L", "LowerLeg.L", "Foot.L"]:
+			if sk2.find_bone(bn) < 0:
+				miss.append(bn)
+		print("[bonechk] cls=%s 骨數=%d 找不到的骨=%s" % [hero["cls"], sk2.get_bone_count(), miss])
+		var nm: Array = []
+		for i in mini(sk2.get_bone_count(), 20):
+			nm.append(sk2.get_bone_name(i))
+		print("[bonechk] 前 20 根骨名=", nm)
+		print("[bonechk] want_prone=%s _prone=%.2f" % [hero["node"].want_prone,
+				hero["node"]._prone])
 	print("[e2e] DONE")
 	get_tree().quit(0)
 
@@ -2411,7 +2446,10 @@ func _tps_control(delta: float) -> void:
 	if float(acting["ap"]) <= 0.0:
 		return
 	var flat := Vector3(fwd.x, 0, fwd.z).normalized()
-	var right := Vector3(flat.z, 0, -flat.x)
+	# ⚠ 左右相反的真因（使用者 2026-07-26 指正）：Godot 是右手座標、-Z 為前，
+	#   前向量 (0,0,-1) 的右手邊是世界 +X。舊寫法 (flat.z, 0, -flat.x) 算出來是 (-1,0,0)
+	#   ＝左邊，所以按右鍵往左走。正確是 (-flat.z, 0, flat.x)。
+	var right := Vector3(-flat.z, 0, flat.x)
 	var dir: Vector3 = (flat * iz + right * ix).normalized()
 	var before: Vector3 = node.global_position
 	node.move_dir(dir, delta)
@@ -3236,6 +3274,21 @@ func _build_ground() -> void:
 				break
 			if _in_any_deploy(sdef):
 				continue
+			# 蓋在水裡的房子跳過（QA 反驗證：海峽圖一棟民房泡在深水正中央）。
+			# 房子不會蓋在海裡——佈局資料是舊陸戰版沿用的，場景層要自己守。
+			var srect := Rect2(float(sdef.get("x", 0)), float(sdef.get("y", 0)),
+					float(sdef.get("w", 60)), float(sdef.get("h", 60)))
+			var wet := false
+			for wkey2 in ["waters", "deepwaters", "shallows"]:
+				for wr2 in map_data.get(wkey2, []):
+					if srect.intersects(Rect2(float(wr2.get("x", 0)), float(wr2.get("y", 0)),
+							float(wr2.get("w", 60)), float(wr2.get("h", 60)))):
+						wet = true
+						break
+				if wet:
+					break
+			if wet:
+				continue
 			var bd = BUILDING.new()
 			world.add_child(bd)
 			var cx: float = float(sdef.get("x", 0)) + float(sdef.get("w", 60)) * 0.5
@@ -3446,7 +3499,7 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 	var rmul: float = float(terrain.biome.get("rock_mult", 1.0))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
-	var want: int = int(gwp * ghp / 52000.0 * rmul * 10.0)
+	var want: int = int(gwp * ghp / 52000.0 * rmul * 5.5)   # 10.0 密到像一地鵝卵蛋（QA 實拍）
 	var sm := SphereMesh.new()
 	sm.radial_segments = 7
 	sm.rings = 4
@@ -3471,7 +3524,16 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 				break
 		if bad or (terrain != null and (terrain.in_trench(px, py) or terrain.in_water(px, py))):
 			continue
-		var sc: float = rng.randf_range(0.35, 1.5)
+		# 最小間距：巨石成堆貼在一起就是「一窩蛋」，散開才像地質
+		var too_close := false
+		for ex in xfs:
+			if Vector2((ex as Transform3D).origin.x, (ex as Transform3D).origin.z).distance_to(
+					Vector2((px - gwp * 0.5) * WORLD_SCALE, (py - ghp * 0.5) * WORLD_SCALE)) < 3.5:
+				too_close = true
+				break
+		if too_close:
+			continue
+		var sc: float = rng.randf_range(0.30, 1.9)
 		var ty: float = terrain.height_at(px, py)
 		var b := (Basis(Vector3.UP, rng.randf() * TAU)
 				* Basis(Vector3(1, 0, 0), rng.randf_range(-0.25, 0.25))).scaled(
@@ -3547,10 +3609,19 @@ void vertex() {
 
 void fragment() {
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	ALBEDO = mix(vec3(0.10, 0.26, 0.30), vec3(0.55, 0.70, 0.72), fres);
-	ALPHA = 0.82;
-	ROUGHNESS = 0.08;
-	SPECULAR = 0.6;
+	// 邊緣淡出：矩形水塊的硬直角像貼上去的色紙（QA 反驗證指出）。
+	// ⚠ 不可用 floor() 的方塊雜訊做參差——會變成棋盤格（第一版實拍）。
+	//   改用連續的正弦擾動，邊界才是自然的曲線。
+	float edge = min(min(UV.x, 1.0 - UV.x), min(UV.y, 1.0 - UV.y));
+	float wob = 0.012 * (sin(UV.x * 47.0) + sin(UV.y * 39.0 + 1.7));
+	// 深度感：離岸越遠越深越暗（淺水帶偏綠、深水偏靛）
+	float deep = smoothstep(0.0, 0.22, edge);
+	vec3 shallow_c = vec3(0.30, 0.50, 0.48);
+	vec3 deep_c = vec3(0.05, 0.15, 0.26);
+	ALBEDO = mix(mix(shallow_c, deep_c, deep), vec3(0.62, 0.74, 0.78), fres * 0.7);
+	ALPHA = 0.88 * smoothstep(0.0, 0.05 + wob, edge);
+	ROUGHNESS = 0.06;
+	SPECULAR = 0.7;
 }
 """
 
