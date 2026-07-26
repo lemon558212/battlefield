@@ -671,15 +671,44 @@ func _selftest() -> void:
 			var door_push: float = _resolve_walls(door_pt).distance_to(door_pt)
 			print("[buildingchk] 牆推開人 %.2fm、門口不推 %.2fm %s" % [pushed, door_push,
 					"OK" if pushed > 0.1 and door_push < 0.1 else "FAIL"])
-			# 屋頂淡出：把操控中的單位放進室內
+			# ★人要跟實體一樣：不可以把兵直接放進屋裡驗屋頂淡出（那等於繞過牆）。
+			#   改成從屋外「用走的」進去：先撞牆證明進不去，再走門證明進得去。
 			var iu = _deployed[0]
 			iu["node"].stop()
-			iu["node"].global_position = _to3d(bc.x, bc.y)
-			iu["wx"] = bc.x
-			iu["wy"] = bc.y
 			_end_action()
 			cp = 6
+			# 隔離：場上建築彼此很近，不只留一棟的話會撞到「隔壁棟」的牆，
+			# 看起來像門進不去（實測兵停在門外 1.25m，其實是被鄰棟擋住）。
+			var keep_b2 := _buildings
+			_buildings = [bd]
+			var door_px: Vector2 = bd.doors[0]
+			# (a) 對著實心牆走：門在南牆 32% 處，往旁邊挪 4m 就是牆
+			var wall_x: float = door_px.x + 4.0 / WORLD_SCALE
+			iu["node"].global_position = _to3d(wall_x, door_px.y + 5.0 / WORLD_SCALE)
+			iu["wx"] = wall_x
+			iu["wy"] = door_px.y + 5.0 / WORLD_SCALE
 			_begin_action(iu)
+			cam.tps_yaw = 180.0            # 面向 -Z（往建築走）
+			await get_tree().create_timer(0.5).timeout
+			await _hold_key(KEY_W, 4.0)
+			var in_after_wall: bool = bd.inside(iu["wx"], iu["wy"])
+			print("[solidchk] 對著牆走 4 秒：進到室內=%s %s" % [in_after_wall,
+					"OK(牆是實體)" if not in_after_wall else "FAIL(穿牆了)"])
+			await _snap("res://solid_wall.png")
+			# (b) 對著門走：應該真的走得進去
+			iu["node"].stop()
+			iu["node"].global_position = _to3d(door_px.x, door_px.y + 5.0 / WORLD_SCALE)
+			iu["wx"] = door_px.x
+			iu["wy"] = door_px.y + 5.0 / WORLD_SCALE
+			# 撞牆那段已經把 AP 走光了；AP 歸零就不能再移動，會誤判成「門進不去」
+			iu["ap"] = 150.0
+			iu["ap_max"] = 150.0
+			await get_tree().create_timer(0.4).timeout
+			await _hold_key(KEY_W, 4.0)
+			var in_after_door: bool = bd.inside(iu["wx"], iu["wy"])
+			_buildings = keep_b2
+			print("[solidchk] 對著門走 4 秒：進到室內=%s %s" % [in_after_door,
+					"OK(門是唯一入口)" if in_after_door else "FAIL(門進不去)"])
 			await get_tree().create_timer(1.2).timeout
 			print("[buildingchk] 進屋後屋頂淡出 alpha=%.2f %s" % [float(_roof_a.get(0, 1.0)),
 					"OK" if float(_roof_a.get(0, 1.0)) < 0.15 else "FAIL"])
@@ -1109,6 +1138,11 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	node.position = _to3d(wx, wy)
 	node.rotation.y = 0.0 if side_i == 0 else PI
 	node.shot_fired.connect(_on_shot)
+	# 生成點若壓在牆上就先推出去：兵不該從牆裡冒出來
+	if not _buildings.is_empty():
+		var fx: Vector3 = _resolve_walls(node.global_position,
+				1.6 if Unit.is_vehicle_cls(cls) else 0.42)
+		node.global_position = Vector3(fx.x, node.global_position.y, fx.z)
 	# 抵達目的地才重算掩體：原本玩家移動後從沒更新過 cover，
 	# 走到沙包後面也不會蹲下、迎擊減傷也算不到（2026-07-25 補齊全動作時發現）。
 	node.arrived.connect(func(): _on_unit_arrived(node))
@@ -1445,6 +1479,7 @@ func _process(delta: float) -> void:
 			tr["m"].queue_free()
 			tr["l"].queue_free()
 			_tracers.erase(tr)
+	_solid_bodies()
 	_roof_fade(delta)
 	_tps_control(delta)
 	_action_tick(delta)
@@ -1455,6 +1490,25 @@ func _process(delta: float) -> void:
 		if _enemy_t <= 0:
 			_enemy_step()
 			_enemy_t = 0.25
+
+# 實體約束（GDD/14 §2）：每幀把所有單位推出牆體。
+# ⚠ 先前只有「第三人稱操控中的那一個」會吃碰撞，敵方 AI、點擊移動、
+#   甚至測試把兵直接放進屋裡都能穿牆——牆等於只對玩家有效。
+#   人要跟實體一樣，就不能有任何一條路徑可以繞過碰撞。
+func _solid_bodies() -> void:
+	if _buildings.is_empty():
+		return
+	for u in units:
+		if not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		var node = u["node"]
+		var r: float = 1.6 if Unit.is_vehicle_cls(u["cls"]) else 0.42   # 載具體積大得多
+		var fixed: Vector3 = _resolve_walls(node.global_position, r)
+		if fixed.distance_squared_to(node.global_position) > 0.000001:
+			node.global_position = Vector3(fixed.x, node.global_position.y, fixed.z)
+			var p := _live_px(u)
+			u["wx"] = p.x
+			u["wy"] = p.y
 
 # 屋頂淡出（GDD/14 §2）：玩家操控的單位進到室內時，那棟樓的屋頂淡掉，
 # 否則第三人稱鏡頭會被屋頂整個擋住、根本看不到自己在做什麼。
