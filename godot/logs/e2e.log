@@ -24,7 +24,9 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [selftest] saved res://qa/e2e_battle.png
 [selftest] saved res://qa/e2e_hero_idle.png
 [selftest] saved res://qa/e2e_hero_run.png
+[selftest] saved res://qa/e2e_hero_prone_side.png
+[selftest] saved res://qa/e2e_hero_prone_front.png
 [bonechk] cls=sniper 骨數=62 找不到的骨=["Wrist.R"]
 [bonechk] 前 20 根骨名=["Root", "Hips", "Abdomen", "Torso", "Chest", "Neck", "Head", "Head_end", "Shoulder.L", "UpperArm.L", "LowerArm.L", "Hand.L", "Index2.L", "Index3.L", "Index4.L", "Index4.L_end", "Middle2.L", "Middle3.L", "Middle4.L", "Middle4.L_end"]
-[bonechk] want_prone=true _prone=0.00
+[bonechk] want_prone=true _prone=1.00
 [e2e] DONE

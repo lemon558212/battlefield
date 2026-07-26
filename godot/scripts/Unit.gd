@@ -1174,24 +1174,36 @@ func _aim_pose() -> void:
 					_prone)
 			if is_drive:
 				# 動力腿：收腿時膝往「側前方」頂出（往前才拉得到地），蹬完回到伸直朝後
-				var up_dir: Vector3 = (fwd * (-0.95 + 2.10 * draw)
-						+ rgt * sgn * (-0.08 + 0.60 * draw)
-						- Vector3.UP * (0.22 - 0.10 * draw)).normalized()
+				# 基礎（draw=0）要幾乎水平：0.22 的向下分量會讓大腿斜插進地面、
+				# 小腿被頂到半空（實拍抓到）。改 0.06。
+				var up_dir: Vector3 = (fwd * (-0.99 + 2.10 * draw)
+						+ rgt * sgn * (-0.06 + 0.60 * draw)
+						- Vector3.UP * (0.06 + 0.10 * draw)).normalized()
 				_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir, _prone)
 				# 小腿與大腿反向＝屈膝；蹬地那半波要伸直（kn 回到 0）
 				var kn: float = draw
-				var lo_dir: Vector3 = (-fwd * (0.99 - 0.12 * kn) - rgt * sgn * (0.06 + 0.46 * kn)
-						- Vector3.UP * (0.13 - 0.05 * kn)).normalized()
+				var lo_dir: Vector3 = (-fwd * (0.997 - 0.30 * kn) - rgt * sgn * (0.04 + 0.46 * kn)
+						- Vector3.UP * (0.05 - 0.02 * kn)).normalized()
 				_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir, _prone)
 			else:
-				# 拖行腿：伸直、併攏、略朝下，只有極小的被動晃動（被身體帶著走）
+				# 拖行腿：伸直、併攏、**平貼地面**。
+				# ⚠ 實拍（玩家視角側面近照）發現雙腿在半空中彎著、腳掌朝天——
+				#   那正是使用者連續四輪指的「剪刀腳」。真實臥姿是整條腿貼在地上、
+				#   腳尖朝外貼地。所以大腿與小腿都要幾乎水平（只留很小的向下分量
+				#   讓它壓在地面上），而且**腳掌也要壓平**，不能讓它翹起來。
 				var trail: float = 0.03 * sin(ph * 2.0) * _crawl_amt
-				var up_dir2: Vector3 = (-fwd * 0.97 + rgt * sgn * (0.06 + trail)
-						- Vector3.UP * 0.22).normalized()
+				var up_dir2: Vector3 = (-fwd * 0.995 + rgt * sgn * (0.05 + trail)
+						- Vector3.UP * 0.06).normalized()
 				_rig.point_bone("UpperLeg." + sd, "LowerLeg." + sd, up_dir2, _prone)
-				var lo_dir2: Vector3 = (-fwd * 0.99 - rgt * sgn * 0.05
-						- Vector3.UP * 0.12).normalized()
+				var lo_dir2: Vector3 = (-fwd * 0.997 - rgt * sgn * 0.04
+						- Vector3.UP * 0.05).normalized()
 				_rig.point_bone("LowerLeg." + sd, "Foot." + sd, lo_dir2, _prone)
+		# 腳掌壓平：趴著的人腳背貼地、腳尖朝後外側。先前沒管腳掌，它跟著小腿翹向天空。
+		for sd2 in ["L", "R"]:
+			var fi: int = sk.find_bone("Foot." + sd2)
+			if fi >= 0:
+				_rig.point_bone("LowerLeg." + sd2, "Foot." + sd2,
+						(-fwd * 0.92 - Vector3.UP * 0.39).normalized(), _prone * 0.55)
 		# 貼地：量髖部離地多少，整個模型降下去（只有這裡寫高度，避免兩處互相抵銷）
 		# ⚠ 要用「相對目前位置再修正」的收斂寫法：寫成 base - (量到的高度) 會左右震盪
 		#   （量到的高度本身就含上一幀的修正量），畫面上就是趴著上下抖。

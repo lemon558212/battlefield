@@ -272,6 +272,21 @@ func _e2e() -> void:
 	await get_tree().create_timer(0.7).timeout
 	cam.focus = hero["node"].global_position + Vector3(0, 1.1, 0)
 	await _snap("res://e2e_hero_run.png")
+	# 趴姿在英雄模型上的實況：側面＋正面各一張（背後視角看不出手腳，踩過兩次）
+	hero["node"].stop()
+	hero["node"].want_prone = true
+	await get_tree().create_timer(1.6).timeout
+	var hp0: Vector3 = hero["node"].global_position
+	var hf: Vector3 = hero["node"].facing_dir()
+	cam.focus = hp0 + Vector3(0, 0.5, 0)
+	cam.dist = 4.0
+	cam.pitch_deg = 6.0
+	cam.yaw = atan2(hf.z, hf.x)          # 正側面
+	await get_tree().create_timer(0.5).timeout
+	await _snap("res://e2e_hero_prone_side.png")
+	cam.yaw = atan2(hf.x, hf.z) + PI     # 正前方
+	await get_tree().create_timer(0.4).timeout
+	await _snap("res://e2e_hero_prone_front.png")
 	# 英雄模型的骨架名單：趴姿/IK 都用 hr_ 骨名（Hips/UpperLeg.L/Shoulder.R…），
 	# 英雄若是別套骨架（Mixamo 41 骨）就會整段安靜失效＝畫面上人被扭成一根管子。
 	var hsk: Array = hero["node"].find_children("*", "Skeleton3D", true, false)
@@ -2004,6 +2019,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_end_action()
 			return
+		# Tab：放開／鎖回滑鼠。放開後游標出現，可以直接用滑鼠點敵人、也點得到 UI。
+		if event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
+			_capture_mouse(Input.mouse_mode != Input.MOUSE_MODE_CAPTURED)
+			ui.flash_msg("滑鼠已" + ("鎖定（Tab 放開）" if Input.mouse_mode
+					== Input.MOUSE_MODE_CAPTURED else "放開（可點敵人，Tab 鎖回）"),
+					Color(0.7, 0.9, 1.0))
+			return
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			if ui.fire_panel_open():
 				return
@@ -2461,17 +2483,27 @@ func _tps_control(delta: float) -> void:
 		return
 
 # 第三人稱下開火：取準心最接近的敵人
+# 第三人稱選目標（使用者 2026-07-26：「滑鼠是可以輔助，可以點敵軍，而不是只能到準星」）。
+# 兩點改法：
+#   1. 滑鼠沒被鎖定（按 Tab 放開）時，用**游標位置**選目標＝真的用滑鼠點敵人
+#   2. 判定改「腳→頭整條身體線段」＋容差隨螢幕上的人形大小縮放（跟戰術視角的
+#      _click 同一套），不再是「距離胸口一點 140px」——遠處敵人只有幾十像素高，
+#      舊寫法等於要把準心壓在一個小點上
 func _tps_target():
 	var vp := get_viewport().get_visible_rect().size
-	var center := vp * 0.5
+	var aim_pt: Vector2 = vp * 0.5
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		aim_pt = get_viewport().get_mouse_position()
 	var best = null
 	var bd := 1e9
 	for u in units:
 		if not u["alive"] or u["side"] == player_side or not u["node"].visible:
 			continue
-		var sp: Vector2 = cam.unproject_position(u["node"].global_position + Vector3(0, 1.1, 0))
-		var d: float = sp.distance_to(center)
-		if d < 140.0 and d < bd:
+		var foot: Vector2 = cam.unproject_position(u["node"].global_position)
+		var head: Vector2 = cam.unproject_position(u["node"].global_position + Vector3(0, 1.85, 0))
+		var d: float = _dist_to_seg(aim_pt, foot, head)
+		var tol: float = clampf(foot.distance_to(head) * 1.1, 60.0, 220.0)
+		if d < tol and d < bd:
 			bd = d
 			best = u
 	return best
