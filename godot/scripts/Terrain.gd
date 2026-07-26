@@ -267,6 +267,22 @@ func _ground_color(v: Vector3) -> Color:
 	var c := grass
 	c = c.lerp(dirt, clampf((sl - 0.25) * 2.2, 0.0, 0.85))      # 斜面＝裸土
 	c = c.lerp(rock, clampf((sl - 0.85) * 1.6, 0.0, 0.6))       # 陡坡＝碎石
+	# 岸線（使用者 2026-07-26：「河流只有一片藍色叫做河流? 不對吧」）：
+	# 真實水岸是「濕泥/沙灘帶 → 乾土 → 草」的漸層，而不是草地直接切進藍色貼片。
+	# 這裡把靠近水域的地表染成濕沙色並壓暗（濕的土比乾的暗）。
+	for w2 in _waters:
+		var wr2: Rect2 = w2["r"]
+		var band: float = 46.0
+		var g2: Rect2 = wr2.grow(band)
+		if g2.has_point(Vector2(px, py)):
+			# 距離水緣多遠（水裡＝0）
+			var dx2: float = maxf(maxf(wr2.position.x - px, px - wr2.end.x), 0.0)
+			var dy2: float = maxf(maxf(wr2.position.y - py, py - wr2.end.y), 0.0)
+			var od: float = sqrt(dx2 * dx2 + dy2 * dy2)
+			var wetk: float = 1.0 - clampf(od / band, 0.0, 1.0)
+			wetk *= clampf(0.6 + _vnoise(px * 0.035, py * 0.035) * 0.8, 0.0, 1.0)
+			var wet_c := Color(0.34, 0.29, 0.20)     # 濕泥沙
+			c = c.lerp(wet_c, clampf(wetk * 1.35, 0.0, 0.92))
 	# 彈坑焦痕：直接烤進地表頂點色。先前是 Props 擺一堆懸空的黑色薄板（burn box），
 	# 在彈坑斜壁上會翹起、懸空——燒焦是「地表本身變黑」，不是一種物體（鐵律 0）。
 	for cr2 in _craters:

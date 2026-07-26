@@ -3613,9 +3613,16 @@ func _build_water() -> void:
 		var wsh := Shader.new()
 		wsh.code = WATER_SHADER
 		wmat.shader = wsh
+		# 流向：長條形＝河，沿長邊流；接近正方＝湖／海灣，不流
+		var flow_v := Vector2(1.0, 0.0) if r.size.x >= r.size.y else Vector2(0.0, 1.0)
+		if absf(r.size.x - r.size.y) / maxf(r.size.x, r.size.y) < 0.35:
+			flow_v = Vector2.ZERO
+		wmat.set_shader_parameter("flow", flow_v)
 		mi.material_override = wmat
 		var c: Vector2 = r.get_center()
-		mi.position = Vector3((c.x - map_data.get("w", 960) * 0.5) * WORLD_SCALE, -0.30,
+		# 淺水面略低：三種水域矩形會重疊，同高度會疊出過亮的白片（實拍）
+		var wy: float = -0.30 - (0.06 if pair[1] == "shallows" else 0.0)
+		mi.position = Vector3((c.x - map_data.get("w", 960) * 0.5) * WORLD_SCALE, wy,
 				(c.y - map_data.get("h", 600) * 0.5) * WORLD_SCALE)
 		world.add_child(mi)
 		# 深水圍欄：四邊線段障礙（高度 3m＝人與彈道都擋不住的別想，這是水不是牆，
@@ -3634,9 +3641,15 @@ const WATER_SHADER := """
 shader_type spatial;
 render_mode blend_mix, depth_draw_always, cull_back;
 
+uniform vec2 flow = vec2(1.0, 0.25);   // 流向（河水會流，湖面 flow 給 0）
+
 void vertex() {
 	float t = TIME * 0.9;
-	VERTEX.y += sin(VERTEX.x * 0.7 + t) * 0.06 + sin(VERTEX.z * 1.1 + t * 1.3) * 0.05;
+	// 兩組不同波長、沿流向前進的波：單一正弦看起來像布，疊兩組才像水面
+	float a = dot(VERTEX.xz, normalize(flow + vec2(0.001)));
+	VERTEX.y += sin(a * 0.8 - t * 1.6) * 0.055
+			+ sin(VERTEX.x * 1.3 + t * 0.9) * 0.03
+			+ sin(VERTEX.z * 1.7 - t * 1.1) * 0.025;
 }
 
 void fragment() {
@@ -3650,8 +3663,14 @@ void fragment() {
 	float deep = smoothstep(0.0, 0.22, edge);
 	vec3 shallow_c = vec3(0.30, 0.50, 0.48);
 	vec3 deep_c = vec3(0.05, 0.15, 0.26);
-	ALBEDO = mix(mix(shallow_c, deep_c, deep), vec3(0.62, 0.74, 0.78), fres * 0.7);
-	ALPHA = 0.88 * smoothstep(0.0, 0.05 + wob, edge);
+	// ⚠ 菲涅耳權重要小：0.7 在俯瞰的掠角下整片水變乳白（實拍海灘像牛奶）
+	ALBEDO = mix(mix(shallow_c, deep_c, deep), vec3(0.58, 0.70, 0.76), fres * 0.28);
+	// 岸邊白沫：水最淺的一圈加白，浪花線讓水與地有交界而不是硬切
+	// 白沫只在最外一小圈，而且要弱——太強會變成一圈白色鑲邊（實拍）
+	float foam = (1.0 - smoothstep(0.0, 0.022, edge))
+			* (0.45 + 0.55 * sin(UV.x * 150.0 + UV.y * 110.0 + TIME * 2.2));
+	ALBEDO = mix(ALBEDO, vec3(0.88, 0.92, 0.93), clamp(foam, 0.0, 0.38));
+	ALPHA = 0.90 * smoothstep(0.0, 0.05 + wob, edge);
 	ROUGHNESS = 0.06;
 	SPECULAR = 0.7;
 }
