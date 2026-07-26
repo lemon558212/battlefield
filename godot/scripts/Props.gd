@@ -41,16 +41,18 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	for s in map_data.get("solids", []):
 		_no_zones.append(Rect2(float(s.get("x", 0)), float(s.get("y", 0)),
 				float(s.get("w", 60)), float(s.get("h", 60))).grow(2.5 / _ws))
+	# 貼圖化（GDD/14 §0a）：磚是磚、水泥是水泥、路是柏油，純色時代根本看不出材質差別。
+	# 沒有現成貼圖的（木、金屬、電線、燒黑）維持純色——硬套錯貼圖比純色更假。
 	_mats = {
-		"dirt": _mat(Color(0.34, 0.28, 0.20), 0.98),
-		"concrete": _mat(Color(0.55, 0.54, 0.50), 0.95),
+		"dirt": BattleMats.pbr("Concrete_Asphalt", 6.0, 0.98, Color(0.95, 0.90, 0.82)),
+		"concrete": BattleMats.pbr("Concrete", 2.4, 0.95, Color(1.20, 1.18, 1.12)),
 		"wood": _mat(Color(0.38, 0.28, 0.18), 0.92),
 		"metal": _mat(Color(0.28, 0.29, 0.30), 0.55),
-		"rock": _mat(Color(0.40, 0.39, 0.36), 0.95),
+		"rock": BattleMats.pbr("Concrete", 1.1, 0.95, Color(0.92, 0.90, 0.84)),
 		"rust": _mat(Color(0.31, 0.20, 0.13), 0.98),
 		"burn": _mat(Color(0.17, 0.15, 0.13), 1.0),
-		"brick": _mat(Color(0.64, 0.46, 0.35), 0.96),
-		"brick2": _mat(Color(0.52, 0.36, 0.28), 0.97),
+		"brick": BattleMats.pbr("RedBrick", 1.6, 0.96, Color(1.30, 1.10, 0.98)),
+		"brick2": BattleMats.pbr("RedBrick", 1.6, 0.97, Color(1.05, 0.86, 0.76)),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
 	}
 	_roads(map_data)
@@ -354,6 +356,7 @@ func _box(key: String, size: Vector3, xf: Transform3D) -> void:
 		var nrm: Vector3 = (b - a).cross(c - a).normalized()
 		for p in [a, b, c, a, c, d]:
 			st2.set_normal(nrm)
+			st2.set_uv(BattleMats.world_uv(p, nrm))      # 世界座標 UV，理由見 Mats.gd
 			st2.add_vertex(p)
 
 func _flush() -> void:
@@ -361,6 +364,7 @@ func _flush() -> void:
 		var st: SurfaceTool = _batch[key]
 		var mi := MeshInstance3D.new()
 		mi.name = "Props_" + key
+		st.generate_tangents()          # 法線貼圖要切線，理由同 Building._flush_batch
 		mi.mesh = st.commit()
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if key == "dirt" \
 				else GeometryInstance3D.SHADOW_CASTING_SETTING_ON

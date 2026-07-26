@@ -202,8 +202,12 @@ func _build_mesh() -> void:
 			# 繞反了整片地會變成朝下的法線＝全暗一片，看起來像忘了打光（2026-07-26 實拍踩到）。
 			for v in [p00, p11, p01, p00, p10, p11]:
 				st.set_color(_ground_color(v))
+				# UV＝世界座標公尺：地表要疊一層土質細節貼圖（純色平面是「整片像塑膠」
+				# 最大的單一面積）。顏色仍由頂點色決定，貼圖只負責質感（材質是相乘的）。
+				st.set_uv(Vector2(v.x, v.z))
 				st.add_vertex(v)
 	st.generate_normals()
+	st.generate_tangents()
 	var mi := MeshInstance3D.new()
 	mi.name = "TerrainMesh"
 	mi.mesh = st.commit()
@@ -264,9 +268,11 @@ func _build_grass() -> void:
 	var sh := Shader.new()
 	sh.code = GRASS_SHADER
 	_grass_mat.shader = sh
-	_grass_layer(_tuft_mesh(1.0), _scatter_field(), 55.0, "GrassField")
-	_grass_layer(_tuft_mesh(1.5), _scatter_bushes(), 70.0, "GrassBush")
-	_grass_layer(_tuft_mesh(1.25), _scatter_tree_feet(), 55.0, "GrassRoots")
+	# ⚠ 比例（合理化鐵則）：草地那層先前最高接近 1m，第三人稱走進去畫面全是巨大葉片。
+	#   真實草地是「矮而密」——高度砍到腳踝，葉片數加倍補密度，繪製次數不變。
+	_grass_layer(_tuft_mesh(0.42, 13), _scatter_field(), 55.0, "GrassField")
+	_grass_layer(_tuft_mesh(1.35, 9), _scatter_bushes(), 70.0, "GrassBush")   # 藏得住人的高草
+	_grass_layer(_tuft_mesh(0.75, 10), _scatter_tree_feet(), 55.0, "GrassRoots")
 
 # 樹腳的草：物件與地面的過渡。少了這一圈，樹看起來就是「插在草皮上的模型」。
 func _scatter_tree_feet() -> Array:
@@ -395,7 +401,7 @@ func _build_backdrop() -> void:
 # 一叢草（2026-07-26 重做）：原本是三片交叉的大三角形（0.95m 高、0.34m 寬），
 # 第三人稱趴下來近看就是三片塑膠片。改成多根細葉，每根兩段、往上收尖並朝隨機方向彎。
 # 頂點色 alpha 存「離地權重」給風擺動用（0=根、1=尖）；材質不透明，alpha 不影響顯示。
-func _tuft_mesh(scale_f: float) -> ArrayMesh:
+func _tuft_mesh(scale_f: float, blades := 7) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
@@ -404,7 +410,7 @@ func _tuft_mesh(scale_f: float) -> ArrayMesh:
 	#   地表 shader、地表頂點色之後，這是同一天第三次踩到。
 	var root := Color(0.16, 0.24, 0.09).srgb_to_linear()
 	var tipc := Color(0.40, 0.52, 0.22).srgb_to_linear()
-	for k in 7:
+	for k in blades:
 		var a: float = rng.randf() * TAU
 		var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.38) * scale_f
 		var h: float = rng.randf_range(0.24, 0.60) * scale_f

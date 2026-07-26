@@ -2912,10 +2912,10 @@ func _build_ground() -> void:
 	cam.wall_probe = func(a: Vector3, b: Vector3) -> float: return _wall_ray(a, b)
 	cam.ground_probe = func(p: Vector3) -> float: return terrain.height_at_world(p)
 	# 地表顏色改走頂點色（見 Terrain._ground_color），材質只要最單純的一顆
-	var sm := StandardMaterial3D.new()
+	# 地表：顏色仍由頂點色決定（見 Terrain._ground_color），只疊土質的「法線＋粗糙度」，
+	# 不疊 albedo——把土色乘上去會把草地染成一片灰泥（實拍踩過）。
+	var sm := BattleMats.pbr("Dirt", 2.5, 0.97, Color.WHITE, false).duplicate()
 	sm.vertex_color_use_as_albedo = true
-	sm.roughness = 0.97
-	sm.specular = 0.05
 	terrain.set_material(sm)
 	for c in terrain.trench_covers():
 		_covers.append(c)          # 壕溝＝半身掩體

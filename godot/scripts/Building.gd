@@ -43,10 +43,14 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 			(rect.get_center().y - map_h * 0.5) * _ws)
 	# 材質全場共用一份：每棟各自 new 一組會讓 draw call 與材質切換翻倍
 	# （6 棟建築把 8 單位的幀時從 6.2ms 推到 13.1ms）。
-	var wm := _shared("wall", Color(0.72, 0.69, 0.62), 0.92)
-	var im := _shared("inner", Color(0.62, 0.58, 0.52), 0.95)
-	var fm := _shared("floor", Color(0.42, 0.34, 0.26), 0.9)
-	var rm := _mat(Color(0.44, 0.20, 0.16), 0.85)      # 屋頂要各自淡出，不能共用
+	# 貼圖化（GDD/14 §0a）：純色 albedo 是「像塑膠積木」的主因，見 Mats.gd 檔頭。
+	var wm := BattleMats.pbr("Concrete", 3.2, 0.92, Color(1.28, 1.24, 1.16))
+	_wall_mat = wm
+	var im := BattleMats.pbr("Concrete", 2.6, 0.95, Color(1.10, 1.05, 0.98))
+	var fm := BattleMats.pbr("MarbleFloor", 2.2, 0.9, Color(1.05, 0.98, 0.88))
+	# 屋頂要各自淡出（進屋時透明化），所以不能共用一顆材質
+	var rm := BattleMats.pbr("RoofSlate", 1.0, 0.85, Color(1.35, 0.72, 0.58)).duplicate()
+	rm.uv1_scale = Vector3(6.0, 6.0, 1.0)      # BoxMesh 的 UV 是 0~1，用循環次數而不是公尺
 	var sizex: float = rect.size.x * _ws
 	var sizez: float = rect.size.y * _ws
 	# 地板（每層一片）
@@ -98,7 +102,7 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 var furniture: Array = []      # [{lx, lz, r, val}]，局部座標，Main 轉成掩體登記
 # 室內實體障礙 [lx, lz, r]：桌、櫃、木箱都擋人（使用者：任何物體都不能穿越）
 var solids_local: Array = []
-func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> void:
+func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(absf(rect.position.x) * 17.0 + absf(rect.position.y) * 7.0) + 91
 	for f in floors:
@@ -159,7 +163,7 @@ func _furnish(half: Vector2, im: StandardMaterial3D, fm: StandardMaterial3D) -> 
 				Vector3(ox, y0 + 0.42, oz)))
 
 # 一面牆：把門窗缺口扣掉後，剩下的實心段才建幾何、才登記進 walls
-func _side(a: Vector2, b: Vector2, mat: StandardMaterial3D, is_door: bool) -> void:
+func _side(a: Vector2, b: Vector2, mat: BaseMaterial3D, is_door: bool) -> void:
 	var len_m: float = a.distance_to(b)
 	var dir: Vector2 = (b - a) / maxf(len_m, 0.001)
 	var gaps: Array = []      # [起, 迄]（沿牆的長度座標）
@@ -195,19 +199,19 @@ func _side(a: Vector2, b: Vector2, mat: StandardMaterial3D, is_door: bool) -> vo
 		_wall_piece(a + dir * cursor, a + dir * len_m, mat, 0.0, FLOOR_H * float(floors))
 
 # 建一段牆的幾何；y0=底部高度、hh=高度。只有「落地的實心段」才算擋路/擋視線。
-func _wall_piece(a: Vector2, b: Vector2, mat: StandardMaterial3D, y0: float, hh: float) -> void:
+func _wall_piece(a: Vector2, b: Vector2, mat: BaseMaterial3D, y0: float, hh: float) -> void:
 	if hh <= 0.01 or a.distance_to(b) < 0.02:
 		return
 	var mid: Vector2 = (a + b) * 0.5
 	var len_m: float = a.distance_to(b)
 	var ang: float = atan2(b.y - a.y, b.x - a.x)
-	var key := "wall" if mat == _shared_mats.get("wall") else "inner"
+	var key := "wall" if mat == _wall_mat else "inner"
 	_emit_box(key, mat, Vector3(len_m, hh, WALL_T),
 			Transform3D(Basis(Vector3.UP, -ang), Vector3(mid.x, y0 + hh * 0.5, mid.y)))
 	if y0 <= 0.02:            # 落地的段才擋人、擋子彈
 		walls.append({"a": _local_to_px(a), "b": _local_to_px(b)})
 
-func _partition(half: Vector2, mat: StandardMaterial3D) -> void:
+func _partition(half: Vector2, mat: BaseMaterial3D) -> void:
 	# 兩端內縮半個牆厚：與外牆重疊的共面會 z-fighting，畫面上是一片閃爍的雜點
 	var a := Vector2(0.0, -half.y + WALL_T * 0.5)
 	var b := Vector2(0.0, half.y - WALL_T * 0.5)
@@ -218,7 +222,7 @@ func _partition(half: Vector2, mat: StandardMaterial3D) -> void:
 	_wall_piece(a + Vector2(0, c - DOOR_W * 0.5), a + Vector2(0, c + DOOR_W * 0.5), mat,
 			2.15, FLOOR_H * float(floors) - 2.15)
 
-func _stairs(half: Vector2, mat: StandardMaterial3D) -> void:
+func _stairs(half: Vector2, mat: BaseMaterial3D) -> void:
 	var n := 12
 	for i in n:
 		_emit_box("floor", mat, Vector3(1.1, 0.16, 0.28),
@@ -233,6 +237,7 @@ func _local_to_px(p: Vector2) -> Vector2:
 	return Vector2(rect.get_center().x + p.x / _ws, rect.get_center().y + p.y / _ws)
 
 static var _shared_mats := {}
+var _wall_mat: BaseMaterial3D = null      # 這棟的外牆材質（批次鍵用，見 _wall_piece）
 func _shared(key: String, c: Color, rough: float) -> StandardMaterial3D:
 	if not _shared_mats.has(key):
 		_shared_mats[key] = _mat(c, rough)
@@ -244,7 +249,7 @@ func _mat(c: Color, rough: float) -> StandardMaterial3D:
 	m.roughness = rough
 	return m
 
-func _box(sx: float, sy: float, sz: float, mat: StandardMaterial3D) -> MeshInstance3D:
+func _box(sx: float, sy: float, sz: float, mat: BaseMaterial3D) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(sx, sy, sz)
@@ -257,7 +262,7 @@ func _box(sx: float, sy: float, sz: float, mat: StandardMaterial3D) -> MeshInsta
 # 改成「同材質的箱子全部烤進同一張網格」，一棟只剩一到兩個 surface。
 var _batch := {}          # 材質鍵 → SurfaceTool
 
-func _emit_box(key: String, mat: StandardMaterial3D, size: Vector3, xf: Transform3D) -> void:
+func _emit_box(key: String, mat: BaseMaterial3D, size: Vector3, xf: Transform3D) -> void:
 	if not _batch.has(key):
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -277,8 +282,11 @@ func _emit_box(key: String, mat: StandardMaterial3D, size: Vector3, xf: Transfor
 		# ⚠ 法線要自己給，不可用 generate_normals()：它會把相鄰箱子的頂點合併平均，
 		#   合併後的牆會出現漸層條紋、看起來像半透明（2026-07-26 實拍踩到）。
 		var nrm: Vector3 = (b - a).cross(c - a).normalized()
+		# UV＝世界座標投影（見 BattleMats.world_uv）：合併網格若用各箱子自己的 0~1 UV，
+		# 磚縫會在每個接縫處錯開、大小也不一致，貼上去反而更假。
 		for p in [a, b, c, a, c, d]:
 			st2.set_normal(nrm)
+			st2.set_uv(BattleMats.world_uv(p, nrm))
 			st2.add_vertex(p)
 
 func _flush_batch() -> void:
@@ -286,6 +294,8 @@ func _flush_batch() -> void:
 		var st: SurfaceTool = _batch[key]
 		var mi := MeshInstance3D.new()
 		mi.name = "Merged_" + key
+		# 法線貼圖沒有切線就是亂的（會看到隨機的凹凸與接縫）。UV 已經給了，這裡補切線。
+		st.generate_tangents()
 		mi.mesh = st.commit()
 		# 室內構件（地板/樓梯/隔牆）不投影：陰影貼圖裡本來就看不到，白算
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if key == "wall" 				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -301,7 +311,7 @@ func set_roof_alpha(a: float) -> void:
 		var mi := c as MeshInstance3D
 		if mi == null:
 			continue
-		var m := mi.material_override as StandardMaterial3D
+		var m := mi.material_override as BaseMaterial3D
 		if m == null:
 			continue
 		if a < 0.99:

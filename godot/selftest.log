@@ -16,13 +16,6 @@ ERROR: Failed loading resource: res://assets/art/title-key-visual.jpg.
 WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
    at: _set (scene/resources/material.cpp:4096)
    GDScript backtrace (most recent call first):
-       [0] _build_ground (res://scripts/Main.gd:2918)
-       [1] _open_deploy (res://scripts/Main.gd:1421)
-       [2] _selftest (res://scripts/Main.gd:279)
-       [3] _snap (res://scripts/Main.gd:257)
-WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
-   at: _set (scene/resources/material.cpp:4096)
-   GDScript backtrace (most recent call first):
        [0] finish (res://scripts/Fortify.gd:37)
        [1] _build_ground (res://scripts/Main.gd:2988)
        [2] _open_deploy (res://scripts/Main.gd:1421)
@@ -39,7 +32,7 @@ WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
 [selftest] saved res://st_battle.png
 [facechk] move=(200,0) 正面與移動夾角=0.0度 OK
 [facechk] move=(-200,0) 正面與移動夾角=0.0度 OK
-[facechk] move=(0,200) 正面與移動夾角=0.1度 OK
+[facechk] move=(0,200) 正面與移動夾角=0.2度 OK
 [facechk] move=(0,-200) 正面與移動夾角=0.0度 OK
 [movechk] 合成點擊選取 selected=OK
 [movechk] 點兵後進入第三人稱 OK
@@ -65,7 +58,7 @@ WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
 [pronechk] 解除後起身=0.00 OK
 [selftest] saved res://close_alert.png
 [alertchk] 敵人移動遭迎擊 次數=4 OK
-[alertchk] 迎擊有扣血 120→93 OK
+[alertchk] 迎擊有扣血 120→102 OK
 [alertchk] 狙擊手(sniper,alert=false)不參與警戒 OK
 [alertchk] 建築擋視線 穿過牆被擋=true 從旁邊繞過看得到=true OK
 [aiplanchk] rifleman hp=100% → 推進到射程 0.6 倍 OK
@@ -126,10 +119,10 @@ WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
 [selftest] saved res://crawl_3.png
 [selftest] saved res://crawl_side3.png
 [crawlchk] 趴著走 2.1 秒：位移 1.38m、動畫=idle、髖高 0.26m OK(是匍匐不是趴著跑)
-[crawlchk] 膝蓋外張量 0.87/0.49/0.86 m（差 0.38） OK(雙腿在交替蹬地)
-[crawlchk] 膝蓋相對髖部前後 -0.41/-0.14/0.38 m（正=在前方蹬地） OK(膝蓋往前收)
+[crawlchk] 膝蓋外張量 0.87/0.53/0.86 m（差 0.34） OK(雙腿在交替蹬地)
+[crawlchk] 膝蓋相對髖部前後 -0.41/-0.10/0.38 m（正=在前方蹬地） OK(膝蓋往前收)
 [crawlchk] 左手前伸距離 0.74/0.54/0.44 m（擺幅 0.30） OK(手在往前撐地拉行)
-[crawlchk] 左膝彎曲角 6/79/160 度（0=伸直，最大 160） OK(膝蓋真的有彎)
+[crawlchk] 左膝彎曲角 6/86/160 度（0=伸直，最大 160） OK(膝蓋真的有彎)
 [crawlchk] 每段位移 min=0.047 max=0.193 落差=4.1倍 OK(一蹬一停，不是等速滑行)
 [crawlchk] 連續走 3.5 秒後 趴姿值=0.00、髖高 0.45m（趴著是 0.26） OK(自動起身了)
 [selftest] saved res://crawl_standup.png
@@ -138,14 +131,14 @@ WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
 [selftest] saved res://key_prone.png
 [keychk] C 蹲=1.00 → Z 趴=1.00 → Space 站起(蹲+趴)=0.00 OK(三個姿勢鍵都有效)
 [selftest] saved res://ai_turn.png
-[aichk] 敵方 CP 起始=6 剩餘=2 OK
-[aichk] 敵方單位真的移動 4 個 OK
-[aichk] 敵方階段結束回到指令模式 st=5 耗時=13.6s OK
+[aichk] 敵方 CP 起始=6 剩餘=3 OK
+[aichk] 敵方單位真的移動 3 個 OK
+[aichk] 敵方階段結束回到指令模式 st=5 耗時=11.0s OK
 [aichk] 新回合 CP=7 回合數=2 OK
 [selftest] saved res://close_hit.png
 [anichk] 受擊動作 state=hit OK
 [selftest] saved res://close_death.png
-[anichk] 陣亡倒地 頭高 0.34→0.09 OK
+[anichk] 陣亡倒地 頭高 0.23→0.09 OK
 [rig] rifleman 重定向骨對數=20
 [rig] rifleman 重定向骨對數=20
 [rig] rifleman 重定向骨對數=20
@@ -155,5 +148,5 @@ WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
 [rig] rifleman 重定向骨對數=20
 [rig] rifleman 重定向骨對數=20
 [selftest] saved res://perf16.png
-[perf] units=16 平均幀時=5.9ms (170 FPS) OK
+[perf] units=16 平均幀時=5.8ms (172 FPS) OK
 [selftest] DONE units=16
