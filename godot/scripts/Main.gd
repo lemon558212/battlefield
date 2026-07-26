@@ -2167,8 +2167,6 @@ func _process(delta: float) -> void:
 #   甚至測試把兵直接放進屋裡都能穿牆——牆等於只對玩家有效。
 #   人要跟實體一樣，就不能有任何一條路徑可以繞過碰撞。
 func _solid_bodies() -> void:
-	if _buildings.is_empty() and _blockers.is_empty():
-		return
 	for u in units:
 		if not u["alive"] or not is_instance_valid(u["node"]):
 			continue
@@ -2180,6 +2178,32 @@ func _solid_bodies() -> void:
 			var p := _live_px(u)
 			u["wx"] = p.x
 			u["wy"] = p.y
+	# 步兵彼此也是實體（鐵律 0①：固體不可互穿——先前刻意放行，理由是怕 AI 卡死，
+	# 但那違反物理；卡死交給既有的「真停滯偵測」收尾，不該靠互穿解決）。
+	# 對稱推開：兩人各退一半，誰也不把誰彈飛。已死者不算（屍體可以跨過）。
+	var n := units.size()
+	for i in n:
+		var a = units[i]
+		if not a["alive"] or not is_instance_valid(a["node"]) or Unit.is_vehicle_cls(a["cls"]):
+			continue
+		for j in range(i + 1, n):
+			var b = units[j]
+			if not b["alive"] or not is_instance_valid(b["node"]) or Unit.is_vehicle_cls(b["cls"]):
+				continue
+			var pa: Vector3 = a["node"].global_position
+			var pb: Vector3 = b["node"].global_position
+			var dxz := Vector2(pb.x - pa.x, pb.z - pa.z)
+			var d: float = dxz.length()
+			var need: float = BODY_R * 2.0 * 0.85      # 肩並肩可以貼近一點，胸貼背不行
+			if d >= need or d < 0.0001:
+				continue
+			var push: Vector2 = dxz / d * (need - d) * 0.5
+			a["node"].global_position -= Vector3(push.x, 0, push.y)
+			b["node"].global_position += Vector3(push.x, 0, push.y)
+			for uu in [a, b]:
+				var pp := _live_px(uu)
+				uu["wx"] = pp.x
+				uu["wy"] = pp.y
 
 # 屋頂淡出（GDD/14 §2）：玩家操控的單位進到室內時，那棟樓的屋頂淡掉，
 # 否則第三人稱鏡頭會被屋頂整個擋住、根本看不到自己在做什麼。
