@@ -1092,22 +1092,39 @@ func _build_static() -> void:
 	# 遠景霧氣：拉出空間深度
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.58, 0.66, 0.74)
-	e.fog_density = 0.0013
+	e.fog_density = 0.0010
 	e.fog_sky_affect = 0.0        # 霧吃到天空會把整片天壓成灰色（實拍發現）
-	e.fog_aerial_perspective = 0.12
+	e.fog_aerial_perspective = 0.38   # 遠景要褪成天空色，山脈才有距離感
 	# 高度霧：低窪處積霧，戰場才有空氣感（也讓遠處的兵不再像貼紙）
 	e.fog_height = 1.5
 	e.fog_height_density = 0.06
 	# 色調映射＋微光暈：去除死白、增加層次
+	# SSIL（螢幕空間間接照明）：低多邊形最缺的就是「光在物體之間彈射」——
+	# 草地的綠會反到人腿上、牆面暗部帶到地面色，質感提升比再加模型有效（GDD/14 §0a）。
+	e.ssil_enabled = true
+	e.ssil_radius = 3.2
+	e.ssil_intensity = 0.85
+	e.ssil_sharpness = 0.98
+	e.ssil_normal_rejection = 1.0
+	# 體積霧：晨霧與陽光穿過樹林的光柱，這是「戰場氛圍」最便宜的來源。
+	# 貼地那層要厚一點，遠處的樹腳才會沒入霧裡＝景深感。
+	e.volumetric_fog_enabled = true
+	e.volumetric_fog_density = 0.0095
+	e.volumetric_fog_albedo = Color(0.86, 0.87, 0.86)   # 偏中性，太藍會把整片戰場染冷
+	e.volumetric_fog_length = 96.0
+	e.volumetric_fog_detail_spread = 2.0
+	e.volumetric_fog_ambient_inject = 0.5
+	e.volumetric_fog_sky_affect = 0.0      # 同 fog_sky_affect：吃到天空會把整片天壓灰
 	e.tonemap_mode = Environment.TONE_MAPPER_ACES
 	e.tonemap_exposure = 0.92
 	e.tonemap_white = 4.0
 	e.glow_enabled = true
-	e.glow_intensity = 0.12
-	e.glow_bloom = 0.08
+	e.glow_intensity = 0.22
+	e.glow_bloom = 0.11
+	e.glow_hdr_threshold = 0.95
 	e.adjustment_enabled = true
-	e.adjustment_saturation = 1.16
-	e.adjustment_contrast = 1.10
+	e.adjustment_saturation = 1.10
+	e.adjustment_contrast = 1.14
 	var we := WorldEnvironment.new()
 	we.environment = e
 	add_child(we)

@@ -48,8 +48,8 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"metal": _mat(Color(0.28, 0.29, 0.30), 0.55),
 		"rock": _mat(Color(0.40, 0.39, 0.36), 0.95),
 		"rust": _mat(Color(0.31, 0.20, 0.13), 0.98),
-		"burn": _mat(Color(0.10, 0.09, 0.08), 1.0),
-		"brick": _mat(Color(0.42, 0.30, 0.24), 0.96),
+		"burn": _mat(Color(0.17, 0.15, 0.13), 1.0),
+		"brick": _mat(Color(0.56, 0.40, 0.31), 0.96),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
 	}
 	_roads(map_data)
@@ -228,7 +228,7 @@ func _walls_brick(m: Dictionary) -> void:
 		var cx: float = float(sd.get("x", 0)) + float(sd.get("w", 60)) * 0.5
 		var cy: float = float(sd.get("y", 0)) + float(sd.get("h", 60)) * 0.5
 		var rr: float = maxf(float(sd.get("w", 60)), float(sd.get("h", 60))) * 0.9 + 6.0 / _ws
-		for k in 2:
+		for k in 1:
 			var a: float = rng.randf() * TAU
 			var p := Vector2(cx + cos(a) * rr, cy + sin(a) * rr)
 			var ang: float = a + PI * 0.5
@@ -237,9 +237,9 @@ func _walls_brick(m: Dictionary) -> void:
 			for i in segn:
 				var q: Vector2 = p + dirv * (float(i) - float(segn) * 0.5) * (1.1 / _ws)
 				# 高度往一端遞減＝被炸垮的樣子
-				var hh: float = 1.9 * (1.0 - float(i) / float(segn) * rng.randf_range(0.3, 0.8))
-				if hh < 0.25:
-					continue
+				var hh: float = 2.1 * (1.0 - float(i) / float(segn) * rng.randf_range(0.25, 0.6))
+				if hh < 0.6:
+					continue      # 太矮的整段不畫：一截 0.3m 的牆看起來是散落的板子，不是牆
 				_box("brick", Vector3(1.15, hh, 0.34),
 						Transform3D(Basis(Vector3.UP, -ang), _pos(q.x, q.y, hh * 0.5)))
 			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
@@ -287,7 +287,7 @@ func _scorch(m: Dictionary) -> void:
 func _scorch_at(c: Vector2, r_m: float) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(absf(c.x) * 31.0 + absf(c.y))
-	for i in 10:
+	for i in 7:
 		var a: float = rng.randf() * TAU
 		var d: float = sqrt(rng.randf()) * r_m / _ws
 		var sz: float = rng.randf_range(0.5, 1.5)
