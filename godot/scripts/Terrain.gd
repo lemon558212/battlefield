@@ -484,6 +484,11 @@ func _indoors(px: float, py: float) -> bool:
 # 水面高度（公尺）。Main._build_water 畫水面時用同一個值，兩邊不可各寫各的，
 # 否則「畫出來的水面」和「算出來的水深」會對不起來。
 const WATER_SURFACE_Y := -0.30
+# 涉水上限（公尺）。深水圍欄、移動成本、走查判準**共用這一個數字**。
+# ⚠ 2026-07-28 從 1.35（及胸）降到 1.05（及腰）：走查台實拍到「水淹到脖子還在走」，
+#   那不叫涉水叫游泳，而且人在那個深度根本推不動水、畫面上是一顆頭在漂。
+#   帶裝備的步兵可通行的實務上限就是腰部。
+const WADE_MAX := 1.05
 
 # 把相連（或重疊）的水域矩形分組，每組存一個外框。
 # 分組是必要的：直接用「全部水域的外框」會讓兩個相距很遠的獨立水塘共用一個大外框，
@@ -529,6 +534,9 @@ func _group_waters() -> void:
 # ⚠ pts 會先做一次 Catmull-Rom 加密（每段補 6 點），折線才不會看起來是折的。
 var _coasts: Array = []
 var _rivers: Array = []
+# 淺灘／渡口：河床在這裡抬起來，人走得過去。沒有渡口的河＝一道無法通過的牆，
+# 而真實戰場的河一定有渡口，渡口本身就是戰術焦點（所有人都得從那裡過）。
+var _fords: Array = []
 
 func _smooth_path(pts: Array, per_seg := 6) -> Array:
 	if pts.size() < 2:
@@ -565,6 +573,10 @@ func _build_shores() -> void:
 		if pts.size() >= 2:
 			_coasts.append({"pts": pts, "sea": String(c.get("sea", "west")),
 					"depth": float(c.get("depth", 2.2)), "slope": float(c.get("slope", 70.0))})
+	_fords = []
+	for fd in map.get("fords", []):
+		_fords.append({"c": Vector2(float(fd.get("x", 0)), float(fd.get("y", 0))),
+				"r": float(fd.get("r", 90)), "k": float(fd.get("shallow", 0.42))})
 	for rv in map.get("rivers", []):
 		var rp: Array = _pts_of(rv)
 		if rp.size() >= 2:
@@ -606,12 +618,19 @@ func _shore_drop(px: float, py: float) -> float:
 			# smoothstep：岸邊是緩灘、外海才到最深，不是一階梯下去
 			var t: float = clampf(d / float(co["slope"]), 0.0, 1.0)
 			drop = maxf(drop, float(co["depth"]) * t * t * (3.0 - 2.0 * t))
+	# 渡口：河床抬起（drop 乘上一個小於 1 的係數），中心最淺、往外恢復原深
+	var ford_k := 1.0
+	for fd in _fords:
+		var fdd: float = p.distance_to(fd["c"])
+		if fdd < float(fd["r"]):
+			var ft: float = fdd / float(fd["r"])
+			ford_k = minf(ford_k, lerpf(float(fd["k"]), 1.0, ft * ft))
 	for rv in _rivers:
 		var d2: float = _dist_to_path(p, rv["pts"])
 		var hw: float = rv["hw"]
 		if d2 < hw:
 			var k: float = 1.0 - pow(d2 / hw, 2.2)      # 中央最深、往兩側收成 U 形
-			drop = maxf(drop, float(rv["depth"]) * k)
+			drop = maxf(drop, float(rv["depth"]) * k * ford_k)
 		elif d2 < hw * 1.6:
 			# 河岸土堤：河不會是「地面上挖一條溝」，兩側會有沖積的高地
 			var k2: float = 1.0 - (d2 - hw) / (hw * 0.6)

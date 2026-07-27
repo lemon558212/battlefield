@@ -1034,40 +1034,151 @@ func _tick_steps(moved: float) -> void:
 		_splash_fx(dep)              # 踩在水裡要濺水，不然人像走在玻璃上
 	Audio.step(global_position, _crouch > 0.5 or dep > 0.08)
 
-# 涉水水花：一次性小粒子。用 one-shot 而不是常駐發射器，
-# 不涉水的時候完全沒有成本。
+# 涉水水花（2026-07-28 使用者：「濺出來的水還是一樣太假」）。
+# ★真因跟當年「火是發光方塊」完全同一個：**粒子用的是沒有貼圖的白色方片**。
+#   1×1 的 unshaded 白 QuadMesh billboard 在畫面上就是一個白色正方形，
+#   顏色、大小怎麼調都還是方形。這已經是同一個坑的第三次（火→煙→水花）。
+# 真實的踩水是三件事同時發生，缺一件就假：
+#   ① 水珠：小（2~6cm）、圓、有重量會落回水面、數量多
+#   ② 水幕：腳掌推開的那一片薄水花，貼著水面往外散、扁平
+#   ③ 漣漪：水面上擴散的圓環（這件最重要——沒有它，水花像是「在玻璃上撒白點」）
+static var _drop_tex: GradientTexture2D = null
+static func _drop_dot() -> GradientTexture2D:
+	if _drop_tex != null:
+		return _drop_tex
+	var g := Gradient.new()
+	g.set_offset(0, 0.0)
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.add_point(0.55, Color(1, 1, 1, 0.85))
+	g.set_offset(1, 1.0)
+	g.set_color(1, Color(1, 1, 1, 0.0))
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.width = 48
+	t.height = 48
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	_drop_tex = t
+	return _drop_tex
+
+func _splash_quad(sz: Vector2, col: Color, unshaded := true) -> QuadMesh:
+	var qm := QuadMesh.new()
+	qm.size = sz
+	var mt := StandardMaterial3D.new()
+	if unshaded:
+		mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mt.albedo_color = col
+	mt.albedo_texture = _drop_dot()          # ★柔邊：治「白色方片」
+	mt.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
+	qm.material = mt
+	return qm
+
 func _splash_fx(dep: float) -> void:
+	var k: float = clampf(dep / 0.9, 0.25, 1.0)      # 越深濺得越大
+	var host := get_tree().current_scene
+	if host == null:
+		return
+	var surf_y: float = global_position.y + minf(dep, 0.9) * 0.9
+	# ① 水珠：小而多，有重力會落回水面
 	var pm := ParticleProcessMaterial.new()
 	pm.direction = Vector3(0, 1, 0)
-	pm.spread = 42.0
-	pm.initial_velocity_min = 1.1
-	pm.initial_velocity_max = 2.4 * clampf(dep, 0.2, 1.0)
+	pm.spread = 55.0
+	pm.initial_velocity_min = 0.9 * k
+	pm.initial_velocity_max = 2.6 * k
 	pm.gravity = Vector3(0, -9.8, 0)
-	pm.scale_min = 0.04
-	pm.scale_max = 0.11
-	pm.color = Color(0.82, 0.90, 0.95)
+	pm.scale_min = 0.018
+	pm.scale_max = 0.055                              # 2~5.5cm 的水珠（先前 4~11cm 太大）
+	pm.damping_min = 0.4
+	pm.damping_max = 1.2
+	pm.color = Color(0.88, 0.94, 0.98)
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	pm.emission_sphere_radius = 0.22
-	var qm := QuadMesh.new()
-	qm.size = Vector2.ONE
-	var mt := StandardMaterial3D.new()
-	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mt.albedo_color = Color(0.85, 0.93, 1.0, 0.65)
-	mt.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	qm.material = mt
+	pm.emission_sphere_radius = 0.16
 	var ps := GPUParticles3D.new()
-	ps.amount = 10
-	ps.lifetime = 0.55
+	ps.amount = 18
+	ps.lifetime = 0.7
 	ps.one_shot = true
-	ps.explosiveness = 0.9
+	ps.explosiveness = 0.95
 	ps.process_material = pm
-	ps.draw_pass_1 = qm
+	ps.draw_pass_1 = _splash_quad(Vector2.ONE, Color(0.90, 0.95, 1.0, 0.80))
 	ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	get_tree().current_scene.add_child(ps)
-	ps.global_position = global_position + Vector3(0, 0.05, 0)
+	host.add_child(ps)
+	ps.global_position = Vector3(global_position.x, surf_y, global_position.z)
 	ps.emitting = true
-	get_tree().create_timer(0.9).timeout.connect(ps.queue_free)
+	# ② 水幕：貼著水面往外散的扁平薄片（腳掌推開的那一片）
+	var pm2 := ParticleProcessMaterial.new()
+	pm2.direction = Vector3(0, 0.25, 0)
+	pm2.spread = 88.0                                  # 幾乎是平的一圈
+	pm2.initial_velocity_min = 1.2 * k
+	pm2.initial_velocity_max = 2.4 * k
+	pm2.gravity = Vector3(0, -6.0, 0)
+	pm2.scale_min = 0.06
+	pm2.scale_max = 0.16
+	pm2.damping_min = 2.0
+	pm2.damping_max = 4.0
+	pm2.color = Color(0.92, 0.96, 1.0)
+	pm2.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm2.emission_sphere_radius = 0.20
+	var ps2 := GPUParticles3D.new()
+	ps2.amount = 10
+	ps2.lifetime = 0.42
+	ps2.one_shot = true
+	ps2.explosiveness = 1.0
+	ps2.process_material = pm2
+	ps2.draw_pass_1 = _splash_quad(Vector2.ONE, Color(0.94, 0.97, 1.0, 0.55))
+	ps2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	host.add_child(ps2)
+	ps2.global_position = Vector3(global_position.x, surf_y + 0.02, global_position.z)
+	ps2.emitting = true
+	# one-shot 粒子要自己收：涉水走一段路會留下幾百個節點（舊版就有這個漏）
+	get_tree().create_timer(1.2).timeout.connect(func():
+		if is_instance_valid(ps): ps.queue_free()
+		if is_instance_valid(ps2): ps2.queue_free())
+	# ③ 水面漣漪：一個貼著水面擴散的圓環。少了這件，水花像「在玻璃上撒白點」。
+	var ring := MeshInstance3D.new()
+	var rq := QuadMesh.new()
+	rq.size = Vector2(0.5, 0.5)
+	ring.mesh = rq
+	var rmat := StandardMaterial3D.new()
+	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rmat.albedo_color = Color(0.95, 0.98, 1.0, 0.55)
+	rmat.albedo_texture = _ring_tex()
+	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	rq.material = rmat
+	ring.rotation_degrees.x = -90.0                    # 平躺在水面上
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	host.add_child(ring)
+	ring.global_position = Vector3(global_position.x, surf_y + 0.012, global_position.z)
+	var tw := ring.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3.ONE * (3.2 * k), 0.85).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(rmat, "albedo_color:a", 0.0, 0.85)
+	tw.chain().tween_callback(ring.queue_free)
+
+# 漣漪圓環貼圖：中空的環（不是實心圓——實心圓擴散起來是一團白霧，不是漣漪）
+static var _ring_texture: GradientTexture2D = null
+static func _ring_tex() -> GradientTexture2D:
+	if _ring_texture != null:
+		return _ring_texture
+	var g := Gradient.new()
+	g.set_offset(0, 0.0)
+	g.set_color(0, Color(1, 1, 1, 0.0))
+	g.add_point(0.72, Color(1, 1, 1, 0.0))
+	g.add_point(0.86, Color(1, 1, 1, 1.0))
+	g.set_offset(1, 1.0)
+	g.set_color(1, Color(1, 1, 1, 0.0))
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.width = 64
+	t.height = 64
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	_ring_texture = t
+	return _ring_texture
 
 # 沒有輸入時把殘速滑完（由 _process 每幀呼叫）。人放開腳步不會瞬間釘在地上。
 # ⚠ 2026-07-27 使用者規格：「不會有原地跑步，停下就停下，沒有按按鍵就不會走」。

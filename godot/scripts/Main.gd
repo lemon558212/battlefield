@@ -169,6 +169,8 @@ func _ready() -> void:
 		_playtest()
 	elif "scene" in OS.get_cmdline_user_args():
 		_sceneshots()
+	elif "walk" in OS.get_cmdline_user_args():
+		_walk_all()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -307,6 +309,184 @@ func _sceneshots() -> void:
 	get_tree().quit(0)
 
 # ---------- 實際遊玩驗證（-- play）----------
+# ---------- 全地圖走查（2026-07-27 使用者：「人物全地圖每一個角落都測試」）----------
+# 做法：讓角色**用走的**（按 W，跟玩家完全同一條路徑）沿蛇行路線走遍全圖，
+# 途中每 0.2 秒檢查六條不變量。不用瞬移、不直呼內部函式——瞬移過去只能證明
+# 「那個座標沒問題」，證明不了「走得過去」，而使用者撞到的每一個 bug 都是走出來的。
+#
+# 六條不變量（任何一條破了就記座標、拍照、繼續走完，最後一次列出全部）：
+#   1. 陷進實體：_resolve_solids 會把人推開 → 表示人在障礙/牆體裡面
+#   2. 浮空或陷地：|腳底 - 地面高度| > 0.3m
+#   3. 走進不該走的深水：水深 > 1.35m（及胸，規則上形同不可通行）
+#   4. 卡死：整段路走完時限還離目標 > 2m，而且沒有合法理由（前方就是障礙才算合法）
+#   5. 鏡頭穿牆：頭 → 鏡頭之間有實體
+#   6. 出界：被 _clamp_to_map 夾住以外的地方
+const WALK_STEP_PX := 110.0        # 蛇行取樣間距（px）＝5.5m
+const WALK_SPEED_MIN := 0.9        # 低於這個速度（m/s）持續兩秒就算卡住
+
+func _walk_all() -> void:
+	if not await _boot_to_battle("walk"): get_tree().quit(1); return
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	var pu = _deployed[0]
+	# 敵人會打斷走查（警戒射擊、鏡頭被拉走）：全部移到地圖外並上護盾
+	for e in units:
+		if e["side"] != player_side and is_instance_valid(e["node"]):
+			e["alive"] = false
+			e["node"].visible = false
+	var save := _shield(pu)
+	_begin_action(pu)
+	pu["ap"] = 999999.0
+	pu["ap_max"] = 999999.0
+	pu["node"].auto_stance = false
+	pu["node"].stance_cmd = "stand"
+	# 蛇行路線：一列一列掃過去，涵蓋每一個角落（含四角與貼邊）
+	var cols: int = maxi(3, int(mwp / WALK_STEP_PX))
+	var rows: int = maxi(3, int(mhp / WALK_STEP_PX))
+	var pts: Array = []
+	for r in range(rows + 1):
+		var py: float = clampf(mhp * float(r) / float(rows), 18.0, mhp - 18.0)
+		for c in range(cols + 1):
+			var ci: int = c if (r % 2 == 0) else (cols - c)
+			var px: float = clampf(mwp * float(ci) / float(cols), 18.0, mwp - 18.0)
+			pts.append(Vector2(px, py))
+	print("[walk] 路線 %d 個取樣點（%d 列 × %d 行，間距 %.1fm），地圖 %.0f×%.0f m"
+			% [pts.size(), rows + 1, cols + 1, WALK_STEP_PX * WORLD_SCALE,
+			mwp * WORLD_SCALE, mhp * WORLD_SCALE])
+	# 起點必須在**乾的陸地上**。第一版直接放 pts[0]＝地圖左上角（18,18），
+	# 而那裡在海裡（岸線在 x≈281）→ 整個第一列都在水下，「走進深水」的檢查
+	# 從第一秒就一直 FAIL，測的是我自己的擺位不是遊戲。
+	# ⚠ 前提不成立的測試等於沒測——起點找不到就大聲喊，不要默默從水裡開始。
+	var start_i := -1
+	for i0 in pts.size():
+		if terrain == null or terrain.water_depth(pts[i0].x, pts[i0].y) <= 0.02:
+			var w0: Vector3 = _to3d(pts[i0].x, pts[i0].y)
+			if _resolve_solids(w0, BODY_R, pu).distance_to(w0) < 0.06:
+				start_i = i0
+				break
+	if start_i < 0:
+		push_error("[walk] 全圖找不到一個乾的空地當起點")
+		get_tree().quit(1)
+		return
+	pu["node"].global_position = _to3d(pts[start_i].x, pts[start_i].y)
+	pu["wx"] = pts[start_i].x
+	pu["wy"] = pts[start_i].y
+	print("[walk] 起點 px(%.0f,%.0f)（第 %d 個點；前面的都在海裡或障礙裡）"
+			% [pts[start_i].x, pts[start_i].y, start_i])
+	await get_tree().create_timer(0.5).timeout
+
+	var bad := {"solid": [], "air": [], "deep": [], "stuck": [], "cam": [], "oob": []}
+	var checked := 0
+	var reached := 0
+	for i in range(start_i + 1, pts.size()):
+		var goal: Vector2 = pts[i]
+		var from: Vector2 = _live_px(pu)
+		var dist_m: float = from.distance_to(goal) * WORLD_SCALE
+		# 鏡頭朝目標（玩家就是這樣轉視角再按前進的）
+		var g3: Vector3 = _to3d(goal.x, goal.y)
+		var dv: Vector3 = g3 - pu["node"].global_position
+		cam.tps_yaw = rad_to_deg(atan2(dv.x, dv.z))
+		await get_tree().create_timer(0.12).timeout
+		# 這一段的直線本來走不走得通？走不通就不該當成卡死——
+		# 玩家會繞路，而測試是按著 W 直線走的。（河、建築、石頭都會擋直線。）
+		var line_ok: bool = _path_clear(pu["node"].global_position, g3, BODY_R)
+		# 涉水會慢到 1/2 速，預算要給夠，否則「走得到但太慢」會被誤判成卡死
+		var budget: float = dist_m / 1.0 + 3.0
+		var t := 0.0
+		var slow := 0.0
+		var air_run := 0
+		var last: Vector2 = _live_px(pu)
+		_press_key(KEY_W, true)
+		while t < budget:
+			await get_tree().create_timer(0.2).timeout
+			t += 0.2
+			var now: Vector2 = _live_px(pu)
+			var moved: float = now.distance_to(last) * WORLD_SCALE
+			last = now
+			checked += 1
+			# ---- 六條不變量 ----
+			var wp: Vector3 = pu["node"].global_position
+			var fixed: Vector3 = _resolve_solids(wp, BODY_R, pu)
+			if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
+				bad["solid"].append(now)
+			# ⚠ 「離地 0.3m」單次成立不是 bug——從 0.5m 的河堤走下來本來就有 0.3 秒在自由落體，
+			#   0.2 秒取樣一定會抓到那一幀。判準要問「這是短暫的墜落還是卡在半空」，
+			#   所以改成**連續四次（0.8 秒）都離地**才算。0.8 秒的自由落體是 3.1m，
+			#   比最深的壕溝（1.4m）還深，任何正常落差早就落地了。
+			#   （三次＝0.6 秒還會抓到 1.4m 壕溝的墜落，實測過。）
+			var gnd: float = _ground_height(wp)
+			if absf(wp.y - gnd) > 0.30:
+				air_run += 1
+				if air_run >= 4:
+					bad["air"].append([now, wp.y - gnd])
+					air_run = 0
+			else:
+				air_run = 0
+			var wd: float = terrain.water_depth(now.x, now.y) if terrain != null else 0.0
+			if wd > WADE_MAX:
+				bad["deep"].append([now, wd])
+			if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
+				bad["oob"].append(now)
+			var head: Vector3 = wp + Vector3(0, 1.6, 0)
+			if _wall_ray(head, cam.global_position) < 0.92:
+				bad["cam"].append(now)
+			if now.distance_to(goal) * WORLD_SCALE < 0.9:
+				break
+			slow = (slow + 0.2) if moved < WALK_SPEED_MIN * 0.2 else 0.0
+			if slow >= 2.0:
+				break                                    # 兩秒沒動＝卡住，交給下面判定
+		_press_key(KEY_W, false)
+		var end_gap: float = _live_px(pu).distance_to(goal) * WORLD_SCALE
+		if end_gap < 1.2:
+			reached += 1
+		else:
+			# 走不到不一定是 bug：目標可能在建築裡、在深水裡、在障礙後面。
+			# 只有「目標是一塊乾淨的空地」卻走不到，才是真的卡死。
+			var gw: Vector3 = _to3d(goal.x, goal.y)
+			var gfix: Vector3 = _resolve_solids(gw, BODY_R, pu)
+			var goal_blocked: bool = Vector2(gfix.x - gw.x, gfix.z - gw.z).length() > 0.06
+			var goal_wet: bool = terrain != null and terrain.water_depth(goal.x, goal.y) > 0.9
+			var goal_in_bld := false
+			for bd in _buildings:
+				if bd.rect.has_point(goal):
+					goal_in_bld = true
+					break
+			if line_ok and not (goal_blocked or goal_wet or goal_in_bld):
+				bad["stuck"].append([_live_px(pu), goal, end_gap])
+	print("[walk] 走完 %d 段，抵達 %d 段；共 %d 次取樣檢查" % [pts.size() - 1, reached, checked])
+	var total := 0
+	for k in bad:
+		total += (bad[k] as Array).size()
+	var names := {"solid": "陷進實體(人在障礙裡)", "air": "浮空或陷地(>0.3m)",
+			"deep": "走進深水(>1.35m)", "stuck": "卡死(目標是空地卻走不到)",
+			"cam": "鏡頭穿牆", "oob": "走出地圖"}
+	for k in ["solid", "air", "deep", "stuck", "cam", "oob"]:
+		var arr: Array = bad[k]
+		if arr.is_empty():
+			print("[walk][%s] 0 次 OK" % names[k])
+			continue
+		print("[walk][%s] FAIL %d 次，前 6 筆：" % [names[k], arr.size()])
+		for j in mini(6, arr.size()):
+			print("    ", arr[j])
+	# 到現場拍照：每一類的第一個位置各拍一張，不要只給座標
+	var shot := 0
+	for k2 in ["solid", "air", "deep", "stuck", "cam", "oob"]:
+		var arr2: Array = bad[k2]
+		if arr2.is_empty():
+			continue
+		var e0 = arr2[0]
+		var pos: Vector2 = e0 if e0 is Vector2 else (e0[0] as Vector2)
+		pu["node"].global_position = _to3d(pos.x, pos.y)
+		pu["wx"] = pos.x
+		pu["wy"] = pos.y
+		await get_tree().create_timer(0.6).timeout
+		await _snap("res://walk_bad_%s.png" % k2)
+		shot += 1
+	_unshield(pu, save)
+	print("[walk] FAILS=%d（拍了 %d 張現場照）" % [total, shot])
+	print("[walk] DONE")
+	get_tree().quit(0)
+
 # 使用者 2026-07-27：「反驗證是要實際你自己玩過全部的功能都沒有問題才叫修好」。
 # 這裡不驗任何內部指標，只做玩家會做的事：切換單位、走進屋子、停下來、按姿勢鍵，
 # 每一步都留一張玩家視角的圖，並印出「玩家看得到的那個結果」。
@@ -927,6 +1107,15 @@ func _send_click(pos: Vector2) -> void:
 
 # 合成按鍵：第三人稱是用 WASD 走，測試也必須走同一條路
 # （Input.parse_input_event 會更新 Input.is_key_pressed 的內部狀態，push_input 不會）
+# 按下／放開鍵（不含等待）。走查台要「按著走、邊走邊檢查」，
+# 不能用 _hold_key（那支會 await 整段時間，中途沒辦法取樣）。
+func _press_key(code: Key, down_state: bool) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.physical_keycode = code
+	ev.pressed = down_state
+	Input.parse_input_event(ev)
+
 func _hold_key(code: Key, secs: float) -> void:
 	var down := InputEventKey.new()
 	down.keycode = code
@@ -4459,13 +4648,23 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 				if ts > 0.0 and ts < best:
 					best = ts
 				continue
+			# ⚠ 深水圍欄是**看不見的**（h=0，只擋人不擋彈也不該擋鏡頭）。
+			#   2026-07-28 加了 52 根樁之後，鏡頭穿牆從 4 次跳到 19 次——
+			#   鏡頭被一根畫面上根本不存在的柱子往回拉，玩家只會覺得鏡頭在抽搐。
+			#   凡是「規則上的障礙」都不可以參與視覺判定。
+			if String(bk.get("k", "")) == "deepwater":
+				continue
 			if bk["t"] == "obb":
 				# 長條形障礙（車輛殘骸）：鏡頭一樣不能鑽進去
 				var tb: float = _blk_ray_t(bk, p1, p2)
 				if tb > 0.0 and tb < best:
 					best = tb
 				continue
-			if bk["t"] != "cir" or rr * WORLD_SCALE < 0.35:
+			# ⚠ 0.35m 會把樹幹算進來（椰子/松/闊葉的幹是 0.21~0.41m）。
+			#   走查實拍：鏡頭被一根椰子樹幹卡住，畫面右半邊全是樹皮。
+			#   樹幹很細，鏡頭短暫穿過去幾乎看不出來；鏡頭被細桿子一直往回拉才是災難。
+			#   門檻拉到 0.55m ＝只有樹叢(0.85)、龍牙(0.62)、大石這種真的擋得住視線的才算。
+			if bk["t"] != "cir" or rr * WORLD_SCALE < 0.55:
 				continue
 			var c: Vector2 = bk["c"]
 			var t_close: float = (c - p1).dot(d1) / l2
@@ -5633,13 +5832,17 @@ func _build_water() -> void:
 		if absf(uni.size.x - uni.size.y) / maxf(uni.size.x, uni.size.y) < 0.35:
 			flow_v = Vector2.ZERO
 		wmat.set_shader_parameter("flow", flow_v)
+		# 河比海流得快（有河道資料就當河看）
+		wmat.set_shader_parameter("flow_speed",
+				1.9 if not map_data.get("rivers", []).is_empty() else 1.0)
 		mi.material_override = wmat
 		world.add_child(mi)
 	# 深水圍欄（曲線海岸版）：沿著岸線往海裡走，走到水深 1.5m（及胸）就下一個樁，
 	# 把樁連成折線。這樣圍欄貼著**實際海底地形**，不是一個跟海岸無關的矩形。
 	if has_shore:
-		_deepwater_fence_along_shore()
 		_build_far_ocean()
+	# 深水圍欄一律走等高線版本（海、河、湖都一樣，規則掛在「水有多深」上）
+	_build_deepwater_fence()
 	# 深水圍欄：四邊線段障礙（步兵過不去；日後做船再改成「載具可通行」）
 	for r in deep_rects:
 		var corners := [r.position, Vector2(r.end.x, r.position.y), r.end,
@@ -5651,9 +5854,55 @@ func _build_water() -> void:
 					"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
 					"hl": a2.distance_to(b2) * 0.5})
 
-# 沿岸線佈深水圍欄：對岸線上每一點往海側步進，找到水深 >= WADE_MAX 的位置當樁。
-# ⚠ 找不到（整片都是淺灘）的那一點要跳過，但**不可以整批安靜跳過**——
-#   深水圍欄先前就是「登記了卻從來沒生效」，症狀是玩家可以走進外海。
+# ★★深水圍欄改成「水深等高線」（2026-07-28 走查台實拍抓到：人站在河口的水裡到胸口）。
+#
+# 舊版只沿**海岸線**往外找樁，於是「河」完全沒有圍欄。而且第一章的河口是
+# 河床下陷 1.25m ＋ 海床下陷疊在一起 ＝ 實測 1.47m，比涉水上限還深。
+# 「只處理海、忘了河」是同一類錯誤的第 N 次：規則要掛在**現象**（水有多深）上，
+# 不是掛在**資料來源**（coast 還是 river）上。
+#
+# 做法：掃一遍網格，找出「自己是深水、但隔壁不是」的格子（＝深水的邊界），
+# 在每個邊界格放一個圓形障礙。相鄰圓會互相重疊，人（半徑 0.42m）鑽不過去。
+# 為什麼不是每幀直接問水深：water_depth 要算 height_at（雜訊＋丘陵＋壕溝＋河海迴圈），
+# 每個單位每幀問一次太貴。建置期算一次、變成靜態障礙，執行期零成本。
+const DEEP_STEP_PX := 26.0             # 取樣間距（px）＝1.3m
+const DEEP_R_M := 0.80                 # 每個樁的半徑（公尺）：相鄰樁要重疊到人鑽不過去
+func _build_deepwater_fence() -> void:
+	if terrain == null:
+		return
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	# 只鋪戰場 ±200px：玩家出不了地圖（_clamp_to_map），外海不必立樁
+	var x0: float = -200.0
+	var y0: float = -200.0
+	var nx: int = int((mwp + 400.0) / DEEP_STEP_PX)
+	var ny: int = int((mhp + 400.0) / DEEP_STEP_PX)
+	var deep: Array = []
+	for i in nx + 1:
+		var col: Array = []
+		for j in ny + 1:
+			col.append(terrain.water_depth(x0 + float(i) * DEEP_STEP_PX,
+					y0 + float(j) * DEEP_STEP_PX) > WADE_MAX)
+		deep.append(col)
+	var n := 0
+	for i2 in range(1, nx):
+		for j2 in range(1, ny):
+			if not deep[i2][j2]:
+				continue
+			# 邊界＝自己是深水、四鄰有一個不是
+			if deep[i2 - 1][j2] and deep[i2 + 1][j2] and deep[i2][j2 - 1] and deep[i2][j2 + 1]:
+				continue
+			_water_blk.append({"t": "cir",
+					"c": Vector2(x0 + float(i2) * DEEP_STEP_PX, y0 + float(j2) * DEEP_STEP_PX),
+					"r": DEEP_R_M / WORLD_SCALE, "h": 0.0, "k": "deepwater"})
+			n += 1
+	# ⚠ 一根樁都沒有時要大聲喊：深水圍欄「登記了卻從來沒生效」是本專案的舊病，
+	#   症狀是玩家可以走進外海，而測試看起來一片安靜。
+	if n == 0:
+		push_error("[water] 深水圍欄一根樁都沒立（這張圖真的沒有深過 %.2fm 的水嗎？）" % WADE_MAX)
+	else:
+		print("[water] 深水圍欄 %d 根樁（水深 > %.2fm 的邊界）" % [n, WADE_MAX])
+
 # 遠洋：岸邊那片網格只鋪到戰場外 90m，之後海就結束了——實拍看到海在半路被一條
 # 直線切斷，外面接著米色的外圍地面。遠洋不需要水深變化（一律最深），
 # 所以用一片大平面補到地平線，成本只有兩個三角形。
@@ -5697,42 +5946,13 @@ func _build_far_ocean() -> void:
 	mi.extra_cull_margin = far
 	world.add_child(mi)
 
-const WADE_MAX := 1.5                  # 及胸水深：步兵不可通行
+# ★★涉水上限＝這條物理規則的**唯一真相**（2026-07-28）。
+#   先前同一條規則有三個數字：深水圍欄用 1.5、走查判準用 1.35、
+#   Terrain.move_cost 用 1.35。三個數字就一定會出現「圍欄立在 1.5、
+#   人走到 1.49 沒被擋、判準說 >1.35 就是 FAIL」這種永遠修不完的縫。
+#   1.35m ＝ 1.75m 的人及胸的高度（鐵律 0⑤：量級用現實值）。
+const WADE_MAX := BattleTerrain.WADE_MAX
 const SHORE_PAD_PX := 700.0            # 近岸細網格鋪到戰場外多遠（px；700px = 35m）
-func _deepwater_fence_along_shore() -> void:
-	var pts: Array = terrain.coast_points()
-	if pts.size() < 2:
-		return
-	var nodes: Array = []
-	for i in pts.size():
-		var p: Vector2 = pts[i]
-		# 海側方向＝從岸線往水深增加的方向，用梯度量（不必知道資料寫的是哪一邊）
-		var g := Vector2(terrain.water_depth(p.x + 8.0, p.y) - terrain.water_depth(p.x - 8.0, p.y),
-				terrain.water_depth(p.x, p.y + 8.0) - terrain.water_depth(p.x, p.y - 8.0))
-		if g.length() < 0.0001:
-			continue
-		var dir: Vector2 = g.normalized()
-		var q: Vector2 = p
-		var found := false
-		for _step in 40:
-			q += dir * 8.0
-			if terrain.water_depth(q.x, q.y) >= WADE_MAX:
-				found = true
-				break
-		if found:
-			nodes.append(q)
-	if nodes.size() < 2:
-		push_error("[water] 岸線上找不到深水樁（整片都是淺灘？）＝深水圍欄沒有生效")
-		return
-	for i in range(nodes.size() - 1):
-		var a2: Vector2 = nodes[i]
-		var b2: Vector2 = nodes[i + 1]
-		if a2.distance_to(b2) > 200.0:
-			continue          # 兩樁差太遠＝中間是陸地（海灣），不要連一條穿過陸地的圍欄
-		_water_blk.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
-				"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
-				"hl": a2.distance_to(b2) * 0.5})
-
 # 水面網格：把「這一點的水深」烤進頂點色的 alpha，shader 直接拿它當透明度與深淺色。
 # ⚠ 為什麼不是一片 PlaneMesh（使用者 2026-07-27：「水面那片不透明藍色塊，像藍地毯」）：
 #   ① ALPHA 寫死 0.90＝幾乎不透明，淺灘看不到水底，一律是同一片藍；
@@ -5788,62 +6008,114 @@ shader_type spatial;
 render_mode blend_mix, depth_draw_always, cull_back;
 
 uniform vec2 flow = vec2(1.0, 0.25);   // 流向（河水會流，湖面 flow 給 0）
-// 遠處漣漪的殘留強度。0 ＝遠處變成鏡子（低太陽下整片粉色，實拍抓到），
-// 所以下限不可以是 0——真實海面到地平線都還有浪。
-uniform float ripple_far = 0.06;
+uniform float ripple_far = 0.06;       // 遠處漣漪殘留（0＝鏡子＋摩爾紋，不可為 0）
+uniform float flow_speed = 1.0;        // 河比海流得快
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+uniform sampler2D depth_tex : hint_depth_texture, filter_linear_mipmap;
 
-// ★★2026-07-27：漣漪必須用**世界座標**。
-//   舊版在 fragment() 裡寫 `VERTEX.xz`，而 Godot 的 fragment 階段 VERTEX 是**視空間**——
-//   於是整片波紋鎖在鏡頭上，鏡頭一轉花紋跟著轉。人眼對「花紋不隨物體移動」極度敏感，
-//   讀起來就是一張貼在螢幕上的塑膠紋理，不是水（使用者兩輪都說水很假）。
 varying vec3 wpos;
+
+// ★★2026-07-28（使用者第三次說水假）：漣漪從「sin 的疊加」換成 **hash 梯度雜訊 FBM**。
+//   不管疊幾組正弦、頻率怎麼錯開，正弦的和永遠是規則的燈芯絨／格子紋——
+//   人眼對週期性極度敏感，那就是「一看就假」的根源。真實水面的擾動是無週期的。
+//   （地形當年也是因為正弦疊加出現規則斜條紋才改成 hash 雜訊，同一個教訓。）
+float h21(vec2 p) {
+	// ⚠ 座標要先收進小範圍：wpos 可以到 ±700m，直接丟進 fract 會因為浮點精度
+	//   在大座標處退化成沿軸的條紋（畫面上就是一片對齊的方格）。
+	p = mod(p, 512.0);
+	p = fract(p * vec2(123.34, 456.21));
+	p += dot(p, p + 45.32);
+	return fract(p.x * p.y);
+}
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = h21(i);
+	float b = h21(i + vec2(1.0, 0.0));
+	float c = h21(i + vec2(0.0, 1.0));
+	float d = h21(i + vec2(1.0, 1.0));
+	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+// 兩層不同方向、不同速度的捲動雜訊。方向不同才有「水在動」的感覺，
+// 同方向兩層只是同一張圖在滑。
+// ⚠⚠ 每一階都要**轉一個不成比例的角度**再取樣。
+//   值雜訊是建在整數格點上的，每一階都用同一個方向疊起來，格點會互相對齊，
+//   畫面上就是一整片軸對齊的方格（實拍第一章海面）。
+//   天空 shader 當年為了同一件事就留了一個 36.7 度的旋轉矩陣——同一個教訓。
+const mat2 WROT = mat2(vec2(0.8018, 0.5977), vec2(-0.5977, 0.8018));
+float water_fbm(vec2 p, float t) {
+	float n = 0.0;
+	// ⚠ 階數與頻率要配合**實際尺度**：水面波長 3~5m 才像海，
+	//   0.1m 的細碎波在畫面上是一片乾酪碎粒（第一版實拍就是這樣）。
+	n += vnoise(p + vec2(t * 0.20, t * 0.11)) * 0.58;
+	p = WROT * p * 2.1;
+	n += vnoise(p - vec2(t * 0.31, t * 0.57)) * 0.30;
+	p = WROT * p * 2.05;
+	n += vnoise(p + vec2(t * 0.72, -t * 0.39)) * 0.12;
+	return n;
+}
 
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	float t = TIME * 0.9;
-	// 兩組不同波長、沿流向前進的波：單一正弦看起來像布，疊兩組才像水面
+	float t = TIME * 0.9 * flow_speed;
+	// ⚠ 頂點起伏一定要隨距離淡出：水面網格是 1.2m 一格，掠角看過去時
+	//   0.17m 的高低差會讓每一格變成一個看得見的階梯面——實拍是一整片方格布。
+	//   近處要有起伏（那是水在動的證據），遠處交給法線就好。
+	float vfade = 1.0 - smoothstep(12.0, 55.0,
+			distance(wpos, CAMERA_POSITION_WORLD));
 	float a = dot(wpos.xz, normalize(flow + vec2(0.001)));
-	VERTEX.y += sin(a * 0.8 - t * 1.6) * 0.055
-			+ sin(wpos.x * 1.3 + t * 0.9) * 0.03
-			+ sin(wpos.z * 1.7 - t * 1.1) * 0.025;
+	VERTEX.y += (sin(a * 0.8 - t * 1.6) * 0.045
+			+ (water_fbm(wpos.xz * 0.12, TIME * 0.6) - 0.5) * 0.09) * vfade;
 }
 
 void fragment() {
+	float d = COLOR.a;                       // 建網格時烤進頂點色的實際水深（0=岸、1=深）
+	float vd = length(VERTEX);               // 到鏡頭的距離（VERTEX 在 fragment 是視空間）
+	float near_k = 1.0 - smoothstep(18.0, 130.0, vd);
+	float amp = mix(ripple_far, 1.0, near_k);
+
+	// ---- 法線：FBM 的梯度（不是 sin），所以沒有任何規則紋路 ----
+	float t = TIME * flow_speed;
+	vec2 p = wpos.xz * 0.22 + normalize(flow + vec2(0.001)) * t * 0.10;
+	float e = 0.16;
+	float n0 = water_fbm(p, t);
+	float nx = water_fbm(p + vec2(e, 0.0), t) - n0;
+	float nz = water_fbm(p + vec2(0.0, e), t) - n0;
+	// ⚠ 振幅 5.5 ＝整片海變成雜訊；水面的法線擾動其實很小（波高只有幾公分）
+	NORMAL = normalize(NORMAL + vec3(-nx, 0.0, -nz) * (0.85 * amp));
+
+	// ---- 顏色：深度決定，菲涅耳只當高光不當染色 ----
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	// d ＝這一點的實際水深（0=岸邊、1=深水），建網格時就烤進頂點色 alpha。
-	// 用真實水深而不是「離矩形邊界多遠」，水線才會跟著地形走而不是跟著矩形走。
-	float d = COLOR.a;
 	vec3 shallow_c = vec3(0.20, 0.45, 0.44);
 	vec3 deep_c = vec3(0.02, 0.09, 0.17);
-	// ⚠ 菲涅耳權重要很小：0.28 在斜俯瞰下已經讓整片水變成淡灰紫（實拍第一章海灘），
-	//   0.7 更是像牛奶。水在掠角下確實會反射天空，但那是**高光**不是整片染色。
-	ALBEDO = mix(mix(shallow_c, deep_c, smoothstep(0.06, 0.85, d)),
-			vec3(0.40, 0.54, 0.64), fres * 0.10);
-	// 岸邊白沫：水最淺的那一圈加白，浪花線讓水與地有交界而不是硬切。
-	// 白沫要弱、要窄——太強會變成一圈白色鑲邊（實拍）。
-	float foam = (1.0 - smoothstep(0.0, 0.055, d))
-			* (0.35 + 0.65 * sin(wpos.x * 5.5 + wpos.z * 4.2 + TIME * 2.2));
-	ALBEDO = mix(ALBEDO, vec3(0.86, 0.90, 0.91), clamp(foam, 0.0, 0.26));
-	// ★透明度跟著水深走：淺灘**完全**透明（看得到水底的沙），深水才不透明。
-	//   ⚠ 不可以留 0.16 的底：水深 0 的那一圈還有 16% 不透明就是一條硬邊。
-	ALPHA = clamp(0.94 * smoothstep(0.0, 0.42, d), 0.0, 0.94);
-	// ⚠ ROUGHNESS 0.06 ＝鏡面。水面的頂點波只有 2.5cm，整片幾乎是平的，
-	//   於是變成一整面鏡子把天空照下來。真水面的高光是被小漣漪打碎的。
-	// ⚠ 三組**不同頻率且不成整數倍**、振幅遞減，才看得出是漣漪（兩組同振幅會出現斜格紋）。
-	// ⚠ 漣漪強度隨距離淡出：遠處水面本來就趨近鏡面，滿版波紋會變成一片格子布，
-	//   而且遠處一個像素涵蓋好幾個波長，必定產生摩爾紋（實拍海面就是這樣）。
-	vec2 rp = wpos.xz;
-	float far_fade = mix(ripple_far, 1.0, 1.0 - smoothstep(20.0, 130.0, length(VERTEX)));
-	float n1 = sin(rp.x * 3.1 + TIME * 1.30) * 0.055
-			+ sin(rp.x * 7.3 - rp.y * 1.9 + TIME * 2.05) * 0.028;
-	float n2 = sin(rp.y * 4.7 - TIME * 1.05) * 0.048
-			+ sin(rp.x * 1.3 + rp.y * 5.9 + TIME * 1.55) * 0.022;
-	NORMAL = normalize(NORMAL + vec3(n1, 0.0, n2) * far_fade);
-	// ⚠ 遠處不可以是鏡子也不可以有高頻漣漪：
-	//   鏡子 → 低太陽下整片染成粉色；高頻漣漪 → 一個像素涵蓋好幾個波長 = 摩爾紋。
-	//   兩個都靠「遠處改成霧面」解決：粗糙度拉高、鏡面拉低，讀起來就是深藍的外海。
-	ROUGHNESS = mix(0.58, 0.28, far_fade);
-	SPECULAR = mix(0.10, 0.35, far_fade);
+	vec3 body = mix(shallow_c, deep_c, smoothstep(0.06, 0.85, d));
+
+	// ---- 折射：水下的東西會被扭曲。少了這件，水面就是一張貼在地上的色紙 ----
+	//   ⚠ 網頁版走 gl_compatibility，SCREEN_TEXTURE 仍可用但要保守：
+	//     位移量隨水深與距離收斂，太大會在岸邊把陸地也扯進來。
+	vec2 uv_off = vec2(-nx, -nz) * (0.12 * near_k) * clamp(d * 2.0, 0.0, 1.0);
+	vec3 under = texture(screen_tex, SCREEN_UV + uv_off).rgb;
+	// 淺水看得到底（折射的畫面佔比高），深水幾乎看不到
+	float see_through = (1.0 - smoothstep(0.05, 0.55, d)) * near_k;
+	vec3 col = mix(body, mix(under, body, 0.35), see_through);
+	col = mix(col, vec3(0.40, 0.54, 0.64), fres * 0.10);
+
+	// ---- 岸邊浪花：會一進一退，不是固定寬度的白鑲邊 ----
+	//   浪的相位沿著「離岸方向」推進，所以看起來是浪往岸上打
+	float wave = sin(dot(wpos.xz, normalize(flow + vec2(0.001))) * 1.6 - TIME * 1.7)
+			* 0.5 + 0.5;
+	float lap = mix(0.030, 0.075, wave);           // 浪花線的寬度在呼吸
+	float foam = (1.0 - smoothstep(0.0, lap, d))
+			* (0.55 + 0.45 * water_fbm(wpos.xz * 0.8, TIME * 1.2));
+	col = mix(col, vec3(0.88, 0.92, 0.93), clamp(foam, 0.0, 0.55) * (0.4 + 0.6 * near_k));
+
+	ALBEDO = col;
+	// 有折射的地方要不透明（顏色已經含水下畫面），否則會透兩次變得死白
+	ALPHA = clamp(max(0.94 * smoothstep(0.0, 0.42, d), see_through * 0.9), 0.0, 0.96);
+	// 遠處霧面：避免鏡面把朝霞染成粉紅、也避免高頻法線在遠處產生摩爾紋
+	ROUGHNESS = mix(0.58, 0.16, near_k);
+	SPECULAR = mix(0.10, 0.45, near_k);
 }
 """
 

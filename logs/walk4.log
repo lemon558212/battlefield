@@ -1,0 +1,58 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+[walk] 1 主選單 → 劇情戰役
+[walk] 2 章節 01
+[walk] 3 簡報 → 出擊
+[walk] 4 對話：連點推進 (st=3)
+[water] 深水圍欄 56 根樁（水深 > 1.35m 的邊界）
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _scatter_trees (res://scripts/Main.gd:6286)
+       [1] _build_ground (res://scripts/Main.gd:5520)
+       [2] _open_deploy (res://scripts/Main.gd:2891)
+       [3] <anonymous lambda> (res://scripts/Main.gd:2881)
+       [4] _dlg_step (res://scripts/UI.gd:390)
+       [5] _input (res://scripts/UI.gd:509)
+       [6] _send_click (res://scripts/Main.gd:1101)
+       [7] _boot_to_battle (res://scripts/Main.gd:955)
+[rig] mg 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] assault 重定向骨對數=20
+[walk]   對話結束 st=4 (應為 DEPLOY=4)
+[walk] 5 部署：點卡片 → 點藍框放置
+[rig] sniper 重定向骨對數=20
+[walk]   已部署數=1 OK
+[walk] 6 開始戰鬥
+[walk]   st=5 (應為 CMD=5)
+[walk] 路線 130 個取樣點（10 列 × 13 行，間距 5.5m），地圖 70×50 m
+[walk] 起點 px(350,18)（第 3 個點；前面的都在海裡或障礙裡）
+[walk] 走完 129 段，抵達 28 段；共 1843 次取樣檢查
+[walk][陷進實體(人在障礙裡)] 0 次 OK
+[walk][浮空或陷地(>0.3m)] FAIL 2 次，前 6 筆：
+    [(451.2368, 295.9472), 0.97565970818104]
+    [(443.0932, 421.5191), 0.38884641658645]
+[walk][走進深水(>1.35m)] 0 次 OK
+[walk][卡死(目標是空地卻走不到)] FAIL 49 次，前 6 筆：
+    [(307.9808, 170.0026), (350.0, 222.2222), 3.35130882263184]
+    [(324.1481, 175.3192), (466.6667, 222.2222), 7.50190505981445]
+    [(343.697, 178.8565), (583.3333, 222.2222), 12.1764251708984]
+    [(953.1157, 222.1902), (1050.0, 222.2222), 4.84421424865723]
+    [(1111.42, 235.3755), (1166.667, 222.2222), 2.83952140808105]
+    [(1111.42, 235.3752), (1283.333, 222.2222), 8.62080001831055]
+[walk][鏡頭穿牆] FAIL 19 次，前 6 筆：
+    (1168.133, 110.9735)
+    (1036.724, 222.2031)
+    (1088.569, 222.2106)
+    (1107.269, 231.6196)
+    (1076.851, 235.449)
+    (1072.133, 235.4745)
+[walk][走出地圖] 0 次 OK
+[selftest] saved res://qa/walk_bad_air.png
+[selftest] saved res://qa/walk_bad_stuck.png
+[selftest] saved res://qa/walk_bad_cam.png
+[walk] FAILS=70（拍了 3 張現場照）
+[walk] DONE
