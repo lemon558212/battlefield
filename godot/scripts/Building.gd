@@ -170,8 +170,26 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 # 低桌與木箱＝室內掩體（登記進 covers 由 Main 讀），高櫃擋視線。
 # ⚠ 一律走 _emit_box 合併批次：一間房十來個家具，各自一個節點就是十幾次 draw call。
 var furniture: Array = []      # [{lx, lz, r, val}]，局部座標，Main 轉成掩體登記
-# 室內實體障礙 [lx, lz, r]：桌、櫃、木箱都擋人（使用者：任何物體都不能穿越）
+# 室內實體障礙 [lx, lz, r, 高度m]：桌、櫃、木箱都擋人（使用者：任何物體都不能穿越）
+# ⚠⚠ 2026-07-27：這份清單**做好了卻沒有人讀**——Main.gd 全檔搜不到 solids_local，
+#   於是室內所有家具都是純裝飾，玩家直接穿過木箱與高櫃
+#   （使用者實拍：人站在木箱裡面）。這就是本專案反覆出現的
+#   「設定看起來有、玩起來沒有」。第四個欄位是高度，彈道判定要用。
 var solids_local: Array = []
+# 家具不可以擺在「門到房間中心」那條走道上。
+# ⚠⚠ 2026-07-27：家具一變成實體，第一件事就是**整棟房子進不去**——木箱正好卡在門口。
+#   這跟註解裡那條「門前一根柱子就讓整棟房子廢掉」是同一個錯誤，只是換成家具。
+#   凡是「會擋人的東西」，都必須先問「它會不會堵住唯一的入口」。
+const AISLE_HALF := 1.15      # 走道半寬（公尺）：人的碰撞半徑 0.42m，留兩倍餘裕
+func _blocks_aisle(lx: float, lz: float, r: float) -> bool:
+	if doors.is_empty():
+		return false
+	var d3: Vector3 = _px_to_local(doors[0])
+	var a := Vector2(d3.x, d3.z)
+	var b := Vector2(0.0, 0.0)                        # 房間中心
+	var q: Vector2 = Geometry2D.get_closest_point_to_segment(Vector2(lx, lz), a, b)
+	return Vector2(lx, lz).distance_to(q) < AISLE_HALF + r
+
 func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(absf(rect.position.x) * 17.0 + absf(rect.position.y) * 7.0) + 91
@@ -195,13 +213,20 @@ func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 				2: lx = half.x * along; lz = -half.y + 0.35
 				_: lx = half.x * along; lz = half.y - 0.35
 			var hgt: float = rng.randf_range(1.5, 2.0)
+			if _blocks_aisle(lx, lz, 0.55):
+				continue                # 擋住門口走道的高櫃直接不放
 			_emit_box("inner", im, Vector3(1.0, hgt, 0.45),
 					Transform3D(Basis(Vector3.UP, rot), Vector3(lx, y0 + hgt * 0.5, lz)))
 			if f == 0:
-				solids_local.append([lx, lz, 0.55])      # 高櫃擋人
+				solids_local.append([lx, lz, 0.55, hgt])   # 高櫃擋人（1.5~2.0m，也擋視線）
 		# 桌子（桌面＋四腳）＋兩張椅子
 		var tx: float = rng.randf_range(-half.x * 0.4, half.x * 0.4)
 		var tz: float = rng.randf_range(-half.y * 0.4, half.y * 0.4)
+		for _try in 8:
+			if not _blocks_aisle(tx, tz, 0.78):
+				break
+			tx = rng.randf_range(-half.x * 0.7, half.x * 0.7)
+			tz = rng.randf_range(-half.y * 0.7, half.y * 0.7)
 		_emit_box("floor", fm, Vector3(1.5, 0.09, 0.85),
 				Transform3D(Basis(), Vector3(tx, y0 + 0.74, tz)))
 		for sx in [-0.65, 0.65]:
@@ -215,12 +240,14 @@ func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 					Transform3D(Basis(), Vector3(tx + sx2 * 1.18, y0 + 0.7, tz)))
 		furniture.append({"lx": tx, "lz": tz, "r": 1.1, "val": 0.35})
 		if f == 0:
-			solids_local.append([tx, tz, 0.78])          # 桌子
+			solids_local.append([tx, tz, 0.78, 0.78])    # 桌子（桌面 0.78m＝半身掩體）
 		# 木箱堆＝真正好用的室內掩體（半身高，可以蹲在後面）
 		for k2 in 3:
 			var bx: float = rng.randf_range(-half.x * 0.75, half.x * 0.75)
 			var bz: float = rng.randf_range(-half.y * 0.75, half.y * 0.75)
 			var bs: float = rng.randf_range(0.5, 0.75)
+			if _blocks_aisle(bx, bz, bs * 0.72):
+				continue
 			_emit_box("floor", fm, Vector3(bs, bs, bs),
 					Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(bx, y0 + bs * 0.5, bz)))
 			if rng.randf() < 0.5:      # 疊第二層
@@ -229,7 +256,7 @@ func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 						Vector3(bx + 0.1, y0 + bs + bs * 0.4, bz - 0.08)))
 			if f == 0:
 				furniture.append({"lx": bx, "lz": bz, "r": 0.9, "val": 0.5})
-				solids_local.append([bx, bz, bs * 0.72])  # 木箱堆
+				solids_local.append([bx, bz, bs * 0.72, bs * 1.35])  # 木箱堆（有時疊兩層）
 		# 翻倒的桌子：被打過的房子不會桌椅整齊
 		var ox: float = rng.randf_range(-half.x * 0.6, half.x * 0.6)
 		var oz: float = rng.randf_range(-half.y * 0.6, half.y * 0.6)
@@ -516,11 +543,20 @@ func _decorate(half: Vector2, top: float) -> void:
 					Vector3(step / 2.0, 0.45, 1.0))
 			xf_cornice.append(Transform3D(bs, Vector3(c.x + outv.x, top - 0.22, c.y + outv.y)))
 	# 門扇：卡在門洞裡（模組件 1.0×2.2m → 縮到 DOOR_W×2.15m）
+	# ⚠⚠ 門扇要畫成**開著的**（2026-07-27 使用者：「穿過牆壁特別是有窗戶、門一定會」）。
+	#   門洞在碰撞上本來就是通路（那是唯一入口），但裝飾件是一扇**關著**的門板，
+	#   於是玩家看到的是「人直接穿過一扇關起來的門」＝穿牆。
+	#   把門板繞門框邊緣轉開 100 度，畫面上就是一道敞開的門。
 	for d in _deco_doors:
 		var pos: Vector2 = d[0]
 		var ang: float = d[1]
-		var bs2 := Basis(Vector3.UP, -ang).scaled(Vector3(DOOR_W / 1.0, 2.15 / 2.2, 1.0))
-		xf_door.append(Transform3D(bs2, Vector3(pos.x, 0.0, pos.y)))
+		var dir2 := Vector2(cos(ang), sin(ang))
+		var hinge: Vector2 = pos - dir2 * (DOOR_W * 0.5)          # 鉸鏈在門洞的一側
+		var open_a: float = deg_to_rad(100.0)
+		var bs2 := Basis(Vector3.UP, -(ang + open_a)).scaled(Vector3(DOOR_W / 1.0, 2.15 / 2.2, 1.0))
+		# 門板中心＝鉸鏈 + 轉開後的半個門寬
+		var half_v: Vector2 = dir2.rotated(open_a) * (DOOR_W * 0.5)
+		xf_door.append(Transform3D(bs2, Vector3(hinge.x + half_v.x, 0.0, hinge.y + half_v.y)))
 	# 窗台板：沿窗洞下緣往外凸 9cm 的一塊石板。
 	# ⚠ 這裡原本掛的是**冷氣機**（Downtown City 模組件），有兩個問題：
 	#   ① 年代不對——這是二戰型態的濱海軍事基地，牆上不會有分離式冷氣（軍事顧問16）；

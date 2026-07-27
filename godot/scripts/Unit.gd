@@ -89,6 +89,17 @@ const PRONE_HIP_BACK := 8.0     # 蹬完：腿幾乎打直往後
 const PRONE_HIP_UP := 108.0     # 收腿到底：膝蓋在髖部前方（cos108°=-0.31）
 const PRONE_KNEE_MIN := 8.0
 const PRONE_KNEE_MAX := 48.0
+# ★★停下來要回 idle 的狀態清單（2026-07-27，使用者連續三輪回報「原地跑步」的真因）。
+#   舊寫法是 `_state == "shoot" or _state == "" or _state == "hit" or _state == "crouch"`
+#   ——**"run"/"walk"/"sprint"/"crouch_walk" 都不在裡面**。
+#   鍵盤移動走的是 `move_dir()`，它會 `_play("run")` 然後 `_process` 在
+#   `if _dir_moving: return` 那裡提早返回；鬆開鍵之後 `_dir_moving` 是 false，
+#   流程雖然走到底了，卻因為 "run" 不在清單裡而永遠不回 idle →
+#   **跑步動畫無限循環，連結束行動都不會停**。
+#   ⚠ 教訓：這種「白名單式的狀態回歸」只要漏一個狀態就會卡住，
+#     而且卡住的是「玩家最常看到的那個狀態」。清單要含全部移動狀態。
+const IDLE_BACK := ["", "shoot", "hit", "crouch", "run", "walk", "sprint", "crouch_walk", "aim"]
+
 # 會循環播放的動作（其餘播一次就回 idle）
 const LOOP_KEYS := ["idle", "idle_relaxed", "walk", "run", "sprint", "aim", "crouch", "crouch_walk", "fix"]
 
@@ -1362,7 +1373,7 @@ func _process(delta: float) -> void:
 	elif _crouch > 0.5 and _prone < 0.5 and anim_names.has("crouch"):
 		_play("crouch")   # 有真人蹲姿動作（UAL Crouch_Idle 重定向）就直接播，不再用幾何硬湊
 		# ⚠ 趴著時不可以播蹲姿動畫：那支動作會寫滿全身骨骼，再被趴姿覆寫等於兩層打架
-	elif _state == "shoot" or _state == "" or _state == "hit" or _state == "crouch":
+	elif _state in IDLE_BACK:
 		_play("idle")
 
 # 載具每幀：沒有動畫狀態機，只有「轉向→前進」與砲塔瞄準。

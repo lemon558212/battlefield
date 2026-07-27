@@ -57,7 +57,14 @@ func _over_ui() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if is_tps():
-		if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		# 轉視角有三條路，玩家用哪條都行：
+		#   ① 按住右鍵拖曳（游標沒被鎖住時的主要方式）
+		#   ② Tab 鎖住游標後直接移動滑鼠（想要 FPS 手感的人用）
+		#   ③ Q/E（完全不用滑鼠）
+		# ⚠ 預設**不鎖游標**：這是戰術遊戲，螢幕上一直有「結束行動」要點
+		#   （2026-07-27 使用者：鎖住等於滑鼠沒有用、只能關掉遊戲）。
+		if event is InputEventMouseMotion and (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+				or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)):
 			var m := event as InputEventMouseMotion
 			tps_yaw -= m.relative.x * mouse_sens
 			tps_pitch = clampf(tps_pitch - m.relative.y * mouse_sens, -35.0, 22.0)
@@ -129,29 +136,34 @@ func _apply_tps(delta: float) -> void:
 	#   室內牆到牆常常不到 2m，這個下限在物理上不可能滿足。
 	#   改成可以一路收到 0.04（近乎第一人稱）——牆在後面時本來就該貼著看，
 	#   這是所有 TPS 的標準行為，總比讓玩家看一片牆好。
+	# ★★所有約束一律套在「目標位置 want」上，**不可以在平滑之後再改實際位置**
+	#   （2026-07-27 使用者：「進入建築物畫面會一直跳」）。
+	#   平滑把鏡頭往外推、修正再把它拉回來，兩者每幀互相打架＝畫面持續抖動。
+	#   約束放在 want 上，收斂過程單調、不會震盪。
 	if wall_probe.is_valid():
 		var k: float = float(wall_probe.call(head, want))
 		if k < 1.0:
 			want = head.lerp(want, clampf(k - 0.12, 0.04, 1.0))
+	# 角色在室內時，鏡頭必須也在同一個房間裡。
+	# ⚠ `wall_probe` 是線段對牆段求交：鏡頭若從門窗缺口穿出去再停在牆體裡，
+	#   那條線段沒有命中任何牆段，判定不出來（實拍：室內環顧有一格整片紅磚）。
+	#   所以用「幾何歸屬」再收一次——二分逼近，找出仍在室內的最遠點。
+	if inside_probe.is_valid() and bool(inside_probe.call(tps_node.global_position)):
+		if not bool(inside_probe.call(want)):
+			var lo := 0.0
+			var hi := 1.0
+			for _i in 6:
+				var mid: float = (lo + hi) * 0.5
+				if bool(inside_probe.call(head.lerp(want, mid))):
+					lo = mid
+				else:
+					hi = mid
+			want = head.lerp(want, maxf(lo - 0.06, 0.04))
 	if ground_probe.is_valid():
 		var gy: float = float(ground_probe.call(want)) + 0.45
 		if want.y < gy:
 			want.y = gy                     # 鏡頭不鑽進地面/壕溝壁
 	global_position = global_position.lerp(want, 1.0 - exp(-14.0 * delta))
-	# ★平滑之後要再驗一次：上面算的是「目標位置」，實際位置是逐幀逼近的，
-	#   角色轉身或衝進屋裡時，中間那幾幀的鏡頭會從牆裡穿過去（畫面瞬間變一片牆）。
-	#   收斂完再對「頭→目前位置」做一次探測，超過就當場拉回牆內側。
-	if wall_probe.is_valid():
-		var k2: float = float(wall_probe.call(head, global_position))
-		if k2 < 1.0:
-			global_position = head.lerp(global_position, clampf(k2 - 0.12, 0.04, 1.0))
-	# ★最後一道保險（2026-07-27 實拍：室內四面環顧有一個方向整格畫面是紅磚）：
-	#   `wall_probe` 是線段對牆線段求交，鏡頭若剛好從門窗缺口穿出去再停在牆體裡，
-	#   那條線段是「沒有命中任何牆段」的，判定不出來。
-	#   所以再加一條幾何條件：**角色在室內時，鏡頭必須也在同一個房間裡**。
-	if inside_probe.is_valid() and bool(inside_probe.call(tps_node.global_position)):
-		if not bool(inside_probe.call(global_position)):
-			global_position = head.lerp(global_position, 0.10)
 	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * _shoulder * 0.5
 	look_at(look_at_p, Vector3.UP)
 

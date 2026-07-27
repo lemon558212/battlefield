@@ -70,6 +70,7 @@ var _tracers: Array = []
 var _enemy_queue: Array = []
 var _enemy_t := 0.0
 var _zone_mesh: MeshInstance3D = null
+var _bld_blk: Array = []          # 室內家具障礙（見 _build_ground 的註解）
 var _ap_ring_r := -1.0            # 上次建環用的半徑／圓心（避免每幀重建貼地環）
 var _ap_ring_c := Vector3(1e9, 0, 0)
 # 掩體登記表（GDD/13 Phase2）：每筆＝{wx,wy,r,val,type}，座標為遊戲 px。
@@ -353,6 +354,62 @@ func _playtest() -> void:
 			c_z, "OK" if c_z > 0.8 else "FAIL", c_s, "OK" if c_s < 0.05 else "FAIL"])
 	if c_c <= 0.8 or st_c != "crouch" or c_z <= 0.8 or c_s >= 0.05: fails += 1
 
+	# D2) ★原地跑步（使用者連續三輪回報）：按住 W 走一段、放開、等 1 秒，
+	#     動畫狀態必須回到 idle。舊寫法的狀態回歸白名單漏了 run/walk/sprint，
+	#     於是鍵盤移動過的角色永遠停在跑步動畫。
+	#     ⚠ 這條斷言要看 `_state`（實際在播的動畫），不是看「有沒有在移動」——
+	#       「有沒有在移動」是對的，錯的是動畫沒跟著回去。
+	await _hold_key(KEY_W, 1.0)
+	await get_tree().create_timer(1.0).timeout
+	var st_stop: String = str(pu["node"]._state)
+	print("[play][停下不原地跑步] 放開 W 一秒後動畫=%s 移動中=%s %s"
+			% [st_stop, pu["node"].is_moving(),
+			"OK" if st_stop == "idle" else "FAIL(還在播移動動畫＝原地跑步)"])
+	if st_stop != "idle": fails += 1
+	await _snap("res://play_stop_idle.png")
+
+	# D3) ★鏡頭抖動（使用者：「進入建築物畫面會一直跳」）：
+	#     角色完全靜止時，逐幀量鏡頭位移。約束若寫在「平滑之後的實際位置」上，
+	#     平滑往外推、修正往內拉，每幀互相打架＝畫面持續抖動，這裡量得出來。
+	var jit_max := 0.0
+	var jit_prev: Vector3 = cam.global_position
+	var jt := 0.0
+	while jt < 1.5:
+		await get_tree().process_frame
+		jt += get_process_delta_time()
+		jit_max = maxf(jit_max, jit_prev.distance_to(cam.global_position))
+		jit_prev = cam.global_position
+	print("[play][鏡頭不抖] 角色靜止 1.5 秒，鏡頭每幀最大位移=%.4fm %s"
+			% [jit_max, "OK" if jit_max < 0.02 else "FAIL(鏡頭在震盪)"])
+	if jit_max >= 0.02: fails += 1
+
+	# D4) ★手不可以在背後（使用者：「我不知道你是頭裝反還是手裝反，就是手會在後面」）。
+	#     把鏡頭轉 180 度，等身體轉過來，然後量「持槍手在胸口的前面還是後面」。
+	#     ⚠ 這條斷言的關鍵是**量前後方向**，不是量「手臂骨頭在不在」——
+	#       手臂一直都在，錯的是它被 IK 拉到身體後面（量存在性會通過，量方向才抓得到）。
+	var yaw0: float = cam.tps_yaw
+	cam.tps_yaw = yaw0 + 180.0
+	await get_tree().create_timer(1.6).timeout
+	# ⚠ `pu["node"]` 是 Dictionary 取值＝Variant，`:=` 推不出型別（Parse Error）。要明寫。
+	var sk_a: Array = (pu["node"] as Node3D).find_children("*", "Skeleton3D", true, false)
+	if not sk_a.is_empty():
+		var ska := sk_a[0] as Skeleton3D
+		var ci := ska.find_bone("Chest")
+		var hi2 := ska.find_bone("Hand.R")
+		if ci >= 0 and hi2 >= 0:
+			var cw: Vector3 = ska.global_transform * ska.get_bone_global_pose(ci).origin
+			var hw: Vector3 = ska.global_transform * ska.get_bone_global_pose(hi2).origin
+			var fwd_b: Vector3 = pu["node"].facing_dir()
+			var ahead: float = (hw - cw).dot(fwd_b)
+			var yaw_gap: float = rad_to_deg(absf(wrapf(deg_to_rad(cam.tps_yaw)
+					- pu["node"].rotation.y, -PI, PI)))
+			print("[play][手在身體前面] 鏡頭轉 180 度後：持槍手在胸口前方 %.3fm、"
+					% ahead + "身體與鏡頭夾角 %.0f 度 %s"
+					% [yaw_gap, "OK" if (ahead > 0.05 and yaw_gap < 20.0)
+					else "FAIL(手在背後／身體沒跟著鏡頭轉)"])
+			if ahead <= 0.05 or yaw_gap >= 20.0: fails += 1
+	await _snap("res://play_arm_front.png")
+
 	# E) 走進最近的建築：驗屋頂淡出、鏡頭不穿牆
 	# 走進屋子要走一段路，AP 會先用完（AP 用盡＝停下，看起來像被擋住）。
 	# ⚠ 補 AP 一定要在 _begin_action 之後，它會 ×0.7^N 重算（2026-07-26 的假通過就是這樣來的）。
@@ -364,9 +421,9 @@ func _playtest() -> void:
 	else:
 		var door: Vector2 = bd.doors[0] if not bd.doors.is_empty() else bd.rect.get_center()
 		# 走到門口再進去：用真的操作（轉向 + 按 W），不瞬移
-		var ok_in := await _walk_to_px(pu, door, 22.0)
+		var ok_in := await _walk_to_px(pu, door, 16.0)
 		if ok_in:
-			ok_in = await _walk_to_px(pu, bd.rect.get_center(), 12.0)
+			ok_in = await _walk_to_px(pu, bd.rect.get_center(), 8.0)
 		var inside: bool = bd.inside(_live_px(pu).x, _live_px(pu).y)
 		var here_px := _live_px(pu)
 		print("[play][進屋] 走進去=%s（人在 px(%.0f,%.0f)、門在 px(%.0f,%.0f)、屋框 %s）"
@@ -417,6 +474,31 @@ func _playtest() -> void:
 			await _snap("res://play_in_look%d.png" % k)
 		print("[play][屋內環顧] 已拍四個方向 play_in_look0~3.png")
 
+	# F2) ★遊戲裡近拍英雄：使用者的截圖顯示「沒有手、武器，或在背後」，
+	#     但我的隔離驗證台（ArmShot）拍出來手臂與槍都在。差別一定在「遊戲裡」這條路徑上，
+	#     所以要在**真實戰場**用戰術鏡頭繞著英雄拍四圈，跟使用者看到的同框比對。
+	var hero_node: Node3D = pu["node"]
+	_end_action()
+	await get_tree().create_timer(0.4).timeout
+	cam.clear_tps()
+	cam.set_follow(null)
+	for ang_i in 4:
+		cam.focus = hero_node.global_position + Vector3(0, 1.05, 0)
+		cam.dist = 3.4
+		cam.pitch_deg = 10.0
+		cam.yaw = float(ang_i) * PI * 0.5
+		await get_tree().create_timer(0.7).timeout
+		await _snap("res://play_hero%d.png" % ang_i)
+	var sk_h := hero_node.find_children("*", "Skeleton3D", true, false)
+	if not sk_h.is_empty():
+		var skx := sk_h[0] as Skeleton3D
+		var names := []
+		for bn in ["UpperArm.L", "LowerArm.L", "Hand.L", "UpperArm.R", "LowerArm.R", "Hand.R"]:
+			var bix := skx.find_bone(bn)
+			names.append("%s=%s" % [bn, "有" if bix >= 0 else "缺"])
+		print("[play][英雄骨頭] cls=%s 模型骨數=%d %s" % [pu["cls"], skx.get_bone_count(), " ".join(names)])
+	print("[play][英雄近拍] play_hero0~3.png（手臂與武器要在畫面上）")
+
 	# G) 固體不可互穿（使用者回報「人誤會穿過牆壁、戰車」）。
 	#    ⚠ 這裡**不隔離**任何障礙——使用者是在完整戰場上撞到的，隔離出來的測試證明不了。
 	var solid_fail := 0
@@ -443,6 +525,67 @@ func _playtest() -> void:
 		if inb:
 			solid_fail += 1
 		await _snap("res://play_wall.png")
+	# G-1a ★窗戶下方的牆不可以穿過（使用者：「特別是有窗戶、門一定會」）。
+	#      門洞在規則上就是通路（唯一入口，這是設計），但**窗戶不是**——
+	#      窗台以下是實心牆，人不可能從窗戶「走」進去。
+	# ⚠ 最近的那棟剛好是武器庫（kind=depot，**故意不開窗**），
+	#   直接用 bd 會靜默跳過這一項＝等於沒驗。要挑一棟真的有窗的。
+	var wbd = null
+	for b3 in _buildings:
+		if not b3.windows.is_empty():
+			wbd = b3
+			break
+	if wbd != null:
+		var wpx: Vector2 = wbd.windows[0]
+		var bcw: Vector2 = wbd.rect.get_center()
+		var outw: Vector2 = (wpx - bcw).normalized()
+		_end_action()
+		await get_tree().create_timer(0.3).timeout
+		cp = 6
+		var wstart: Vector2 = wpx + outw * (4.0 / WORLD_SCALE)
+		pu["node"].global_position = _to3d(wstart.x, wstart.y)
+		pu["wx"] = wstart.x
+		pu["wy"] = wstart.y
+		_begin_action(pu)
+		pu["ap"] = 9999.0
+		pu["ap_max"] = 9999.0
+		var tow: Vector3 = _to3d(wpx.x, wpx.y) - pu["node"].global_position
+		cam.tps_yaw = rad_to_deg(atan2(tow.x, tow.z))
+		await get_tree().create_timer(0.4).timeout
+		await _hold_key(KEY_W, 4.0)
+		var in_win: bool = wbd.inside(_live_px(pu).x, _live_px(pu).y)
+		print("[play][撞窗戶] 對著窗戶走 5 秒：進到室內=%s %s"
+				% [in_win, "OK(窗台下是實心牆)" if not in_win else "FAIL(從窗戶走進去了)"])
+		if in_win:
+			solid_fail += 1
+		await _snap("res://play_window.png")
+
+	# G-1b 室內家具也不可以穿過（使用者實拍：人站在木箱裡面）
+	if bd != null and not bd.solids_local.is_empty():
+		var fsl = bd.solids_local[0]
+		var fpx: Vector2 = bd._local_to_px(Vector2(float(fsl[0]), float(fsl[1])))
+		var fr_m: float = float(fsl[2])
+		_end_action()
+		await get_tree().create_timer(0.3).timeout
+		cp = 6
+		var fstart: Vector2 = fpx + Vector2(1.0, 0.0) * (3.0 / WORLD_SCALE)
+		pu["node"].global_position = _to3d(fstart.x, fstart.y)
+		pu["wx"] = fstart.x
+		pu["wy"] = fstart.y
+		_begin_action(pu)
+		pu["ap"] = 9999.0
+		pu["ap_max"] = 9999.0
+		var tof: Vector3 = _to3d(fpx.x, fpx.y) - pu["node"].global_position
+		cam.tps_yaw = rad_to_deg(atan2(tof.x, tof.z))
+		await get_tree().create_timer(0.4).timeout
+		await _hold_key(KEY_W, 4.0)
+		var fgap: float = Vector2(_live_px(pu).x - fpx.x, _live_px(pu).y - fpx.y).length() * WORLD_SCALE
+		print("[play][撞室內家具] 對家具走 4 秒：離家具中心 %.2fm（家具半徑 %.2fm）%s"
+				% [fgap, fr_m, "OK(擋住了)" if fgap > fr_m * 0.85 else "FAIL(穿過家具)"])
+		if fgap <= fr_m * 0.85:
+			solid_fail += 1
+		await _snap("res://play_furniture.png")
+
 	# G-2 對著戰車走 5 秒：不可以穿過車體
 	var veh = null
 	for u2 in units:
@@ -2048,7 +2191,16 @@ func _selftest() -> void:
 				print("[navchk] SKIP 沒有線段型障礙")
 			else:
 				var keep_b4 := _buildings
+				var keep_blk_nav := _blockers
 				_buildings = []
+				# ⚠ 建築被隔離掉了，屋裡的家具障礙也必須一起隔離——
+				#   否則繞路路線會被「一棟不存在的房子裡的木箱」擋住，測出來像是 AI 繞不出去
+				#   （2026-07-27 家具變成實體後當場踩到）。
+				var nav_blk: Array = []
+				for bkn in _blockers:
+					if String(bkn.get("k", "")) != "furniture":
+						nav_blk.append(bkn)
+				_blockers = nav_blk
 				var nf: Vector3 = _to3d(nseg["m"].x, nseg["m"].y + 5.0 / WORLD_SCALE)
 				var ng: Vector3 = _to3d(nseg["m"].x, nseg["m"].y - 5.0 / WORLD_SCALE)
 				var straight: bool = _path_clear(nf, ng, BODY_R)
@@ -2056,6 +2208,7 @@ func _selftest() -> void:
 				var alt_ok: bool = _path_clear(nf, alt, BODY_R)
 				var turned: bool = alt.distance_to(ng) > 0.5
 				_buildings = keep_b4
+				_blockers = keep_blk_nav
 				print("[navchk] 穿過障礙的直線可行=%s（應為 false） %s" % [straight,
 						"OK" if not straight else "FAIL(障礙沒擋住路徑判定)"])
 				print("[navchk] 繞路後換了方向=%s、新路徑可行=%s %s" % [turned, alt_ok,
@@ -2621,7 +2774,14 @@ func _begin_action(u) -> bool:
 		# 下令＝進入第三人稱操控（GDD/07）：鏡頭滑到角色背後、滑鼠鎖定成自由視角
 		cam.set_tps(u["node"])
 		ui.show_crosshair(true)
-		_capture_mouse(true)
+		# ★★2026-07-27 使用者：「控制人物滑鼠被綁定在準星裡，完全不能動，
+		#   這樣要如何點結束行動，我關掉遊戲，等於滑鼠沒有用。」
+		#   下令時**不再自動鎖滑鼠**。鎖滑鼠是 FPS 的慣例，但這是戰術遊戲——
+		#   螢幕上一直有「結束行動」「AP 條」「角色卡」要點，鎖住游標等於把 UI 廢掉。
+		#   改成：游標永遠可用；要自由轉視角的人自己按 Tab 鎖。轉視角本來就有 Q/E。
+		_capture_mouse(false)
+		ui.flash_msg("操作：WASD 移動　Q/E 轉視角　C 蹲 Z 趴 Space 站　左鍵開火　"
+				+ "Tab 鎖滑鼠自由轉視角　Esc 結束行動", Color(0.75, 0.92, 1.0))
 		# ★玩家親自操控期間關掉自動姿勢（使用者 2026-07-27：「停下來又自動蹲回去」）。
 		#   自動掩體判定原本每次停下就把人壓成蹲姿，玩家想站著看前方也站不起來——
 		#   自動判定壓過玩家意圖。姿勢改由 C／Z／Space 全權決定。
@@ -2688,8 +2848,14 @@ func _ap_reach_dir(u, dir: Vector3, max_steps := 90) -> float:
 		gone += step
 	return gone
 
-# 行動範圍圈：VC 用 AP 條，這裡再加一圈地面指示，玩家才知道還能走多遠
+# 行動範圍圈已移除（2026-07-27 使用者：「AP 不用特別再用黃圈去判斷還有多少 AP，
+# 右下角就已經有顯示了」）。留空函式讓呼叫端不用改，並確保舊的圈不會殘留在畫面上。
 func _update_ap_ring() -> void:
+	if is_instance_valid(_ap_ring):
+		_ap_ring.visible = false
+	return
+
+func _update_ap_ring_unused() -> void:
 	if acting == null:
 		return
 	if not is_instance_valid(_ap_ring):
@@ -2986,7 +3152,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			if ui.fire_panel_open():
 				return
-			var tgt = _tps_target()
+			var tgt = _tps_target((event as InputEventMouseButton).position)
 			if tgt == null:
 				ui.flash_msg("準心沒有對到敵人", Color(1.0, 0.8, 0.5))
 				return
@@ -3008,8 +3174,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				ui.hide_fire_panel()
 				if part != "" and acting == sh2 and not bool(sh2.get("fired", false)):
 					_fire(sh2, tgt, part)
-				if cam.is_tps():
-					_capture_mouse(true))
+				# ⚠ 開完火不可以把滑鼠鎖回去（2026-07-27 使用者：鎖住就點不到「結束行動」）
+				)
 			return
 		return
 	# 指令模式：Tab／N＝切換到下一個我方單位並把鏡頭帶過去。
@@ -3815,6 +3981,14 @@ func _tps_control(delta: float) -> void:
 	# 準心方向：角色永遠瞄向你看的地方
 	var fwd: Vector3 = cam.tps_forward()
 	node.aim_point = node.global_position + Vector3(0, 1.4, 0) + fwd * 20.0
+	# ★★身體要跟著鏡頭轉（2026-07-27 使用者：「手會在後面」的真因）。
+	#   舊版只設 aim_point，身體只在 `move_dir()`（真的在走）時才轉向 →
+	#   站著用滑鼠把鏡頭轉到角色後面時，身體還朝原來的方向，
+	#   只有手臂與槍被 IK 拉去背後，看起來就是「手裝反了」。
+	#   所有第三人稱射擊遊戲在準心舉起時都是「身體對齊視角」，這裡照做。
+	if not node.is_moving():
+		var want_yaw: float = deg_to_rad(cam.tps_yaw)
+		node.rotation.y = lerp_angle(node.rotation.y, want_yaw, minf(1.0, 9.0 * delta))
 	if ui.fire_panel_open():
 		return                      # 面板開著時不要一邊走一邊選部位
 	# 鍵盤轉視角（使用者 2026-07-26：不想什麼都靠滑鼠）。
@@ -3872,11 +4046,15 @@ func _tps_control(delta: float) -> void:
 #   2. 判定改「腳→頭整條身體線段」＋容差隨螢幕上的人形大小縮放（跟戰術視角的
 #      _click 同一套），不再是「距離胸口一點 140px」——遠處敵人只有幾十像素高，
 #      舊寫法等於要把準心壓在一個小點上
-func _tps_target():
+# `click_at`＝滑鼠點擊事件回報的位置。
+# ⚠ 一定要吃事件帶來的座標，不可以只問 `get_viewport().get_mouse_position()`：
+#   合成點擊（測試、教學指引）只會給事件座標，不會真的搬動作業系統的游標，
+#   於是「點敵人」永遠打不到目標（2026-07-27 改成不鎖游標之後 [partchk] 當場掛掉）。
+func _tps_target(click_at := Vector2(-1, -1)):
 	var vp := get_viewport().get_visible_rect().size
 	var aim_pt: Vector2 = vp * 0.5
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		aim_pt = get_viewport().get_mouse_position()
+		aim_pt = click_at if click_at.x >= 0.0 else get_viewport().get_mouse_position()
 	var best = null
 	var bd := 1e9
 	for u in units:
@@ -4861,6 +5039,7 @@ func _build_ground() -> void:
 	# 舊做法是擺現成模型的實心外殼＋一個圓形掩體，玩家進不去、視線也只能用圓近似。
 	_buildings = []
 	_blockers = []          # 重建場景時一定要清，否則上一張地圖的障礙會留在新戰場上
+	_bld_blk = []           # 室內家具的碰撞圓（最後與 props/fort 的一起併進 _blockers）
 	_low_blk = []
 	_fire_lights = []
 	_marks = []
@@ -4928,6 +5107,19 @@ func _build_ground() -> void:
 				_covers.append({"wx": fp.x, "wy": fp.y,
 						"r": float(fu["r"]) / WORLD_SCALE, "val": float(fu["val"]),
 						"type": "furniture"})
+			# ★★室內家具也要擋人（2026-07-27）：`bd.solids_local` 一直有算，
+			#   但 Main 從來沒有讀它 → 室內家具全是裝飾，玩家直接穿過木箱與高櫃
+			#   （使用者實拍：人站在木箱裡面）。鐵律 0①：固體不可互穿。
+			#   `pen`＝子彈穿得過（木箱木桌本來就不擋彈，擋彈的效果走 _covers 的命中懲罰）。
+			#   ⚠ 不可以直接 append 到 `_blockers`：下面那行是
+			#     `_blockers = props.blockers + fort.blockers + _water_blk`（整個覆蓋），
+			#     append 進去會被無聲清掉——沙包當年就是這樣消失的（2026-07-26）。
+			#     所以收在自己的陣列裡，最後一起併。
+			for sl in bd.solids_local:
+				var sp: Vector2 = bd._local_to_px(Vector2(float(sl[0]), float(sl[1])))
+				_bld_blk.append({"t": "cir", "c": sp, "k": "furniture",
+						"r": float(sl[2]) / WORLD_SCALE,
+						"h": float(sl[3]) if sl.size() > 3 else 0.8, "pen": true})
 			# 掩體：建築本體仍登記一個圓（貼著外牆＝硬掩體），視線改吃牆線段
 			_covers.append({"wx": cx, "wy": cy,
 					"r": maxf(float(sdef.get("w", 60)), float(sdef.get("h", 60))) * 0.85 + 30.0,
@@ -4971,7 +5163,7 @@ func _build_ground() -> void:
 		var wp: Vector2 = props.wreck_spots[wi]
 		_add_fire(_to3d(wp.x, wp.y) + Vector3(0, 0.5, 0), 0.7)
 	_destructibles = fort.destructibles
-	_blockers = props.blockers + fort.blockers + _water_blk
+	_blockers = props.blockers + fort.blockers + _water_blk + _bld_blk
 	_low_blk = []
 	for bk0 in _blockers:
 		if float(bk0.get("h", 1.2)) <= STEP_UP and String(bk0.get("k", "")) != "deepwater":
