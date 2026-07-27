@@ -70,6 +70,8 @@ var _tracers: Array = []
 var _enemy_queue: Array = []
 var _enemy_t := 0.0
 var _zone_mesh: MeshInstance3D = null
+var _ap_ring_r := -1.0            # 上次建環用的半徑／圓心（避免每幀重建貼地環）
+var _ap_ring_c := Vector3(1e9, 0, 0)
 # 掩體登記表（GDD/13 Phase2）：每筆＝{wx,wy,r,val,type}，座標為遊戲 px。
 # val＝遮蔽強度 0~1；sandbag 硬掩體、building 全掩體、bush 只給隱蔽(降敵視野)不擋彈。
 var _covers: Array = []
@@ -2450,19 +2452,104 @@ func _update_ap_ring() -> void:
 		return
 	if not is_instance_valid(_ap_ring):
 		_ap_ring = MeshInstance3D.new()
-		_ap_ring.mesh = TorusMesh.new()
 		var m := StandardMaterial3D.new()
 		m.albedo_color = Color(1.0, 0.85, 0.35, 0.55)
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_ap_ring.material_override = m
 		add_child(_ap_ring)
+	# ★2026-07-27 使用者回報「黃色線浮空不貼地」的真因：這一圈以前是 TorusMesh，
+	#   整圈只有一個高度（角色腳下）。半徑十幾公尺的圈套在起伏地形上，
+	#   一半浮在空中、一半埋進土裡，看起來就是一條橫過戰場的黃色浮空帶。
+	#   改成逐頂點取地形高度的環帶。
 	var r: float = maxf(_ap_metres(acting), 0.05)
-	var tm := _ap_ring.mesh as TorusMesh
-	tm.inner_radius = maxf(r - 0.12, 0.02)
-	tm.outer_radius = r
-	_ap_ring.global_position = acting["node"].global_position + Vector3(0, 0.05, 0)
+	var c: Vector3 = acting["node"].global_position
+	# 每幀重建 72 段的貼地環＝每幀 146 次地形取樣，沒必要：半徑或圓心動超過 15cm 才重建。
+	if _ap_ring.mesh == null or absf(r - _ap_ring_r) > 0.15 or c.distance_to(_ap_ring_c) > 0.15:
+		_ap_ring_r = r
+		_ap_ring_c = c
+		_ap_ring.mesh = _ground_ring_mesh(c, maxf(r - 0.16, 0.02), r, 72)
+	_ap_ring.global_position = Vector3.ZERO
 	_ap_ring.visible = true
+
+# 貼地環帶：以 c 為圓心、內外半徑各取一圈，每個頂點的 y 直接問地形。
+# 任何「畫在地上的指示線」都要用這個，不可以用固定高度的平面／圓環
+# （鐵律 0 的延伸：畫在地上的東西就該貼著地）。
+func _ground_ring_mesh(c: Vector3, r_in: float, r_out: float, seg: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts_in: Array = []
+	var pts_out: Array = []
+	for i in seg + 1:
+		var a: float = TAU * float(i) / float(seg)
+		var d := Vector3(cos(a), 0.0, sin(a))
+		pts_in.append(_ground_pt(c + d * r_in))
+		pts_out.append(_ground_pt(c + d * r_out))
+	for i in seg:
+		for v in [pts_in[i], pts_out[i], pts_out[i + 1], pts_in[i], pts_out[i + 1], pts_in[i + 1]]:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v)
+	return st.commit()
+
+func _ground_pt(p: Vector3, lift := 0.06) -> Vector3:
+	var y: float = p.y
+	if terrain != null:
+		y = terrain.height_at_world(p)
+	return Vector3(p.x, y + lift, p.z)
+
+# 貼地矩形（部署區底色）：以 px 為單位的 Rect 切成格子，每個格點的 y 問地形。
+func _ground_rect_mesh(z: Dictionary, lift: float) -> ArrayMesh:
+	var x0: float = z.get("x", 0)
+	var y0: float = z.get("y", 0)
+	var w: float = z.get("w", 300)
+	var h: float = z.get("h", 200)
+	var nx: int = maxi(2, int(w / 24.0))
+	var ny: int = maxi(2, int(h / 24.0))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in nx:
+		for j in ny:
+			var a := _ground_pt(_to3d(x0 + w * i / nx, y0 + h * j / ny), lift)
+			var b := _ground_pt(_to3d(x0 + w * (i + 1) / nx, y0 + h * j / ny), lift)
+			var c := _ground_pt(_to3d(x0 + w * (i + 1) / nx, y0 + h * (j + 1) / ny), lift)
+			var d := _ground_pt(_to3d(x0 + w * i / nx, y0 + h * (j + 1) / ny), lift)
+			for v in [a, b, c, a, c, d]:
+				st.set_normal(Vector3.UP)
+				st.add_vertex(v)
+	return st.commit()
+
+# 貼地矩形外框（部署區邊界帶）：沿四條邊鋪一條 band_m 公尺寬的帶子，同樣逐點貼地。
+func _ground_rect_border(z: Dictionary, band_m: float) -> ArrayMesh:
+	var x0: float = z.get("x", 0)
+	var y0: float = z.get("y", 0)
+	var w: float = z.get("w", 300)
+	var h: float = z.get("h", 200)
+	var band: float = band_m / WORLD_SCALE
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var edges := [
+		[Vector2(x0, y0), Vector2(x0 + w, y0), Vector2(0, 1)],
+		[Vector2(x0 + w, y0), Vector2(x0 + w, y0 + h), Vector2(-1, 0)],
+		[Vector2(x0 + w, y0 + h), Vector2(x0, y0 + h), Vector2(0, -1)],
+		[Vector2(x0, y0 + h), Vector2(x0, y0), Vector2(1, 0)],
+	]
+	for e in edges:
+		var a: Vector2 = e[0]
+		var b: Vector2 = e[1]
+		var inw: Vector2 = e[2] * band
+		var n: int = maxi(2, int(a.distance_to(b) / 24.0))
+		for i in n:
+			var p0: Vector2 = a.lerp(b, float(i) / n)
+			var p1: Vector2 = a.lerp(b, float(i + 1) / n)
+			var q0 := _ground_pt(_to3d(p0.x, p0.y), 0.07)
+			var q1 := _ground_pt(_to3d(p1.x, p1.y), 0.07)
+			var q2 := _ground_pt(_to3d(p1.x + inw.x, p1.y + inw.y), 0.07)
+			var q3 := _ground_pt(_to3d(p0.x + inw.x, p0.y + inw.y), 0.07)
+			for v in [q0, q1, q2, q0, q2, q3]:
+				st.set_normal(Vector3.UP)
+				st.add_vertex(v)
+	return st.commit()
 
 func _count_cls(s: int, cls: String) -> int:
 	var n := 0
@@ -4534,16 +4621,29 @@ func _build_ground() -> void:
 	var z := _my_zone()
 	var zone_mesh := MeshInstance3D.new()
 	zone_mesh.name = "DeployZone"
-	var zpm := PlaneMesh.new()
-	zpm.size = Vector2(z.get("w", 300) * WORLD_SCALE, z.get("h", 200) * WORLD_SCALE)
-	zone_mesh.mesh = zpm
+	# ★2026-07-27 使用者回報「部署那片不透明藍色塊，像一張藍地毯」的真因：
+	#   這裡本來是一片 PlaneMesh，只有中心點一個高度，蓋在起伏地形上就是一張浮著的毯子；
+	#   alpha 0.20 的無光照藍色疊在暗色地面上，看起來還一點都不透。
+	#   改成逐格取地形高度的貼地網格、alpha 降到 0.10，再加一圈明顯的邊框——
+	#   玩家真正需要看到的是「界線在哪」，不是整片被染藍。
+	zone_mesh.mesh = _ground_rect_mesh(z, 0.05)
 	var zmat := StandardMaterial3D.new()
-	zmat.albedo_color = Color(0.42, 0.78, 1.0, 0.20)
+	zmat.albedo_color = Color(0.42, 0.78, 1.0, 0.10)
 	zmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	zmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	zmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	zone_mesh.material_override = zmat
-	zone_mesh.position = _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5) + Vector3(0, 0.05, 0)
 	world.add_child(zone_mesh)
+	var zone_edge := MeshInstance3D.new()
+	zone_edge.name = "DeployZoneEdge"
+	zone_edge.mesh = _ground_rect_border(z, 0.30)
+	var emat := StandardMaterial3D.new()
+	emat.albedo_color = Color(0.55, 0.86, 1.0, 0.75)
+	emat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	emat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	emat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	zone_edge.material_override = emat
+	zone_mesh.add_child(zone_edge)      # 掛在藍框底下，一起顯示/隱藏
 	_zone_mesh = zone_mesh
 
 	cam.set_follow(null)

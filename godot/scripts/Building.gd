@@ -49,10 +49,16 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	# 材質全場共用一份：每棟各自 new 一組會讓 draw call 與材質切換翻倍
 	# （6 棟建築把 8 單位的幀時從 6.2ms 推到 13.1ms）。
 	# 貼圖化（GDD/14 §0a）：純色 albedo 是「像塑膠積木」的主因，見 Mats.gd 檔頭。
-	var wm := BattleMats.pbr("Concrete", 3.2, 0.92, Color(1.28, 1.24, 1.16))
+	# ⚠ 2026-07-27 使用者：「牆面貼圖尺度不對，近看是白模」。兩個原因疊在一起：
+	#   ① 一次循環 3.2m ——第三人稱貼到牆邊時，整個畫面只有半張貼圖，等於沒有紋理；
+	#   ② tint 1.28 是把貼圖整個乘亮，細節被推到過曝，剩下一片死白。
+	#   改成 1.5m 一循環、tint 回到 1.0 附近。
+	#   ⚠ 反過來也不行：1.5m 一循環時，貼圖的方格重複被看得一清二楚（實拍是一面棋盤）。
+	#   2.4m 是「近看有紋理、遠看看不出重複」的折衷值。
+	var wm := BattleMats.pbr("Concrete", 2.4, 0.92, Color(1.02, 0.99, 0.93))
 	_wall_mat = wm
-	var im := BattleMats.pbr("Concrete", 2.6, 0.95, Color(1.10, 1.05, 0.98))
-	var fm := BattleMats.pbr("MarbleFloor", 2.2, 0.9, Color(1.05, 0.98, 0.88))
+	var im := BattleMats.pbr("Concrete", 2.0, 0.95, Color(0.96, 0.93, 0.88))
+	var fm := BattleMats.pbr("MarbleFloor", 1.9, 0.9, Color(0.98, 0.92, 0.83))
 	# 屋頂要各自淡出（進屋時透明化），所以不能共用一顆材質
 	var rm := BattleMats.pbr("RoofSlate", 1.0, 0.85, Color(1.35, 0.72, 0.58)).duplicate()
 	rm.uv1_scale = Vector3(6.0, 6.0, 1.0)      # BoxMesh 的 UV 是 0~1，用循環次數而不是公尺
@@ -64,6 +70,11 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 				Transform3D(Basis(), Vector3(0, float(f) * FLOOR_H - 0.09, 0)))
 	# 四面外牆：南面開門，其餘開窗
 	var half := Vector2(sizex * 0.5, sizez * 0.5)
+	# 地基：牆體直接一刀切進草地是最明顯的「假」（使用者品質判準：與地面的過渡）。
+	# 加一圈比牆略寬、往下埋 0.5m 的基座，外圍再散幾塊碎石把交界線藏掉。
+	_emit_box("floor", im, Vector3(sizex + 0.34, 0.9, sizez + 0.34),
+			Transform3D(Basis(), Vector3(0, -0.40, 0)))
+	_footing_debris(Vector2(sizex * 0.5, sizez * 0.5), im)
 	_side(Vector2(-half.x, half.y), Vector2(half.x, half.y), wm, true)     # +Z（南）：門
 	_side(Vector2(half.x, -half.y), Vector2(half.x, half.y), wm, false)    # +X
 	_side(Vector2(-half.x, -half.y), Vector2(half.x, -half.y), wm, false)  # -Z
@@ -202,6 +213,24 @@ func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 				Vector3(ox, y0 + 0.42, oz)))
 
 # 一面牆：把門窗缺口扣掉後，剩下的實心段才建幾何、才登記進 walls
+# 牆腳碎料：沿四邊隨機丟幾塊小石/水泥塊，把「牆與地面的那條直線」打散。
+# 不進碰撞表（0.1~0.2m 高的東西本來就跨得過去），純視覺。
+func _footing_debris(half: Vector2, mat: BaseMaterial3D) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(rect.position.x) * 7919 + int(rect.position.y)
+	for i in 22:
+		var t: float = rng.randf()
+		var p: Vector2
+		match i % 4:
+			0: p = Vector2(lerp(-half.x, half.x, t), half.y + rng.randf_range(0.02, 0.42))
+			1: p = Vector2(lerp(-half.x, half.x, t), -half.y - rng.randf_range(0.02, 0.42))
+			2: p = Vector2(half.x + rng.randf_range(0.02, 0.42), lerp(-half.y, half.y, t))
+			_: p = Vector2(-half.x - rng.randf_range(0.02, 0.42), lerp(-half.y, half.y, t))
+		var sx: float = rng.randf_range(0.14, 0.36)
+		var sy: float = rng.randf_range(0.06, 0.16)
+		_emit_box("floor", mat, Vector3(sx, sy, sx * rng.randf_range(0.6, 1.0)),
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(p.x, sy * 0.3, p.y)))
+
 func _side(a: Vector2, b: Vector2, mat: BaseMaterial3D, is_door: bool) -> void:
 	var len_m: float = a.distance_to(b)
 	var dir: Vector2 = (b - a) / maxf(len_m, 0.001)

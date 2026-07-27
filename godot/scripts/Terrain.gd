@@ -345,7 +345,15 @@ func _build_grass() -> void:
 	var gd: float = float(biome.get("grass_density", 1.0))
 	if gd > 0.01:
 		_grass_layer(_tuft_mesh(0.55, 9), _scatter_field(), 42.0, "GrassField")
-	_grass_layer(_tuft_mesh(1.35, 9), _scatter_bushes(), 70.0, "GrassBush")   # 藏得住人的高草
+		# ★戰場外那一圈（2026-07-27 使用者：「遠景空曠、中景沒銜接」）：
+		#   地形在戰場外還鋪了 90m，但草只鋪到戰場邊界，於是戰場邊緣就是一條
+		#   「草地 → 光禿土地」的硬邊，遠景整片是裸土。
+		#   外圈用 2.4 倍間距的稀草銜接（葉片數也減半），成本只有內圈的六分之一。
+		_grass_layer(_tuft_mesh(0.62, 5), _scatter_outer(), 60.0, "GrassOuter")
+	# ⚠ 高草的葉片寬度也跟著 scale_f 放大，1.35 倍時單片葉子有 4.3cm 寬——
+	#   第三人稱貼地時整個畫面被幾片巨大葉子塞滿（使用者：畫面全是草）。
+	#   高度保留（要藏得住蹲著的人），寬度砍回正常草葉。
+	_grass_layer(_tuft_mesh(1.15, 11, 0.62), _scatter_bushes(), 70.0, "GrassBush")
 	_grass_layer(_tuft_mesh(0.75, 10), _scatter_tree_feet(), 55.0, "GrassRoots")
 
 # 樹腳的草：物件與地面的過渡。少了這一圈，樹看起來就是「插在草皮上的模型」。
@@ -384,6 +392,29 @@ func _scatter_field() -> Array:
 			if _indoors(jx, jy) or slope_at(jx, jy) > 0.7:
 				continue
 			xf.append(_tuft_xf(jx, jy, rng, 0.7, 1.05))
+		px += step
+	return xf
+
+# 戰場外圈的稀草：只為了把「戰場」與「遠景森林」之間那段光禿地補起來。
+# 間距刻意放大，玩家不會走到那裡，只需要遠看有東西。
+func _scatter_outer() -> Array:
+	var xf: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 771144
+	var step: float = 1.7 / ws / maxf(float(biome.get("grass_density", 1.0)), 0.05)
+	var band: float = 62.0 / ws
+	var px := -band
+	while px < mw + band:
+		var py := -band
+		while py < mh + band:
+			var jx: float = px + rng.randf_range(-step * 0.45, step * 0.45)
+			var jy: float = py + rng.randf_range(-step * 0.45, step * 0.45)
+			py += step
+			if jx > 0.0 and jx < mw and jy > 0.0 and jy < mh:
+				continue                       # 戰場內已經有細草，不重複鋪
+			if slope_at(jx, jy) > 0.8 or in_water(jx, jy):
+				continue
+			xf.append(_tuft_xf(jx, jy, rng, 0.9, 1.6))
 		px += step
 	return xf
 
@@ -557,7 +588,7 @@ func _ridge_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3
 # 一叢草（2026-07-26 重做）：原本是三片交叉的大三角形（0.95m 高、0.34m 寬），
 # 第三人稱趴下來近看就是三片塑膠片。改成多根細葉，每根兩段、往上收尖並朝隨機方向彎。
 # 頂點色 alpha 存「離地權重」給風擺動用（0=根、1=尖）；材質不透明，alpha 不影響顯示。
-func _tuft_mesh(scale_f: float, blades := 7) -> ArrayMesh:
+func _tuft_mesh(scale_f: float, blades := 7, width_f := 1.0) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
@@ -571,7 +602,7 @@ func _tuft_mesh(scale_f: float, blades := 7) -> ArrayMesh:
 		var a: float = rng.randf() * TAU
 		var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.38) * scale_f
 		var h: float = rng.randf_range(0.24, 0.60) * scale_f
-		var w: float = rng.randf_range(0.020, 0.032) * scale_f
+		var w: float = rng.randf_range(0.020, 0.032) * scale_f * width_f
 		var lean_a: float = rng.randf() * TAU
 		var lean := Vector3(cos(lean_a), 0, sin(lean_a)) * rng.randf_range(0.10, 0.30) * h
 		var side := Vector3(-sin(a), 0, cos(a))

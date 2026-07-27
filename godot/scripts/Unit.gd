@@ -376,12 +376,45 @@ func _apply_look(model: Node, p_cls: String) -> void:
 			# 遠看就是一個剪影（hr_w_Swat 換上韓沐霜配色時整個人變黑，2026-07-25 實拍）。
 			# 作法＝取角色的色相、乘回原材質的相對亮度。
 			var t_lum: float = maxf(target.get_luminance(), 0.06)
-			var shade: float = clampf(src.get_luminance() / t_lum, 0.6, 1.7)
+			# ⚠ 這個係數是用來保留原模型的明暗層次，但範圍開太大（0.6~1.7）時，
+			#   每個部位都被拉回它原本的亮度，角色配色等於沒有作用——
+			#   hr_w_Swat 原本整身淺灰，套上任何配色出來都還是整身淺灰（實拍證實）。
+			#   收窄到 0.78~1.30：層次還在，但主色真的看得出來。
+			var shade: float = clampf(src.get_luminance() / t_lum, 0.78, 1.30)
 			var toned := Color(clampf(target.r * shade, 0.0, 1.0), clampf(target.g * shade, 0.0, 1.0),
 					clampf(target.b * shade, 0.0, 1.0), target.a)
 			var dup := (base as StandardMaterial3D).duplicate()
-			dup.albedo_color = src.lerp(toned, 0.8)
+			dup.albedo_color = _readable(src.lerp(toned, 0.92))
+			_add_rim(dup)
 			mi.set_surface_override_material(si, dup)
+
+# 角色的可讀性下限（2026-07-27）：黃昏側逆光下，深色戰術裝的 albedo 只有 0.06~0.10，
+# 一旦人站在建築陰影裡就變成一片純黑剪影——使用者看到的「沒有手臂」有一半是這個，
+# 因為手臂與軀幹之間的明暗差被壓成 0，整個人只剩輪廓。
+# 角色是玩家唯一要一直盯著看的東西，把明度下限拉到 0.30 並保留色相。
+# ⚠ 不可以用「低於門檻就拉到門檻」的夾限：所有深色部位會被壓成同一個亮度，
+#   角色變成一團沒有層次的米色（2026-07-27 實拍，一次就看出來）。
+#   要用 gamma 提亮——暗的還是比中間調暗，只是整體離開「純黑」那一段。
+# ⚠ 提太多也不行：0.62 把深色戰術裝提到跟褲子一樣亮，整個人變成一團沒有層次的米色
+#   （2026-07-27 實拍第二次）。0.80 只把「近乎純黑」那一段拉離黑，中亮調幾乎不動。
+const CHAR_GAMMA := 0.80      # v' = v^0.80：0.06→0.11、0.24→0.33、0.60→0.66
+const CHAR_MIN_V := 0.13      # 提亮後仍太暗的再補一個地板，避免在陰影裡變純黑
+
+func _readable(c: Color) -> Color:
+	var v: float = maxf(maxf(c.r, c.g), c.b)
+	if v < 0.001:
+		return c
+	var k: float = maxf(pow(v, CHAR_GAMMA), CHAR_MIN_V) / v
+	return Color(minf(c.r * k, 1.0), minf(c.g * k, 1.0), minf(c.b * k, 1.0), c.a)
+
+# 邊緣光：讓角色在逆光/陰影裡仍然有一圈輪廓亮邊，跟背景分得開。
+# 這不是寫實的做法，是可讀性——所有第三人稱遊戲都在角色身上加這個。
+func _add_rim(m: StandardMaterial3D) -> void:
+	# ⚠ 強度要克制：低多邊形角色的法線大多偏離視線，rim 0.55 會讓整個人泛白
+	#   （2026-07-27 實拍：士兵變成一尊石膏像）。0.22 只在真正的輪廓邊亮起來。
+	m.rim_enabled = true
+	m.rim = 0.22
+	m.rim_tint = 0.6
 
 func _tint(model: Node, tint: Color, strength: float) -> void:
 	if strength <= 0.001:
@@ -393,7 +426,8 @@ func _tint(model: Node, tint: Color, strength: float) -> void:
 			var base := mi.get_active_material(si)
 			if base is StandardMaterial3D:
 				var dup := (base as StandardMaterial3D).duplicate()
-				dup.albedo_color = dup.albedo_color.lerp(tint, strength)
+				dup.albedo_color = _readable(dup.albedo_color.lerp(tint, strength))
+				_add_rim(dup)
 				mi.set_surface_override_material(si, dup)
 
 # 武器改回「握在手裡」（2026-07-25）：揹背只是繞過掛點縮放暴衝，並非修好。

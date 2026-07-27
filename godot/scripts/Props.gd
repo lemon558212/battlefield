@@ -62,6 +62,10 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"brick": BattleMats.pbr("RedBrick", 1.6, 0.96, Color(1.30, 1.10, 0.98)),
 		"brick2": BattleMats.pbr("RedBrick", 1.6, 0.97, Color(1.05, 0.86, 0.76)),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
+		# 地面痕跡專用（2026-07-27 使用者：「深色小方塊，還要更淡」）：
+		# 先前借用 "dirt"＝柏油貼圖，比土地暗一大截，於是每一片都讀成一個深色方塊。
+		# 痕跡本來就只是「土被踩過、顏色深一點」，對比要小到幾乎看不出邊界。
+		"mark": _mat(Color(0.34, 0.27, 0.19), 1.0),
 	}
 	_roads(map_data)
 	_blocks(map_data)
@@ -270,11 +274,28 @@ func _walls_brick(m: Dictionary) -> void:
 					var lyh: float = hh / float(layers)
 					var shift: float = (0.055 if ly % 2 == 0 else -0.055) + rng.randf_range(-0.02, 0.02)
 					var key: String = "brick" if (ly + i) % 2 == 0 else "brick2"
-					_box(key, Vector3(0.9, lyh * 0.94, 0.28),
+					# ★最底層往下埋 0.4m（2026-07-27 使用者：「紅磚牆浮空不接地」）。
+					#   每個 0.9m 寬的磚塊只取牆段中心一個地形高度，地面一有起伏，
+					#   兩端就懸空。把最底層加長往下埋，任何坡度都不會再看到牆底的縫。
+					var extra: float = 0.4 if ly == 0 else 0.0
+					_box(key, Vector3(0.9, lyh * 0.94 + extra, 0.28),
 							Transform3D(Basis(Vector3.UP, -ang),
-							_pos(q.x, q.y, lyh * (float(ly) + 0.5)) + Vector3(shift, 0, 0)))
+							_pos(q.x, q.y, lyh * (float(ly) + 0.5) - extra * 0.5) + Vector3(shift, 0, 0)))
+				_ground_skirt(q, ang, rng)
 			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
 			_blk_seg(p - half, p + half, 0.20, 1.25)
+
+# 牆腳的碎料堆（使用者的品質判準之一：「與地面的過渡，不可以硬插進地面」）。
+# 現實裡沒有任何東西是「一條直線切進土裡」的——牆腳一定有掉下來的磚塊、
+# 被雨打出來的土堆。幾塊小方塊就能把那條生硬的交界線藏掉。
+func _ground_skirt(q: Vector2, ang: float, rng: RandomNumberGenerator) -> void:
+	for k in rng.randi_range(3, 5):
+		var off := Vector2(rng.randf_range(-0.55, 0.55), rng.randf_range(-0.30, 0.30)).rotated(ang)
+		var p := q + off / _ws
+		var sx: float = rng.randf_range(0.16, 0.34)
+		var sy: float = rng.randf_range(0.07, 0.15)
+		_box("brick2" if k % 2 == 0 else "rock", Vector3(sx, sy, sx * rng.randf_range(0.6, 1.0)),
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(p.x, p.y, sy * 0.35)))
 
 # 電線：桿子有了卻沒有線，遠看就是一排孤零零的木頭。線是垂鏈，分段畫。
 func _cables(m: Dictionary) -> void:
@@ -394,7 +415,7 @@ func _clutter(m: Dictionary) -> void:
 		_one_clutter(CLUTTER_KINDS[rng.randi() % CLUTTER_KINDS.size()], p, rng)
 		placed += 1
 	# 地面痕跡：小坑、裂縫、散落碎屑。純視覺、不擋任何東西（跨得過去）。
-	for i in 130:
+	for i in 90:
 		var p2 := Vector2(rng.randf_range(30.0, _mw - 30.0), rng.randf_range(30.0, _mh - 30.0))
 		if _terrain != null and _terrain.in_water(p2.x, p2.y):
 			continue
@@ -404,7 +425,7 @@ func _clutter(m: Dictionary) -> void:
 		if _terrain != null and _terrain.slope_at(p2.x, p2.y) > 0.10:
 			continue
 		var sz: float = rng.randf_range(0.25, 0.8)
-		_box("dirt", Vector3(sz, 0.012, sz * rng.randf_range(0.5, 1.4)),
+		_box("mark", Vector3(sz, 0.012, sz * rng.randf_range(0.5, 1.4)),
 				Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(p2.x, p2.y, -0.004)))
 
 # 單件雜物。每一件都：尺寸抖動、顏色抖動、傾斜一點、底下壓泥土。
