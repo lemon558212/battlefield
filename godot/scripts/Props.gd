@@ -58,7 +58,7 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"metal": _mat(Color(0.28, 0.29, 0.30), 0.55),
 		"rock": BattleMats.pbr("Concrete", 1.1, 0.95, Color(0.92, 0.90, 0.84)),
 		"rust": _mat(Color(0.31, 0.20, 0.13), 0.98),
-		"burn": _mat(Color(0.17, 0.15, 0.13), 1.0),
+		"burn": _mat(Color(0.30, 0.26, 0.22), 1.0),   # 純黑在黃昏會變成黑洞，提亮成焦土色
 		"brick": BattleMats.pbr("RedBrick", 1.6, 0.96, Color(1.30, 1.10, 0.98)),
 		"brick2": BattleMats.pbr("RedBrick", 1.6, 0.97, Color(1.05, 0.86, 0.76)),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
@@ -328,10 +328,12 @@ func _scorch_at(c: Vector2, r_m: float) -> void:
 	for i in 7:
 		var a: float = rng.randf() * TAU
 		var d: float = sqrt(rng.randf()) * r_m / _ws
-		var sz: float = rng.randf_range(0.5, 1.5)
-		_box("burn", Vector3(sz, 0.04, sz * rng.randf_range(0.6, 1.4)),
+		# ⚠ 舊值：1.5m 見方、4cm 厚、離地 3cm 的純黑方塊，在黃昏光線下就是一個黑洞
+		#   （使用者 2026-07-27 截圖）。焦痕要薄、要小、要貼平。
+		var sz: float = rng.randf_range(0.35, 0.9)
+		_box("burn", Vector3(sz, 0.010, sz * rng.randf_range(0.6, 1.4)),
 				Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
-				_pos(c.x + cos(a) * d, c.y + sin(a) * d, 0.03)))
+				_pos(c.x + cos(a) * d, c.y + sin(a) * d, -0.004)))
 
 # ---------- 障礙登記 ----------
 # 半徑參數用公尺（跟建模同一套單位，改的時候不用心算），存進去統一換成 px。

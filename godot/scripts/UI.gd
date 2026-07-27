@@ -103,6 +103,7 @@ func _label(txt: String, size: int, col: Color) -> Label:
 
 func _btn(txt: String, size := 20) -> Button:
 	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
 	b.text = txt
 	b.add_theme_font_size_override("font_size", size)
 	b.custom_minimum_size = Vector2(260, 52)
@@ -295,6 +296,7 @@ func show_story(unlocked: int) -> void:
 		var n: int = ch.get("n", 0)
 		var lock: bool = n > unlocked
 		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
 		b.custom_minimum_size = Vector2(560, 46)
 		b.add_theme_font_size_override("font_size", 18)
 		b.text = "  %02d   %s" % [n, ("🔒 尚未解鎖" if lock else ch.get("title", ""))]
@@ -562,6 +564,7 @@ func show_deploy(ch, budget_left: int, roster: Array, on_pick: Callable, on_go: 
 		cost_l.position = Vector2(250, 22)
 		card.add_child(cost_l)
 		var btn := Button.new()
+		btn.focus_mode = Control.FOCUS_NONE
 		btn.flat = true
 		btn.size = Vector2(308, 64)
 		btn.custom_minimum_size = Vector2(308, 64)

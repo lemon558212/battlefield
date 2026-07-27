@@ -2765,10 +2765,13 @@ func _add_fire(pos: Vector3, radius: float) -> void:
 		return
 	# ⚠ 粒子數與燈的範圍都要克制：第一版（46+34 粒、燈半徑 12m、每幀改 energy）
 	#   讓 16 單位的幀時從 5.8ms 掉到 11.9ms。火只是背景元素，不值這個價。
-	for spec in [{"n": 22, "life": 1.4, "sz": 0.42, "up": 3.2, "col": Color(1.0, 0.55, 0.16),
-					"y": 0.0, "spread": radius},
-			{"n": 16, "life": 4.0, "sz": 1.5, "up": 2.0, "col": Color(0.20, 0.19, 0.18),
-					"y": 2.4, "spread": radius * 1.5}]:
+	# ⚠ 使用者 2026-07-27 截圖：屋頂上一團「發亮的大方塊」。原因是火焰用了
+	#   0.42~1.5m 的加法混合方片——那個尺寸的方片就是一個發光的箱子。
+	#   火的粒子要**小而多**，煙要大但**很淡**，才會讀成火與煙而不是幾何體。
+	for spec in [{"n": 34, "life": 1.1, "sz": 0.16, "up": 2.8, "col": Color(1.0, 0.55, 0.16),
+					"y": 0.0, "spread": radius * 0.6},
+			{"n": 20, "life": 4.0, "sz": 0.95, "up": 2.0, "col": Color(0.22, 0.21, 0.20),
+					"y": 2.2, "spread": radius * 1.2}]:
 		var pm := ParticleProcessMaterial.new()
 		pm.direction = Vector3(0, 1, 0)
 		pm.spread = 14.0
@@ -2789,7 +2792,7 @@ func _add_fire(pos: Vector3, radius: float) -> void:
 				else BaseMaterial3D.BLEND_MODE_MIX)
 		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		mat.vertex_color_use_as_albedo = true
-		mat.albedo_color = Color(1, 1, 1, 0.5 if spec["y"] == 0.0 else 0.28)
+		mat.albedo_color = Color(1, 1, 1, 0.30 if spec["y"] == 0.0 else 0.14)
 		qm.material = mat
 		var ps := GPUParticles3D.new()
 		ps.amount = int(spec["n"])
@@ -2803,8 +2806,8 @@ func _add_fire(pos: Vector3, radius: float) -> void:
 		ps.global_position = pos + Vector3(0, float(spec["y"]), 0)
 	var fl := OmniLight3D.new()
 	fl.light_color = Color(1.0, 0.6, 0.25)
-	fl.light_energy = 3.0
-	fl.omni_range = minf(radius * 3.2, 7.0)
+	fl.light_energy = 2.0
+	fl.omni_range = minf(radius * 3.2, 6.0)
 	fl.shadow_enabled = false
 	world.add_child(fl)
 	fl.global_position = pos + Vector3(0, 0.6, 0)
@@ -3251,7 +3254,13 @@ func _action_tick(_delta: float) -> void:
 		return
 	var mine: bool = acting["side"] == player_side
 	var pos: Vector3 = acting["node"].global_position
+	# ⚠ AP 必須依「真的走到哪裡」扣，不是依每幀位移的**總和**。
+	#   被擋住時人會在碰撞邊界來回抖動，每幀都有一點位移，加總起來 AP 就被扣光了——
+	#   玩家看到的是「原地跑步，AP 一直掉」（使用者 2026-07-27 實測）。
+	#   低於門檻的抖動一律不算。
 	var moved: float = Vector2(pos.x - _act_last.x, pos.z - _act_last.z).length()
+	if moved < 0.004:
+		moved = 0.0
 	_act_last = pos
 	if moved > 0.0:
 		# 地形成本（GDD/14 §3-4）：上坡 ×1.5、彈坑 ×2——同樣的距離，難走的地形就是吃更多 AP

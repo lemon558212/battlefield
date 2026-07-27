@@ -928,19 +928,20 @@ func _splash_fx(dep: float) -> void:
 	get_tree().create_timer(0.9).timeout.connect(ps.queue_free)
 
 # 沒有輸入時把殘速滑完（由 _process 每幀呼叫）。人放開腳步不會瞬間釘在地上。
+# ⚠ 2026-07-27 使用者規格：「不會有原地跑步，停下就停下，沒有按按鍵就不會走」。
+#   我先前為了「慣性」加了放開鍵後的滑行——那違反這條規格，已移除。
+#   起步仍保留加速度（那不會造成「沒按鍵還在動」），但**放開鍵就是立刻停**。
 func _coast(delta: float) -> void:
 	_tick_stamina(delta, false)
-	if _dead or _dir_moving or _move_target != null:
-		return
-	if _vel.length() < 0.01:
-		_vel = Vector3.ZERO
-		return
-	_vel = _vel.move_toward(Vector3.ZERO, DECEL * delta)
-	global_position += _vel * delta
+	_vel = Vector3.ZERO
 
 # 第三人稱直接操控（GDD/07）：每幀給一個世界方向就走，不設目的地。
 # 與點擊移動共用同一套 AP 扣除（Main._action_tick 量的是「實際位移」，兩種都吃得到）。
 var _dir_moving := false
+# 近期實際淨位移（判斷「有沒有真的在前進」，用來擋掉原地跑步）
+var _moved_recent := 1.0
+var _win_from := Vector3.ZERO
+var _move_win := 0.0
 func move_dir(dir: Vector3, delta: float) -> void:
 	if _dead or dir.length() < 0.01:
 		return
@@ -981,6 +982,17 @@ func move_dir(dir: Vector3, delta: float) -> void:
 	_vel = _vel.move_toward(d * spd, ACCEL * delta)
 	global_position += _vel * delta
 	_tick_steps(_vel.length() * delta)
+	# ★動畫必須跟著**實際位移**，不是跟著按鍵。被牆或雜物擋住時人根本沒有前進，
+	#   卻照播跑步動畫＝原地跑步（使用者 2026-07-27 指正）。
+	#   淨位移由 Main 的碰撞解算之後才知道，所以看的是「上一小段實際走了多遠」。
+	_move_win += delta
+	if _move_win >= 0.25:
+		_moved_recent = global_position.distance_to(_win_from)
+		_win_from = global_position
+		_move_win = 0.0
+	if _moved_recent < 0.03:
+		_play("idle")            # 推不動就站著推，不要空踩腳
+		return
 	if _crouch > 0.5 and anim_names.has("crouch_walk"):
 		_play("crouch_walk")
 	else:
