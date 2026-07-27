@@ -737,7 +737,10 @@ func _selftest() -> void:
 	await get_tree().create_timer(0.3).timeout
 	await _hold_key(KEY_W, 1.2)
 	var moved: float = p_before.distance_to(pu["node"].global_position)
-	print("[movechk] 第三人稱前進位移=%.2fm %s" % [moved, "OK" if moved > 0.5 else "FAIL(人沒動)"])
+	# FAIL 時要看得出「為什麼沒動」：姿勢（趴著只有 0.8m/s）／AP／有沒有被擋住
+	print("[movechk] 第三人稱前進位移=%.2fm（_prone=%.2f _crouch=%.2f AP=%.0f yaw=%.0f）%s"
+			% [moved, pu["node"]._prone, pu["node"]._crouch, float(pu.get("ap", 0.0)),
+			cam.tps_yaw, "OK" if moved > 0.5 else "FAIL(人沒動)"])
 	# ---- 行動模式 AP/CP（GDD/01 §1-2）----
 	# 上面那次點擊本身就是「下令」，所以這裡先驗它扣了 CP、也給了 AP
 	var cp0: int = cp
@@ -753,7 +756,8 @@ func _selftest() -> void:
 	await _snap("res://ap_mode.png")     # AP 條與行動範圍圈要看得到
 	# 走到 AP 歸零：一次點很遠的地方，應只走到 AP 允許的最遠處
 	var ap_before: float = acting["ap"]
-	var reach_m: float = _ap_metres(acting)
+	var mid0: Vector3 = _to3d(map_data.get("w", 960) * 0.5, map_data.get("h", 600) * 0.5)
+	var reach_m: float = _ap_reach_dir(acting, mid0 - acting["node"].global_position)
 	# ⚠ 先把第三人稱視角轉向地圖中心再往前走。
 	#   單位常常就站在地圖邊緣，朝外走會被 _clamp_to_map 夾住原地踏步，
 	#   看起來像「AP 沒扣、人不動」，其實是撞牆（2026-07-26 花了三輪才查出來）。
@@ -1386,11 +1390,16 @@ func _selftest() -> void:
 			var sb_a: Vector2 = sb_mid + sb_n * (4.0 / WORLD_SCALE)
 			var sb_b: Vector2 = sb_mid - sb_n * (4.0 / WORLD_SCALE)
 			var sb_h: float = float(sbg["h"])
-			var shot_body: bool = _shot_clear(sb_a, sb_b, 1.32, 1.15)      # 站→站的軀幹
-			var shot_head: bool = _shot_clear(sb_a, sb_b, 1.32, 1.52)      # 站→站的頭
-			var shot_crouch: bool = _shot_clear(sb_a, sb_b, 0.92, 0.78)    # 蹲→蹲
+			# ⚠ 要把「剛剛用來走路的那個測試兵」排除掉：他就站在沙包旁邊、正好壓在這條
+			#   測試線上，而人本身也擋彈道（619e574）。他站著時 body_top=1.75 會把
+			#   「瞄頭」那一發擋掉，測出來像是沙包變成無敵牆——量到的其實是自己人。
+			#   （2026-07-27：玩家操控期間不再自動蹲之後，他行動結束的瞬間還站著，
+			#     這個一直存在的破口才穩定顯形。）
+			var shot_body: bool = _shot_clear(sb_a, sb_b, 1.32, 1.15, sbu)      # 站→站的軀幹
+			var shot_head: bool = _shot_clear(sb_a, sb_b, 1.32, 1.52, sbu)      # 站→站的頭
+			var shot_crouch: bool = _shot_clear(sb_a, sb_b, 0.92, 0.78, sbu)    # 蹲→蹲
 			var shot_along: bool = _shot_clear(sb_a, sb_a + (sbg["b"] - sbg["a"]).normalized()
-					* (8.0 / WORLD_SCALE), 1.32, 1.15)                        # 沿著沙包同側射
+					* (8.0 / WORLD_SCALE), 1.32, 1.15, sbu)                        # 沿著沙包同側射
 			print("[sandchk] 沙包高 %.2fm 彈道：站軀幹=%s(應false) 站頭部=%s(應true) 蹲=%s(應false) 同側=%s(應true) %s"
 					% [sb_h, shot_body, shot_head, shot_crouch, shot_along,
 					"OK(擋子彈且瞄頭仍打得到)" if (not shot_body and shot_head and not shot_crouch
@@ -1917,6 +1926,9 @@ func _selftest() -> void:
 			var cru_save := _shield(cru)
 			cru["node"].want_prone = true
 			_begin_action(cru)
+			# ⚠ _begin_action 會關掉自動姿勢（玩家操控期間不自動蹲/趴）。
+			#   這一組驗的正是「自動臥射 + 爬久了會自己起身」那條路徑，所以要打開回來。
+			cru["node"].auto_stance = true
 			cru["ap"] = 300.0
 			cru["ap_max"] = 300.0
 			cam.tps_yaw = 180.0
@@ -2419,8 +2431,9 @@ func _begin_action(u) -> bool:
 		# ★玩家親自操控期間關掉自動姿勢（使用者 2026-07-27：「停下來又自動蹲回去」）。
 		#   自動掩體判定原本每次停下就把人壓成蹲姿，玩家想站著看前方也站不起來——
 		#   自動判定壓過玩家意圖。姿勢改由 C／Z／Space 全權決定。
+		# ⚠ 不可以順手把 stance_cmd 清掉：玩家（與測試）常常是「先指定姿勢再下令」，
+		#   清掉等於下令的瞬間把人從趴姿拉回站姿（實測讓 [sandchk] 與 [crawlchk] 一起掛掉）。
 		u["node"].auto_stance = false
-		u["node"].stance_cmd = ""
 	return true
 
 # 結束行動：單位進入警戒狀態（GDD/01 §2 最後一條）
@@ -2435,16 +2448,51 @@ func _end_action() -> void:
 		return
 	acting["node"].stop()
 	acting["node"].auto_stance = true      # 交回 AI/自動判定（結束行動後自己找掩體）
-	acting["node"].stance_cmd = ""
 	_update_cover_state(acting)
 	acting = null
 	ui.hide_ap()
 	if is_instance_valid(_ap_ring):
 		_ap_ring.visible = false
 
-# 剩餘 AP 還能走幾公尺
+# 剩餘 AP 在**完全平坦**的地形上還能走幾公尺（＝上限，不含地形成本）
 func _ap_metres(u) -> float:
 	return float(u.get("ap", 0.0)) * PX_PER_AP * WORLD_SCALE
+
+# 剩餘 AP 往某個方向實際走得到多遠（沿路累積地形成本）。
+# ★2026-07-27：這是 [apchk] 掛了很久的真因——UI 說可走 11.5m、實走只有 9.0m。
+#   扣 AP 時乘了上坡 ×1.5／彈坑 ×2，但顯示的行動範圍用的是「平地上限」，
+#   兩邊各算各的。玩家看到的是「圈畫到那裡，走過去卻半路就停」。
+#   ⚠ 這裡只改**顯示與點地移動的上限**，移動規則（每幀怎麼扣 AP）完全沒動。
+func _ap_reach_dir(u, dir: Vector3, max_steps := 90) -> float:
+	var budget: float = _ap_metres(u)
+	if budget <= 0.0 or terrain == null:
+		return budget
+	var d := Vector3(dir.x, 0.0, dir.z)
+	if d.length() < 0.0001:
+		return budget
+	d = d.normalized()
+	var mob: String = String(GameData.class_base.get(u["cls"], {}).get("mobility", "foot"))
+	var wmul: float = weather_move_mul()
+	var step := 0.35
+	var pos: Vector3 = u["node"].global_position
+	var gone := 0.0
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	for i in max_steps:
+		pos += d * step
+		var px: float = pos.x / WORLD_SCALE + mw * 0.5
+		var py: float = pos.z / WORLD_SCALE + mh * 0.5
+		if px < 1.0 or py < 1.0 or px > mw - 1.0 or py > mh - 1.0:
+			break
+		var cost: float = terrain.move_cost(px, py, mob) * wmul
+		var spend: float = step * cost
+		if spend > budget:
+			gone += step * (budget / maxf(spend, 0.0001))
+			budget = 0.0
+			break
+		budget -= spend
+		gone += step
+	return gone
 
 # 行動範圍圈：VC 用 AP 條，這裡再加一圈地面指示，玩家才知道還能走多遠
 func _update_ap_ring() -> void:
@@ -2469,14 +2517,14 @@ func _update_ap_ring() -> void:
 	if _ap_ring.mesh == null or absf(r - _ap_ring_r) > 0.15 or c.distance_to(_ap_ring_c) > 0.15:
 		_ap_ring_r = r
 		_ap_ring_c = c
-		_ap_ring.mesh = _ground_ring_mesh(c, maxf(r - 0.16, 0.02), r, 72)
+		_ap_ring.mesh = _ground_ring_mesh(c, 72)
 	_ap_ring.global_position = Vector3.ZERO
 	_ap_ring.visible = true
 
 # 貼地環帶：以 c 為圓心、內外半徑各取一圈，每個頂點的 y 直接問地形。
 # 任何「畫在地上的指示線」都要用這個，不可以用固定高度的平面／圓環
 # （鐵律 0 的延伸：畫在地上的東西就該貼著地）。
-func _ground_ring_mesh(c: Vector3, r_in: float, r_out: float, seg: int) -> ArrayMesh:
+func _ground_ring_mesh(c: Vector3, seg: int) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var pts_in: Array = []
@@ -2484,6 +2532,9 @@ func _ground_ring_mesh(c: Vector3, r_in: float, r_out: float, seg: int) -> Array
 	for i in seg + 1:
 		var a: float = TAU * float(i) / float(seg)
 		var d := Vector3(cos(a), 0.0, sin(a))
+		# 每個方向各自算「這個方向真的走得到多遠」：上坡與彈坑那側的圈會自然凹進來。
+		var r_out: float = maxf(_ap_reach_dir(acting, d, 60), 0.05)
+		var r_in: float = maxf(r_out - 0.16, 0.02)
 		pts_in.append(_ground_pt(c + d * r_in))
 		pts_out.append(_ground_pt(c + d * r_out))
 	for i in seg:
@@ -2892,14 +2943,14 @@ func _click(sp: Vector2) -> void:
 		if absf(dir.y) > 0.0001:
 			hit = from + dir * ((gy - from.y) / dir.y)     # 依地形高度重新求交
 			hit.y = terrain.height_at_world(hit)
-	var reach: float = _ap_metres(acting)
-	if reach < 0.05:
-		ui.flash_msg("AP 用盡，只能原地開火或結束行動", Color(1.0, 0.7, 0.4))
-		return
-	# 超出 AP 的點：走到能走的最遠處（而不是不理玩家或直接走完）
 	var here: Vector3 = acting["node"].global_position
 	var to := hit - here
 	to.y = 0.0
+	# 上限跟著方向走（含地形成本），跟畫在地上的圈是同一套算法
+	var reach: float = _ap_reach_dir(acting, to)
+	if reach < 0.05:
+		ui.flash_msg("AP 用盡，只能原地開火或結束行動", Color(1.0, 0.7, 0.4))
+		return
 	if to.length() > reach:
 		hit = here + to.normalized() * reach
 	acting["node"].move_to(_clamp_to_map(hit))
@@ -4849,12 +4900,10 @@ func _build_water() -> void:
 		return
 	for pair in rects:
 		var r: Rect2 = pair[0]
-		var pm := PlaneMesh.new()
-		pm.size = Vector2(r.size.x * WORLD_SCALE, r.size.y * WORLD_SCALE)
-		pm.subdivide_width = 24
-		pm.subdivide_depth = 24
 		var mi := MeshInstance3D.new()
-		mi.mesh = pm
+		mi.mesh = _water_mesh(r)
+		if mi.mesh == null:
+			continue
 		var wmat := ShaderMaterial.new()
 		var wsh := Shader.new()
 		wsh.code = WATER_SHADER
@@ -4865,11 +4914,8 @@ func _build_water() -> void:
 			flow_v = Vector2.ZERO
 		wmat.set_shader_parameter("flow", flow_v)
 		mi.material_override = wmat
-		var c: Vector2 = r.get_center()
-		# 淺水面略低：三種水域矩形會重疊，同高度會疊出過亮的白片（實拍）
-		var wy: float = BattleTerrain.WATER_SURFACE_Y - (0.06 if pair[1] == "shallows" else 0.0)
-		mi.position = Vector3((c.x - map_data.get("w", 960) * 0.5) * WORLD_SCALE, wy,
-				(c.y - map_data.get("h", 600) * 0.5) * WORLD_SCALE)
+		# 網格已經是世界座標（頂點就帶著水深），節點放原點即可
+		mi.position = Vector3(0, -(0.06 if pair[1] == "shallows" else 0.0), 0)
 		world.add_child(mi)
 		# 深水圍欄：四邊線段障礙（高度 3m＝人與彈道都擋不住的別想，這是水不是牆，
 		# 但步兵確實過不去；日後做船再改成「載具可通行」）
@@ -4882,6 +4928,44 @@ func _build_water() -> void:
 				_water_blk.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
 						"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
 						"hl": a2.distance_to(b2) * 0.5})
+
+# 水面網格：把「這一點的水深」烤進頂點色的 alpha，shader 直接拿它當透明度與深淺色。
+# ⚠ 為什麼不是一片 PlaneMesh（使用者 2026-07-27：「水面那片不透明藍色塊，像藍地毯」）：
+#   ① ALPHA 寫死 0.90＝幾乎不透明，淺灘看不到水底，一律是同一片藍；
+#   ② 岸邊只靠矩形 UV 淡出，地形高出水面的地方照樣鋪著藍色 → 藍色蓋在陸地上。
+#   改成逐格判水深：全部四角都在水面之上（陸地）的格子直接不畫，
+#   水深 0~0.7m 的帶狀區逐漸透明，這就是真實的岸線。
+#   （不用 DEPTH_TEXTURE 做岸邊淡出，是因為網頁版走 gl_compatibility，風險太高。）
+func _water_mesh(r: Rect2) -> ArrayMesh:
+	if terrain == null:
+		return null
+	var nx: int = clampi(int(r.size.x / 12.0), 4, 48)
+	var ny: int = clampi(int(r.size.y / 12.0), 4, 48)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var any := false
+	for i in nx:
+		for j in ny:
+			var pts := []
+			var deep := []
+			for corner in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+				var px: float = r.position.x + r.size.x * float(corner[0]) / float(nx)
+				var py: float = r.position.y + r.size.y * float(corner[1]) / float(ny)
+				pts.append(Vector3((px - map_data.get("w", 960) * 0.5) * WORLD_SCALE,
+						BattleTerrain.WATER_SURFACE_Y,
+						(py - map_data.get("h", 600) * 0.5) * WORLD_SCALE))
+				deep.append(terrain.water_depth(px, py))
+			if float(deep[0]) <= 0.0 and float(deep[1]) <= 0.0 						and float(deep[2]) <= 0.0 and float(deep[3]) <= 0.0:
+				continue                       # 整格都是陸地：不要在陸地上鋪藍色
+			any = true
+			for idx in [0, 1, 2, 0, 2, 3]:
+				st.set_normal(Vector3.UP)
+				st.set_color(Color(1, 1, 1, clampf(float(deep[idx]) / 0.7, 0.0, 1.0)))
+				st.set_uv(Vector2(float(idx % 3), float(idx / 3)))
+				st.add_vertex(pts[idx])
+	if not any:
+		return null
+	return st.commit()
 
 # 水面 shader：兩層正弦波起伏＋菲涅耳反光。刻意簡單——手機 WebGL2 也要跑得動。
 const WATER_SHADER := """
@@ -4901,23 +4985,22 @@ void vertex() {
 
 void fragment() {
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	// 邊緣淡出：矩形水塊的硬直角像貼上去的色紙（QA 反驗證指出）。
-	// ⚠ 不可用 floor() 的方塊雜訊做參差——會變成棋盤格（第一版實拍）。
-	//   改用連續的正弦擾動，邊界才是自然的曲線。
-	float edge = min(min(UV.x, 1.0 - UV.x), min(UV.y, 1.0 - UV.y));
-	float wob = 0.012 * (sin(UV.x * 47.0) + sin(UV.y * 39.0 + 1.7));
-	// 深度感：離岸越遠越深越暗（淺水帶偏綠、深水偏靛）
-	float deep = smoothstep(0.0, 0.22, edge);
-	vec3 shallow_c = vec3(0.30, 0.50, 0.48);
+	// d ＝這一點的實際水深（0=岸邊、1=深水），建網格時就烤進頂點色 alpha。
+	// 用真實水深而不是「離矩形邊界多遠」，水線才會跟著地形走而不是跟著矩形走。
+	float d = COLOR.a;
+	vec3 shallow_c = vec3(0.34, 0.52, 0.47);
 	vec3 deep_c = vec3(0.05, 0.15, 0.26);
 	// ⚠ 菲涅耳權重要小：0.7 在俯瞰的掠角下整片水變乳白（實拍海灘像牛奶）
-	ALBEDO = mix(mix(shallow_c, deep_c, deep), vec3(0.58, 0.70, 0.76), fres * 0.28);
-	// 岸邊白沫：水最淺的一圈加白，浪花線讓水與地有交界而不是硬切
-	// 白沫只在最外一小圈，而且要弱——太強會變成一圈白色鑲邊（實拍）
-	float foam = (1.0 - smoothstep(0.0, 0.022, edge))
-			* (0.45 + 0.55 * sin(UV.x * 150.0 + UV.y * 110.0 + TIME * 2.2));
-	ALBEDO = mix(ALBEDO, vec3(0.88, 0.92, 0.93), clamp(foam, 0.0, 0.38));
-	ALPHA = 0.90 * smoothstep(0.0, 0.05 + wob, edge);
+	ALBEDO = mix(mix(shallow_c, deep_c, smoothstep(0.06, 0.85, d)),
+			vec3(0.58, 0.70, 0.76), fres * 0.28);
+	// 岸邊白沫：水最淺的那一圈加白，浪花線讓水與地有交界而不是硬切。
+	// 白沫要弱、要窄——太強會變成一圈白色鑲邊（實拍）。
+	float foam = (1.0 - smoothstep(0.0, 0.10, d))
+			* (0.45 + 0.55 * sin(VERTEX.x * 5.5 + VERTEX.z * 4.2 + TIME * 2.2));
+	ALBEDO = mix(ALBEDO, vec3(0.88, 0.92, 0.93), clamp(foam, 0.0, 0.34));
+	// ★透明度跟著水深走：淺灘幾乎全透明（看得到水底的沙），深水才不透明。
+	//   這是「一片不透明藍色塊」與「真的是水」之間唯一的差別。
+	ALPHA = clamp(0.16 + 0.72 * smoothstep(0.0, 0.55, d), 0.0, 0.88);
 	ROUGHNESS = 0.06;
 	SPECULAR = 0.7;
 }

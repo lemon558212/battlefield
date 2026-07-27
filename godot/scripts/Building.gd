@@ -300,8 +300,8 @@ func _in_stairs(lx: float, lz: float, rad := 0.0) -> bool:
 	if floors <= 1:
 		return false
 	var half := Vector2(rect.size.x * _ws * 0.5, rect.size.y * _ws * 0.5)
-	var z0: float = -half.y + 0.36
-	var zone := Rect2(half.x - 1.55, z0, STAIR_W, _stair_run()).grow(0.4 + rad)
+	var z0: float = -half.y + 0.61
+	var zone := Rect2(half.x - 1.80, z0, STAIR_W, _stair_run()).grow(0.4 + rad)
 	return zone.has_point(Vector2(lx, lz))
 
 # 樓梯坡度（鐵律 0⑤：真實量級）。
@@ -320,9 +320,11 @@ func _stairs(half: Vector2, mat: BaseMaterial3D) -> void:
 	var run: float = _stair_run()
 	var n: int = maxi(8, int(run / 0.28))
 	for i in n:
+		# ⚠ 往室內多退 0.25m：舊值讓梯面外緣離牆內面只剩 13cm，從窗口看出去
+		#   整段樓梯貼在窗洞後面，讀起來像「樓梯長在牆上」（使用者 2026-07-27）。
 		_emit_box("floor", mat, Vector3(1.1, 0.16, run / float(n) + 0.02),
-				Transform3D(Basis(), Vector3(half.x - 0.8, float(i) * (FLOOR_H / float(n)),
-						-half.y + 0.5 + float(i) * (run / float(n)))))
+				Transform3D(Basis(), Vector3(half.x - 1.05, float(i) * (FLOOR_H / float(n)),
+						-half.y + 0.75 + float(i) * (run / float(n)))))
 
 # 腳下的支撐面（鐵律 0③：有重量的東西會停在最近的支撐面上，不會沉到地形高度）。
 # ⚠ 先前二樓地板只是畫出來的：站在二樓的人高度照 terrain.height_at() 算，
@@ -342,9 +344,9 @@ func floor_at(px: float, py: float, y: float) -> float:
 	# 逐階判定會讓人每 0.26m 掉一次、走起來像在抽搐。
 	if floors > 1:
 		var half := Vector2(rect.size.x * _ws * 0.5, rect.size.y * _ws * 0.5)
-		var z0: float = -half.y + 0.36
+		var z0: float = -half.y + 0.61
 		var run: float = _stair_run()
-		if absf(lp.x - (half.x - 0.8)) <= 0.75 and lp.y >= z0 and lp.y <= z0 + run:
+		if absf(lp.x - (half.x - 1.05)) <= 0.75 and lp.y >= z0 and lp.y <= z0 + run:
 			var ramp: float = clampf((lp.y - z0) / run, 0.0, 1.0) * FLOOR_H
 			if ramp <= ly + STEP_TOL:
 				best = maxf(best, ramp)
@@ -464,7 +466,6 @@ const DECO := {
 func _decorate(half: Vector2, top: float) -> void:
 	var xf_cornice: Array = []
 	var xf_door: Array = []
-	var xf_ac: Array = []
 	# 簷口：沿四面牆頂鋪，每 2m 一件（模組件原尺寸剛好 2m 寬）
 	var runs := [
 		[Vector2(-half.x, half.y), Vector2(half.x, half.y)],
@@ -492,22 +493,23 @@ func _decorate(half: Vector2, top: float) -> void:
 		var ang: float = d[1]
 		var bs2 := Basis(Vector3.UP, -ang).scaled(Vector3(DOOR_W / 1.0, 2.15 / 2.2, 1.0))
 		xf_door.append(Transform3D(bs2, Vector3(pos.x, 0.0, pos.y)))
-	# 冷氣機：掛在窗台下方，隔一扇窗掛一台（每扇都掛看起來像機房）
-	var k := 0
+	# 窗台板：沿窗洞下緣往外凸 9cm 的一塊石板。
+	# ⚠ 這裡原本掛的是**冷氣機**（Downtown City 模組件），有兩個問題：
+	#   ① 年代不對——這是二戰型態的濱海軍事基地，牆上不會有分離式冷氣（軍事顧問16）；
+	#   ② 它往外凸 24cm、又剛好在窗口下方，遠看就是「有東西從牆裡露出來」
+	#      （使用者 2026-07-27 把它連同窗內看到的樓梯一起讀成「樓梯露在建築外」）。
+	#   窗台板同樣提供「凸出物才有的輪廓與陰影」，但年代與尺度都對。
 	for w in _deco_wins:
-		k += 1
-		if k % 2 == 0:
-			continue
 		var pw: Vector2 = w[0]
 		var angw: float = w[1]
-		var outw := Vector2(-sin(angw), cos(angw)) * 0.24
+		var outw := Vector2(-sin(angw), cos(angw)) * 0.05
 		if (pw + outw).length() < pw.length():
 			outw = -outw          # 一定要朝建築外側凸出
-		xf_ac.append(Transform3D(Basis(Vector3.UP, -angw),
-				Vector3(pw.x + outw.x, WIN_SILL - 0.42, pw.y + outw.y)))
+		_emit_box("wall", _wall_mat, Vector3(WIN_W + 0.24, 0.09, WALL_T + 0.14),
+				Transform3D(Basis(Vector3.UP, -angw),
+				Vector3(pw.x + outw.x, WIN_SILL - 0.05, pw.y + outw.y)))
 	_deco_mm("cornice", xf_cornice)
 	_deco_mm("door", xf_door)
-	_deco_mm("ac", xf_ac)
 
 static var _deco_mesh := {}      # 路徑 → Mesh（全場共用，一個模型只讀一次）
 

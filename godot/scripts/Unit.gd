@@ -170,6 +170,7 @@ var want_cover := false        # 由 Main 依所在位置設定；靜止時自�
 # 自動姿勢總開關。玩家親自操控（第三人稱行動模式）時關掉——
 # 使用者 2026-07-27：「停下來又自動蹲回去」，自動掩體判定壓過玩家意圖。
 # 關掉之後姿勢完全由 C／Z／Space 決定，AI 與非操控中的單位不受影響。
+# 關掉之後「自動蹲掩體」與「狙擊手自動臥射」都不生效，姿勢完全由 C/Z/Space 決定。
 var auto_stance := true
 var _model_base_y := 0.0
 var _crouch := 0.0             # 0=站 1=蹲（平滑過渡）
@@ -252,17 +253,65 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 	return u
 
 # 腳下識別環＋接觸陰影（載具用同一套，只是放大）
+# 腳下的識別環與接觸陰影：要跟著坡面躺平。
+# ⚠ 固定水平的環在斜坡上有一半會埋進土裡、另一半浮在空中（實拍：站在土堤上時
+#   藍環只剩半圈）——跟行動範圍圈是同一個病，只是尺寸小所以拖到現在才處理。
+var _ring: MeshInstance3D = null
+var _ring_shadow: MeshInstance3D = null
+
+var _ring_r := 0.0
+var _ring_at := Vector3(1e9, 0, 0)
+
+func _align_ring() -> void:
+	if _ring == null or not is_instance_valid(_ring) or not ground_sampler.is_valid():
+		return
+	# 逐頂點問地面高度重建環帶——跟行動範圍圈同一套。
+	# 只轉基底（對齊坡面法線）在山脊上不夠：地面是彎的，平面環一定有一段埋進去。
+	if global_position.distance_to(_ring_at) < 0.12:
+		return
+	_ring_at = global_position
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var seg := 40
+	var pin: Array = []
+	var pout: Array = []
+	for i in seg + 1:
+		var a: float = TAU * float(i) / float(seg)
+		var d := Vector3(cos(a), 0.0, sin(a))
+		pin.append(_ring_pt(d * _ring_r))
+		pout.append(_ring_pt(d * (_ring_r + 0.10)))
+	for i in seg:
+		for v in [pin[i], pout[i], pout[i + 1], pin[i], pout[i + 1], pin[i + 1]]:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v)
+	_ring.mesh = st.commit()
+	_ring.position = Vector3.ZERO
+	if _ring_shadow != null and is_instance_valid(_ring_shadow):
+		var n: Vector3 = _ground_normal()
+		if n.length() > 0.001:
+			var side: Vector3 = n.cross(Vector3(0, 0, 1))
+			if side.length() < 0.01:
+				side = n.cross(Vector3(1, 0, 0))
+			side = side.normalized()
+			_ring_shadow.basis = Basis(side, n.normalized(),
+					side.cross(n.normalized()).normalized()) * Basis(Vector3(1, 0, 0), -PI * 0.5)
+
+# 環上一點：以單位為中心的局部偏移，y 直接問地面（回傳局部座標）
+func _ring_pt(off: Vector3) -> Vector3:
+	var w: Vector3 = global_position + off
+	var gy: float = float(ground_sampler.call(w))
+	return Vector3(off.x, gy - global_position.y + 0.07, off.z)
+
 func _add_ring_and_shadow(is_player: bool, scale_k: float) -> void:
 	var ring := MeshInstance3D.new()
 	ring.name = "Ring"
-	var tor := TorusMesh.new()
-	tor.inner_radius = 0.62 * scale_k
-	tor.outer_radius = 0.72 * scale_k
-	ring.mesh = tor
-	ring.position.y = 0.06
+	_ring_r = 0.62 * scale_k
+	ring.position.y = 0.0
+	_ring = ring
 	var rm := StandardMaterial3D.new()
 	rm.albedo_color = Color(0.36, 0.61, 1.0) if is_player else Color(1.0, 0.36, 0.30)
 	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ring.material_override = rm
 	add_child(ring)
 	var sh := MeshInstance3D.new()
@@ -271,6 +320,7 @@ func _add_ring_and_shadow(is_player: bool, scale_k: float) -> void:
 	sh.mesh = qm
 	sh.rotation_degrees.x = -90
 	sh.position.y = 0.04
+	_ring_shadow = sh
 	var shm := StandardMaterial3D.new()
 	shm.albedo_color = Color(0, 0, 0, 0.26)
 	shm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1185,6 +1235,9 @@ func _update_crouch(delta: float) -> void:
 	if stance_cmd == "prone":
 		ptarget = 1.0 if not _dead else 0.0
 	elif stance_cmd == "" and auto_stance:
+		# ⚠ 玩家操控期間連「自動臥射」也要關（2026-07-27 實測 [movechk]：
+		#   狙擊手一被下令就自動趴下，玩家按 W 只能以 0.24~0.8m/s 匍匐，
+		#   畫面上就是「人不會動」——跟使用者抱怨的自動蹲是同一個病）。
 		ptarget = 1.0 if (want_prone and not _dead and _move_target == null
 				and _prone_hold < PRONE_BREAK_T) else 0.0
 	# 水深過腳踝就趴不下去：臉會泡在水裡（鐵律 0：現實怎樣就怎樣）。
@@ -1220,6 +1273,7 @@ func _update_crouch(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_stick_to_ground(delta)
+	_align_ring()
 	if _is_vehicle:
 		_vehicle_process(delta)
 		return
@@ -1380,9 +1434,19 @@ func _fade(k: float) -> void:
 # 程式化持槍姿（GDD/13，2026-07-25）：模型自帶動畫是「單手指槍」，長槍必須雙手才合理。
 # 作法同真實遊戲的疊加瞄準層：槍托抵右肩、槍口指向目標，再用 IK 把兩隻手抓上槍。
 # 移動中不套用（跑步時雙手鎖在槍上會與跑步動畫打架），改回攜行姿。
+# ★★時間積分只能算一次／幀（2026-07-27）。
+#   本函式掛在 `skeleton_updated` 上，而收尾的 force_update_all_bone_transforms()
+#   會讓訊號在同一幀再發一次 → 一幀跑兩次。裡面 `move_toward(…, 每幀固定量)` 這類
+#   逐幀積分因此被算兩次：第二次讀到的 `_dir_moving` 已經被 Unit._process 清掉，
+#   `+0.06` 當場被 `-0.06` 抵銷，匍匐擺動永遠停在 0（[crawlchk] 三項一起 FAIL）。
+#   ⚠ 通則：任何「每幀累加/收斂」的狀態都不可以寫在一幀可能被呼叫多次的回呼裡。
+var _pose_frame := -1
+
 func _aim_pose() -> void:
 	if not _gun_armed or _rig == null or _gun_node == null or not _gun_fixed or _model == null:
 		return
+	var fresh: bool = int(Engine.get_process_frames()) != _pose_frame
+	_pose_frame = int(Engine.get_process_frames())
 	var sks := _model.find_children("*", "Skeleton3D", true, false)
 	if sks.is_empty():
 		return
@@ -1406,7 +1470,8 @@ func _aim_pose() -> void:
 		# 匍匐擺動（2026-07-26）：靜止臥射時 sw 全為 0＝原本的姿勢，一動才擺。
 		# 匍匐的辨識特徵是「一腿屈膝外張蹬地、身體隨之側滾」，不是雙腿一起划。
 		var crawling: float = 1.0 if (is_moving() and _prone > 0.5) else 0.0
-		_crawl_amt = move_toward(_crawl_amt, crawling, 0.06)      # 起停要漸進，否則會抽一下
+		if fresh:
+			_crawl_amt = move_toward(_crawl_amt, crawling, 0.06)  # 起停要漸進，否則會抽一下
 		if _crawl_amt > 0.001:
 			# 身體隨著蹬地的那一腿側滾——這是匍匐看起來「有在使力」的來源
 			_rig.add_world_rotation("Hips", fwd, deg_to_rad(11.0) * sin(_crawl) * _crawl_amt)
@@ -1542,7 +1607,8 @@ func _aim_pose() -> void:
 			var ratio: float = clampf(d / _gun_len, 0.0, 1.0)
 			need_deg = rad_to_deg(acos(ratio))
 	# 平滑：每秒最多轉 240 度，抬槍與放下都不會瞬間跳
-	_muzzle_block = move_toward(_muzzle_block, need_deg, get_process_delta_time() * 240.0)
+	if fresh:
+		_muzzle_block = move_toward(_muzzle_block, need_deg, get_process_delta_time() * 240.0)
 	if _muzzle_block > 0.5:
 		# 繞右手軸往上轉＝槍口朝天（真實的 high port 持槍），同時把槍往後收貼近身體
 		var lift: float = minf(_muzzle_block, 86.0)
