@@ -390,5 +390,39 @@ func _armdiag() -> void:
 		var ua: Vector3 = sk.get_bone_global_pose(sk2i).origin
 		var hd: Vector3 = sk.get_bone_global_pose(hd2i).origin
 		print("[armdiag] 無瞄準時 上臂→手 距離=%.4f（骨架空間）" % ua.distance_to(hd))
+	# ★ 逐狀態側視：使用者說「鏡頭在旁邊跟前面也看不到手臂」，
+	#   站姿瞄準是唯一我驗過的狀態。蹲、蹲行、跑步走的是不同分支，要各拍一張。
+	for st2 in [["stand_aim", "stand", false, true], ["crouch", "crouch", false, true],
+			["crouch_walk", "crouch", true, true], ["run", "stand", true, true],
+			["stand_noaim", "stand", false, false]]:
+		u.stance_cmd = String(st2[1])
+		u.aim_point = Vector3(0, 1.3, 6.0) if bool(st2[3]) else null
+		var tt := 0.0
+		while tt < 1.4:
+			await get_tree().process_frame
+			var dtt: float = get_process_delta_time()
+			tt += dtt
+			if bool(st2[2]):
+				u.move_dir(Vector3(0, 0, 1), dtt)
+			u.global_position = Vector3.ZERO      # 原地跑，鏡頭才框得住
+		camn.global_position = Vector3(2.4, 1.25, 0.0)
+		camn.look_at(Vector3(0, 1.0, 0), Vector3.UP)
+		await get_tree().create_timer(0.3).timeout
+		get_viewport().get_texture().get_image().save_png("res://qa/arm_%s.png" % st2[0])
+		var uai: int = sk.find_bone("UpperArm.R")
+		var lai: int = sk.find_bone("LowerArm.R")
+		var hpi: int = sk.find_bone("Hips")
+		var hdi: int = sk.find_bone("Head")
+		if uai >= 0 and lai >= 0 and hpi >= 0 and hdi >= 0:
+			var hp: Vector3 = sk.get_bone_global_pose(hpi).origin
+			var hd: Vector3 = sk.get_bone_global_pose(hdi).origin
+			var el: Vector3 = sk.get_bone_global_pose(lai).origin
+			var ua2: Vector3 = sk.get_bone_global_pose(uai).origin
+			# 手肘離「髖→頭」這條身體中軸多遠：小於軀幹半寬就是埋在身體裡＝看不到手臂
+			var axis: Vector3 = (hd - hp).normalized()
+			var v: Vector3 = el - hp
+			var off: float = (v - axis * v.dot(axis)).length()
+			print("[armdiag] %-12s 肘離中軸=%.4f 上臂長=%.4f 肘/上臂=%.2f" % [st2[0], off,
+					ua2.distance_to(el), off / maxf(ua2.distance_to(el), 0.00001)])
 	print("[armdiag] DONE")
 	get_tree().quit(0)

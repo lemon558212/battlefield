@@ -203,6 +203,13 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 	if model_path != "" and ResourceLoader.exists(model_path):
 		packed = load(model_path)
 	if packed == null and ResourceLoader.exists("res://assets/models/chars/soldier.glb"):
+		# ⚠⚠ 靜默退回舊模型是本專案踩過的坑（2026-07-25），而且症狀非常誤導：
+		#   舊 soldier.glb 是土黃色、骨名是 Wrist.R/Foot 父階錯誤，
+		#   現在的 IK 全部照 hr_ 骨名寫，套不上去就是「沒有手臂、沒有武器」。
+		#   絕對不可以再靜默——要大聲喊出來。
+		push_error("[Unit] 模型載入失敗，退回舊 soldier.glb！path=%s exists=%s cls=%s"
+				% [model_path, ResourceLoader.exists(model_path), p_cls])
+		print("[modelfallback] FAIL 退回舊模型 path=%s cls=%s" % [model_path, p_cls])
 		packed = load("res://assets/models/chars/soldier.glb")
 	if packed:
 		var model := packed.instantiate()
