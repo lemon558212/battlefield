@@ -3225,6 +3225,97 @@ func _my_zone() -> Dictionary:
 		return dz[player_side]
 	return {"x": 100, "y": 250, "w": 300, "h": 200}
 
+# 這一章的難度設定（data/difficulty.json）。鐵律 3：數值不寫在引擎裡。
+# ⚠ 非劇情模式（chapter=0）一律當第 1 章，不要拿到 null 就整套行為消失——
+#   「設定看起來有、玩起來沒有」是本專案反覆出現的病。
+# 章節難度的「地形要變複雜」（使用者 2026-07-28）。
+# 做法：把額外的彈坑與沙包工事**加進 map_data**，再讓 Terrain/Fortify 照原本的流程長出來，
+# 而不是另外寫一套「難度專用地形」——這樣所有既有規則（掩體、移動成本、焦土、
+# 走查判準）都自動適用，不必再維護第二條路徑。
+# ⚠ 一定要避開建築與部署區：彈坑長在部署格上＝玩家一放下士兵就掉進坑裡。
+func _boost_terrain() -> void:
+	var k: float = float(_diff().get("terrain", 0.0))
+	if k <= 0.01:
+		return
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242 + chapter * 97
+	var solids: Array = map_data.get("solids", [])
+	var zones: Array = map_data.get("deploy", [])
+	var fox: Array = map_data.get("foxholes", []).duplicate()
+	var sbs: Array = map_data.get("sandbags", []).duplicate()
+	var want_f: int = int(round(7.0 * k))
+	var want_s: int = int(round(5.0 * k))
+	var got_f := 0
+	var got_s := 0
+	for _try in 900:
+		if got_f >= want_f and got_s >= want_s:
+			break
+		var px: float = rng.randf_range(mwp * 0.10, mwp * 0.92)
+		var py: float = rng.randf_range(mhp * 0.08, mhp * 0.92)
+		var r: float = rng.randf_range(22.0, 38.0)
+		var bad := false
+		for sd in solids:
+			var sr := Rect2(float(sd.get("x", 0)), float(sd.get("y", 0)),
+					float(sd.get("w", 60)), float(sd.get("h", 60))).grow(r + 30.0)
+			if sr.has_point(Vector2(px, py)):
+				bad = true
+				break
+		if not bad:
+			for dz in zones:
+				var zr := Rect2(float(dz.get("x", 0)), float(dz.get("y", 0)),
+						float(dz.get("w", 300)), float(dz.get("h", 200))).grow(r + 24.0)
+				if zr.has_point(Vector2(px, py)):
+					bad = true
+					break
+		if not bad and terrain != null:
+			pass       # terrain 還沒建好，水域改用資料層判斷（下面）
+		if not bad:
+			# 水裡不挖坑也不堆沙包：用 maps.json 的水域資料粗判（terrain 這時還沒建）
+			for wk in ["waters", "deepwaters", "shallows"]:
+				for wr in map_data.get(wk, []):
+					if Rect2(float(wr.get("x", 0)), float(wr.get("y", 0)),
+							float(wr.get("w", 60)), float(wr.get("h", 60))).grow(r).has_point(Vector2(px, py)):
+						bad = true
+						break
+			for rv in map_data.get("rivers", []):
+				var hw: float = float(rv.get("w", 60)) * 0.5 + r
+				for i in range((rv.get("pts", []) as Array).size() - 1):
+					var a := Vector2(float(rv["pts"][i][0]), float(rv["pts"][i][1]))
+					var b := Vector2(float(rv["pts"][i + 1][0]), float(rv["pts"][i + 1][1]))
+					if Geometry2D.get_closest_point_to_segment(Vector2(px, py), a, b).distance_to(Vector2(px, py)) < hw:
+						bad = true
+						break
+			var co = map_data.get("coast", null)
+			if co != null and not bad:
+				for q in co.get("pts", []):
+					if absf(py - float(q[1])) < 120.0 and px < float(q[0]) + r + 20.0:
+						bad = true
+						break
+		if bad:
+			continue
+		if got_f < want_f:
+			fox.append({"x": px, "y": py, "r": r})
+			got_f += 1
+		elif got_s < want_s:
+			var horiz: bool = rng.randf() < 0.5
+			sbs.append({"x": px, "y": py, "w": (46.0 if horiz else 12.0),
+					"h": (12.0 if horiz else 46.0)})
+			got_s += 1
+	map_data["foxholes"] = fox
+	map_data["sandbags"] = sbs
+	print("[diff] 地形加碼（×%.2f）：彈坑 +%d、工事 +%d" % [k, got_f, got_s])
+
+func _diff() -> Dictionary:
+	var tiers: Array = GameData.difficulty.get("tiers", [])
+	if tiers.is_empty():
+		push_error("[diff] data/difficulty.json 沒讀到，AI 會退回最簡單的行為")
+		return {"enemyCount": 3, "vehicles": 0, "cover": 0.0, "focus": 0.0,
+				"flank": 0.0, "alertK": 1.0, "retreatHp": 0.3, "terrain": 0.0}
+	var idx: int = clampi(maxi(chapter, 1) - 1, 0, tiers.size() - 1)
+	return tiers[idx]
+
 func _ai_deploy() -> void:
 	var es := 1 - player_side
 	var zone: Dictionary = {}
@@ -3233,20 +3324,46 @@ func _ai_deploy() -> void:
 		zone = dz[es]
 	else:
 		zone = {"x": 560, "y": 250, "w": 300, "h": 200}
-	# 敵軍鏡射玩家進度：載具未解鎖不出、步兵數 = 已解鎖具名+1
-	var named_n := 0
-	for cls in GameData.characters.keys():
-		if GameData.characters[cls].get("unlockCh", 1) <= chapter:
-			named_n += 1
-	var pool := ["mg", "at", "sniper", "assault", "rifleman", "rifleman", "engineer"]
-	var count = min(named_n + 1, pool.size())
+	# ★★2026-07-28 使用者裁定：第 6~15 章不解鎖新東西，改用「敵人變多、地形變複雜、
+	#   AI 變聰明」爬難度。數量與載具數一律讀 data/difficulty.json。
+	# ⚠ 舊版註解寫「載具依 vehicle_unlock」，但**程式從來沒讀過**——敵軍永遠不出載具。
+	#   這是本專案的老病：設定看起來有、玩起來沒有。
+	var dif: Dictionary = _diff()
+	var pool := ["mg", "at", "sniper", "assault", "rifleman", "rifleman", "engineer",
+			"mortar", "specops", "sam", "rifleman", "assault"]
+	var count: int = int(dif.get("enemyCount", 3))
+	var placed_e := 0
 	for i in count:
-		var cls: String = pool[i]
+		var cls: String = pool[i % pool.size()]
 		if not CLASS_MODEL.has(cls):
 			continue
-		var wx: float = zone.get("x", 560) + 30 + (i % 3) * 55
-		var wy: float = zone.get("y", 250) + 30 + int(i / 3) * 55
+		var wx: float = zone.get("x", 560) + 30 + float(placed_e % 3) * 55.0
+		var wy: float = zone.get("y", 250) + 30 + float(placed_e / 3) * 55.0
 		_spawn_unit(cls, es, wx, wy, false)
+		placed_e += 1
+	# 敵方載具：依難度表的數量，且仍受 vehicle_unlock 的章節限制（玩家沒有的敵人也不該有）
+	var veh_n: int = int(dif.get("vehicles", 0))
+	if veh_n > 0:
+		var vpool: Array = []
+		for vc in GameData.vehicle_unlock.keys():
+			if int(GameData.vehicle_unlock[vc]) <= maxi(chapter, 1) and CLASS_MODEL.has(vc):
+				if String(GameData.class_base.get(vc, {}).get("domain", "land")) in map_data.get("allow", ["land"]):
+					vpool.append(vc)
+		if vpool.is_empty() and veh_n > 0:
+			push_error("[diff] 第 %d 章要出 %d 台敵方載具，但這張圖沒有任何已解鎖的載具可選"
+					% [chapter, veh_n])
+		for k in veh_n:
+			if vpool.is_empty():
+				break
+			var vc2: String = vpool[k % vpool.size()]
+			var vx: float = zone.get("x", 560) + 30 + float(placed_e % 3) * 55.0
+			var vy: float = zone.get("y", 250) + 30 + float(placed_e / 3) * 55.0
+			_spawn_unit(vc2, es, vx, vy, false)
+			placed_e += 1
+	print("[diff] 第 %d 章：敵步兵 %d、敵載具 %d、掩體 %.2f 集火 %.2f 側翼 %.2f 地形 %.2f"
+			% [maxi(chapter, 1), count, veh_n, float(dif.get("cover", 0.0)),
+			float(dif.get("focus", 0.0)), float(dif.get("flank", 0.0)),
+			float(dif.get("terrain", 0.0))])
 
 func _start_battle() -> void:
 	if _count_side(player_side) == 0:
@@ -4346,6 +4463,8 @@ func _action_tick(_delta: float) -> void:
 # 敵方階段（AI09）：與玩家同一套行動經濟——花 CP 下令、移動吃 AP、每次行動開火一次。
 # 舊版是「每 1.1 秒把單位硬移 120px」，玩家受 AP 限制而敵人不受，且移動是瞬移不會被迎擊。
 func _enemy_step() -> void:
+	if _ai_focus != null and not _ai_focus["alive"]:
+		_ai_focus = null
 	# A) 目前有單位在行動：等它走完/AP 用盡 → 開火 → 收尾
 	if acting != null and acting["side"] != player_side:
 		if not acting["alive"]:
@@ -4431,14 +4550,37 @@ func _enemy_step() -> void:
 # ---- 敵方 AI 狀態機（GDD/01 §6，禁止改成不可預測的隨機大雜燴）----
 # 每個單位依序評估，取第一個成立者：殘血撤退 → 職責行為 → 無目標推進主堡。
 # 回傳 {"target": 單位或 null, "range_k": 想推進到射程的幾倍, "dest": 指定目的地或 null, "why": 說明}
+# 集火目標：整個敵方陣營這一回合共用同一個目標。
+# ⚠ 每個單位各自挑「最近的」＝火力被平均分散到所有人身上，誰都打不死；
+#   集中打一個才是真的戰術。這一格快取每回合清一次（_enemy_step 開頭）。
+var _ai_focus = null
+
+func _ai_pick_focus(e, foes: Array):
+	if _ai_focus != null and _ai_focus["alive"]:
+		return _ai_focus
+	# 挑「血最少 ÷ 距離」最高的：快死的、又離得近的，最值得全隊一起打
+	var best = null
+	var bs := -1.0
+	var from := Vector2(float(e["wx"]), float(e["wy"]))
+	for x in foes:
+		var d: float = maxf(from.distance_to(Vector2(float(x["wx"]), float(x["wy"]))), 1.0)
+		var sc: float = (float(x["maxhp"]) - float(x["hp"]) + 20.0) / d * 100.0
+		if sc > bs:
+			bs = sc
+			best = x
+	_ai_focus = best
+	return best
+
 func _ai_plan(e) -> Dictionary:
 	var hp_ratio: float = float(e["hp"]) / maxf(float(e["maxhp"]), 1.0)
+	var dif: Dictionary = _diff()
 	var foes: Array = []
 	for x in units:
 		if x["alive"] and x["side"] != e["side"]:
 			foes.append(x)
 	# 1) 殘血撤退：往自家主堡方向退，並優先躲進掩體
-	if hp_ratio < 0.3:
+	#    撤退門檻隨章節提高——會撤退療傷的軍隊比死戰到底的難打得多
+	if hp_ratio < float(dif.get("retreatHp", 0.3)):
 		return {"target": _nearest_foe(e), "range_k": 1.0, "dest": _retreat_dest(e), "why": "殘血撤退"}
 	if foes.is_empty():
 		return {"target": null, "range_k": 0.6, "dest": _base_dest(1 - e["side"]), "why": "無目標→推進主堡"}
@@ -4455,7 +4597,32 @@ func _ai_plan(e) -> Dictionary:
 			return {"target": _nearest_foe(e), "range_k": 1.0, "dest": _cover_dest(e), "why": "機槍兵佔掩體警戒"}
 		"tank":
 			return {"target": _pick_valuable(foes), "range_k": 0.6, "dest": null, "why": "坦克轟最高價值目標"}
-	return {"target": _nearest_foe(e), "range_k": 0.6, "dest": null, "why": "推進到射程 0.6 倍"}
+	# 3) 章節難度行為（data/difficulty.json）。這三件用的都是**專案裡早就有、
+	#    但只有機槍兵或根本沒人用**的機制：_cover_dest / 集火 / _avoid_goal 側翼。
+	var tgt = _nearest_foe(e)
+	var why := "推進到射程 0.6 倍"
+	var dest = null
+	var rk := 0.6
+	var rr := randf()
+	if rr < float(dif.get("focus", 0.0)):
+		var f = _ai_pick_focus(e, foes)
+		if f != null:
+			tgt = f
+			why = "集火（全隊同一個目標）"
+	if randf() < float(dif.get("cover", 0.0)):
+		dest = _cover_dest(e)
+		rk = 0.85
+		why += "＋佔掩體"
+	elif randf() < float(dif.get("flank", 0.0)) and tgt != null:
+		# 側翼：不從正面推，繞到目標的側後方。_avoid_goal 早就寫好了，先前沒人用。
+		var tp := Vector2(float(tgt["wx"]), float(tgt["wy"]))
+		var ep := Vector2(float(e["wx"]), float(e["wy"]))
+		var dirv: Vector2 = (tp - ep).normalized()
+		var side: Vector2 = Vector2(-dirv.y, dirv.x) * (1.0 if randf() < 0.5 else -1.0)
+		var want: Vector2 = tp - dirv * (120.0) + side * 170.0
+		dest = _avoid_goal(e["node"].global_position, _to3d(want.x, want.y), BODY_R)
+		why += "＋側翼迂迴"
+	return {"target": tgt, "range_k": rk, "dest": dest, "why": why}
 
 # 找最近的某兵種目標。⚠ 距離要從「發起者」量起，不是從 foes[0] 量（會挑錯人）。
 func _pick_foe(foes: Array, cls: String, from: Vector2):
@@ -5259,7 +5426,10 @@ func _intercept_tick(delta: float) -> void:
 		if not u["alive"] or not _can_alert(u["cls"]) or not is_instance_valid(u["node"]):
 			continue
 		u["_alert_t"] = float(u.get("_alert_t", 0.0)) + delta
+		# 警戒射擊間隔隨章節縮短（只作用在敵方——玩家的節奏不該被難度動）
 		var gap: float = float(ALERT_GAP.get(u["cls"], ALERT_GAP_DEFAULT))
+		if u["side"] != player_side:
+			gap /= maxf(float(_diff().get("alertK", 1.0)), 0.2)
 		if u["_alert_t"] < gap:
 			continue
 		if u["node"].is_moving():
@@ -5355,6 +5525,7 @@ func _build_ground() -> void:
 	# 地形（GDD/14 §1）：高度場網格取代平面——丘陵、壕溝、彈坑都在這裡長出來
 	terrain = TERRAIN.new()
 	world.add_child(terrain)
+	_boost_terrain()          # 章節難度：地形變複雜（額外彈坑與工事）
 	terrain.build(map_data, WORLD_SCALE)
 	_apply_sky(str(map_data.get("sky", "day")))
 	_build_water()

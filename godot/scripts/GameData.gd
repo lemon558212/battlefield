@@ -9,6 +9,7 @@ var maps: Dictionary = {}
 var story: Array = []
 var characters: Dictionary = {}
 var vehicle_unlock: Dictionary = {}
+var difficulty: Dictionary = {}   # 章節難度曲線（data/difficulty.json）
 var terrain_mobility: Dictionary = {}
 var char_look: Dictionary = {}
 
@@ -19,6 +20,7 @@ func _ready() -> void:
 	maps = _load_json("res://data/maps.json")
 	characters = _load_json("res://data/characters.json")
 	vehicle_unlock = _load_json("res://data/vehicle_unlock.json")
+	difficulty = _load_json("res://data/difficulty.json")
 	terrain_mobility = _load_json("res://data/terrain_mobility.json")
 	char_look = _load_json("res://data/char_look.json")
 	var st = _load_json_any("res://data/story.json")

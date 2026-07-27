@@ -1,0 +1,49 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+[e2e] 1 主選單 → 劇情戰役
+[e2e] 2 章節 01
+[e2e] 3 簡報 → 出擊
+[e2e] 4 對話：連點推進 (st=3)
+[water] 深水圍欄 68 根樁（水深 > 1.05m 的邊界）
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _scatter_trees (res://scripts/Main.gd:6527)
+       [1] _build_ground (res://scripts/Main.gd:5706)
+       [2] _open_deploy (res://scripts/Main.gd:2896)
+       [3] <anonymous lambda> (res://scripts/Main.gd:2886)
+       [4] _dlg_step (res://scripts/UI.gd:390)
+       [5] _input (res://scripts/UI.gd:509)
+       [6] _send_click (res://scripts/Main.gd:1106)
+       [7] _boot_to_battle (res://scripts/Main.gd:960)
+[rig] mg 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[diff] 第 1 章：敵步兵 3、敵載具 0、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
+[e2e]   對話結束 st=4 (應為 DEPLOY=4)
+[e2e] 5 部署：點卡片 → 點藍框放置
+[rig] sniper 重定向骨對數=20
+[e2e]   已部署數=1 OK
+[e2e] 6 開始戰鬥
+[e2e]   st=5 (應為 CMD=5)
+[e2e] 7 選兵 → 點地面移動
+[e2e]   選取=OK
+[e2e]   第三人稱=OK
+[e2e]   位移=3.97m 終點 px=(1280,517) OK
+[sinkchk] 靜止 3 秒的垂直漂移：身體 +0.000m 模型 +0.000m 鏡頭 +0.000m OK(沒有下沉)
+[selftest] saved res://qa/e2e_battle.png
+[selftest] saved res://qa/e2e_hero_idle.png
+[selftest] saved res://qa/e2e_hero_crouchwalk.png
+[selftest] saved res://qa/e2e_hero_run.png
+[selftest] saved res://qa/crawl_move_0.png
+[selftest] saved res://qa/crawl_move_1.png
+[selftest] saved res://qa/crawl_move_2.png
+[selftest] saved res://qa/crawl_move_3.png
+[selftest] saved res://qa/e2e_hero_prone_side.png
+[selftest] saved res://qa/e2e_hero_prone_front.png
+[bonechk] cls=sniper 骨數=62 找不到的骨=["Wrist.R"]
+[bonechk] 前 20 根骨名=["Root", "Hips", "Abdomen", "Torso", "Chest", "Neck", "Head", "Head_end", "Shoulder.L", "UpperArm.L", "LowerArm.L", "Hand.L", "Index2.L", "Index3.L", "Index4.L", "Index4.L_end", "Middle2.L", "Middle3.L", "Middle4.L", "Middle4.L_end"]
+[bonechk] want_prone=true _prone=0.00
+[e2e] DONE

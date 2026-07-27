@@ -1,0 +1,170 @@
+{
+ "_note": "章節難度曲線。1~5 章靠解鎖新單位給成長感；6~15 章不解鎖新東西，改靠敵人數量、地形複雜度、AI 行為（掩體/集火/側翼/撤退）爬升。cover/focus/flank 是機率(0~1)；terrain 是額外地形物件的倍率。",
+ "tiers": [
+  {
+   "ch": 1,
+   "enemyCount": 3,
+   "vehicles": 0,
+   "cover": 0.0,
+   "focus": 0.0,
+   "flank": 0.0,
+   "alertK": 1.0,
+   "retreatHp": 0.3,
+   "terrain": 0.0
+  },
+  {
+   "ch": 2,
+   "enemyCount": 3,
+   "vehicles": 0,
+   "cover": 0.0,
+   "focus": 0.0,
+   "flank": 0.0,
+   "alertK": 1.0,
+   "retreatHp": 0.3,
+   "terrain": 0.0
+  },
+  {
+   "ch": 3,
+   "enemyCount": 5,
+   "vehicles": 0,
+   "cover": 0.2,
+   "focus": 0.0,
+   "flank": 0.0,
+   "alertK": 1.0,
+   "retreatHp": 0.3,
+   "terrain": 0.15
+  },
+  {
+   "ch": 4,
+   "enemyCount": 5,
+   "vehicles": 0,
+   "cover": 0.2,
+   "focus": 0.0,
+   "flank": 0.0,
+   "alertK": 1.0,
+   "retreatHp": 0.3,
+   "terrain": 0.15
+  },
+  {
+   "ch": 5,
+   "enemyCount": 6,
+   "vehicles": 1,
+   "cover": 0.3,
+   "focus": 0.15,
+   "flank": 0.0,
+   "alertK": 1.05,
+   "retreatHp": 0.32,
+   "terrain": 0.25
+  },
+  {
+   "ch": 6,
+   "enemyCount": 7,
+   "vehicles": 1,
+   "cover": 0.34,
+   "focus": 0.21,
+   "flank": 0.06,
+   "alertK": 1.08,
+   "retreatHp": 0.34,
+   "terrain": 0.33
+  },
+  {
+   "ch": 7,
+   "enemyCount": 7,
+   "vehicles": 1,
+   "cover": 0.39,
+   "focus": 0.26,
+   "flank": 0.12,
+   "alertK": 1.12,
+   "retreatHp": 0.35,
+   "terrain": 0.4
+  },
+  {
+   "ch": 8,
+   "enemyCount": 8,
+   "vehicles": 2,
+   "cover": 0.43,
+   "focus": 0.32,
+   "flank": 0.18,
+   "alertK": 1.16,
+   "retreatHp": 0.37,
+   "terrain": 0.47
+  },
+  {
+   "ch": 9,
+   "enemyCount": 8,
+   "vehicles": 2,
+   "cover": 0.48,
+   "focus": 0.37,
+   "flank": 0.24,
+   "alertK": 1.19,
+   "retreatHp": 0.38,
+   "terrain": 0.55
+  },
+  {
+   "ch": 10,
+   "enemyCount": 9,
+   "vehicles": 2,
+   "cover": 0.53,
+   "focus": 0.43,
+   "flank": 0.3,
+   "alertK": 1.23,
+   "retreatHp": 0.4,
+   "terrain": 0.62
+  },
+  {
+   "ch": 11,
+   "enemyCount": 10,
+   "vehicles": 2,
+   "cover": 0.57,
+   "focus": 0.48,
+   "flank": 0.36,
+   "alertK": 1.26,
+   "retreatHp": 0.42,
+   "terrain": 0.7
+  },
+  {
+   "ch": 12,
+   "enemyCount": 10,
+   "vehicles": 3,
+   "cover": 0.61,
+   "focus": 0.54,
+   "flank": 0.42,
+   "alertK": 1.29,
+   "retreatHp": 0.43,
+   "terrain": 0.77
+  },
+  {
+   "ch": 13,
+   "enemyCount": 11,
+   "vehicles": 3,
+   "cover": 0.66,
+   "focus": 0.59,
+   "flank": 0.48,
+   "alertK": 1.33,
+   "retreatHp": 0.45,
+   "terrain": 0.85
+  },
+  {
+   "ch": 14,
+   "enemyCount": 11,
+   "vehicles": 3,
+   "cover": 0.71,
+   "focus": 0.65,
+   "flank": 0.54,
+   "alertK": 1.36,
+   "retreatHp": 0.46,
+   "terrain": 0.93
+  },
+  {
+   "ch": 15,
+   "enemyCount": 12,
+   "vehicles": 3,
+   "cover": 0.75,
+   "focus": 0.7,
+   "flank": 0.6,
+   "alertK": 1.4,
+   "retreatHp": 0.48,
+   "terrain": 1.0
+  }
+ ]
+}
