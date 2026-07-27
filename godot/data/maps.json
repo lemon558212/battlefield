@@ -269,7 +269,8 @@
     ],
     "w": 40
    }
-  ]
+  ],
+  "weather": "clear"
  },
  "verdun": {
   "id": "verdun",
@@ -713,7 +714,8 @@
     ],
     "w": 44
    }
-  ]
+  ],
+  "weather": "clear"
  },
  "desert": {
   "id": "desert",
@@ -887,7 +889,8 @@
     ],
     "w": 44
    }
-  ]
+  ],
+  "weather": "clear"
  },
  "forest": {
   "id": "forest",
@@ -1316,7 +1319,8 @@
     ],
     "w": 44
    }
-  ]
+  ],
+  "weather": "clear"
  },
  "beach": {
   "id": "beach",
@@ -1518,7 +1522,8 @@
     ],
     "w": 44
    }
-  ]
+  ],
+  "weather": "clear"
  },
  "strait": {
   "id": "strait",
@@ -1648,7 +1653,8 @@
     ],
     "w": 44
    }
-  ]
+  ],
+  "weather": "rain"
  },
  "harbor": {
   "id": "harbor",
@@ -1822,7 +1828,8 @@
     ],
     "w": 44
    }
-  ]
+  ],
+  "weather": "clear"
  },
  "tutorial": {
   "id": "tutorial",
@@ -1905,7 +1912,8 @@
     "h": 120,
     "floors": 2,
     "kind": "radar",
-    "note": "雷達站（開場起火）"
+    "note": "雷達站（開場起火）",
+    "burning": true
    },
    {
     "x": 590,
@@ -2271,6 +2279,7 @@
     "r": 100,
     "h": 4
    }
-  ]
+  ],
+  "weather": "clear"
  }
 }

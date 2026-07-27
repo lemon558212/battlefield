@@ -146,7 +146,7 @@ func _fences(m: Dictionary) -> void:
 					continue
 				_box("wood", Vector3(0.12, 1.05, 0.12), Transform3D(Basis(), _pos(p.x, p.y, 0.52)))
 				# 柵欄是連續的橫杆，障礙必須是線段——只登記柱子的話人會從兩柱之間穿過去
-				_blk_seg(p, p + dir * step, 0.14, 1.05)
+				_blk_seg(p, p + dir * step, 0.14, 1.05, true)   # 木柵欄：擋人不擋彈
 				var p2: Vector2 = p + dir * step * 0.5
 				var ang: float = atan2(dir.y, dir.x)
 				for hh in [0.55, 0.9]:
@@ -167,7 +167,7 @@ func _poles(m: Dictionary) -> void:
 			if _off_limits(p) or (_terrain != null and _terrain.in_water(p.x, p.y)):
 				d += 260.0
 				continue
-			_blk_cir(p, 0.32, 6.2)
+			_blk_cir(p, 0.32, 6.2, true)                    # 木電線桿：擋人不擋彈
 			_box("wood", Vector3(0.22, 6.2, 0.22), Transform3D(Basis(), _pos(p.x, p.y, 3.1)))
 			_box("wood", Vector3(1.6, 0.14, 0.14), Transform3D(Basis(), _pos(p.x, p.y, 5.6)))
 			d += 260.0
@@ -333,12 +333,15 @@ func _scorch_at(c: Vector2, r_m: float) -> void:
 # h_m＝這個障礙的實際高度（公尺）。人的碰撞不看高度（都擋），但彈道要看：
 # 0.95m 的護欄擋得住趴著與蹲著的人的彈道，擋不住站姿對站姿的對射——這是
 # 使用者 2026-07-26 指正「子彈可以穿過這些物體」的正解，不是一律擋或一律不擋。
-func _blk_cir(c: Vector2, r_m: float, h_m: float) -> void:
-	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m})
+# pen＝子彈打得穿（鐵律 0②：材質不同，擋彈能力就不同）。
+# 木柵欄、木電線桿擋得住人，但擋不住步槍彈——真實步槍彈輕鬆穿過 2cm 木板。
+# 沙包、混凝土龍牙、車體才是真的擋彈物。
+func _blk_cir(c: Vector2, r_m: float, h_m: float, pen := false) -> void:
+	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m, "pen": pen})
 
-func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float) -> void:
+func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false) -> void:
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
-	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m,
+	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen,
 			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
 
 # ---------- 幾何合併 ----------

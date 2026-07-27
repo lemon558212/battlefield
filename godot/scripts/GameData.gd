@@ -94,6 +94,13 @@ func hit_chance(shooter, target, dist_px: float, part := "body") -> float:
 	if ratio > 0.5:
 		c *= 1.0 - 0.45 * ((ratio - 0.5) / 0.5)
 	c *= float(PART_ACC.get(part, 1.0))
+	# 姿勢、移動與傷勢（鐵律 0）：先前站著跑步射擊與趴著據槍的命中率完全相同。
+	# 真實差距很大——臥射有雙肘與地面三點支撐，跑動中射擊基本上是亂槍。
+	# stance/moving/hurt 由 Main 在包裝時填，沒有就當站姿、靜止、滿血。
+	c *= float(shooter.stance_acc)
+	if shooter.moving:
+		c *= 0.55
+	c *= 0.78 + 0.22 * clampf(shooter.hp_ratio, 0.0, 1.0)
 	return clamp(c, 0.0, 0.99)
 
 # GDD/01 §4 剋制兩條（與 js/combat.js 同一套判斷，不另設倍率表）：

@@ -140,13 +140,25 @@ func slope_at(px: float, py: float) -> float:
 
 # 地形移動成本（GDD/14 §3-4）：上坡 ×1.5、彈坑/溝底 ×2。
 # AP 是「距離換算」的，成本倍率直接乘在扣除量上。
-func move_cost(px: float, py: float) -> float:
-	var c := 1.0
-	if slope_at(px, py) > 0.35:
-		c = 1.5
+# ⚠ 2026-07-27：`data/terrain_mobility.json` 早就寫好每種機動型別的地形倍率
+#   （shallow 1.55、wire 1.8、bush 0.85…），但**全專案沒有一行讀它**，
+#   這裡自己寫死 1.5／2.0（違反鐵律 3，而且偵察兵跟重裝兵過壕溝一樣快）。
+func move_cost(px: float, py: float, mob := "foot") -> float:
+	var tab: Dictionary = GameData.terrain_mobility.get(mob, {})
+	var c: float = float(tab.get("ground", 1.0))
+	if in_water(px, py):
+		var d: float = water_depth(px, py)
+		var k = tab.get("shallow", 1.55)
+		c = maxf(c, float(k) if k != null else 3.0)
+		if d > 1.35:
+			c = maxf(c, 4.0)          # 深及胸：形同不可通行
 	for cr in _craters:
 		if Vector2(px - float(cr.get("x", 0)), py - float(cr.get("y", 0))).length() < float(cr.get("r", 36)):
-			return 2.0
+			c = maxf(c, float(tab.get("crater", 1.15)))
+	if in_trench(px, py):
+		c = maxf(c, float(tab.get("trench", 1.25)))
+	if slope_at(px, py) > 0.35:
+		c = maxf(c, float(tab.get("hill", 1.15)) * 1.3)
 	return c
 
 # 這個點是不是在壕溝裡（半身掩體判定）

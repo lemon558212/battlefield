@@ -49,3 +49,61 @@ func voice(cls: String, kind: String) -> void:
 		if s is AudioStream:
 			_voice.stream = s
 			_voice.play()
+
+
+# ---------- 戰場音效（GDD/14 §音響；2026-07-27 補）----------
+# ⚠ 先前整個專案**只有 BGM 與角色語音**：開一槍是靜音的，爆炸也是。
+#   而且用的是 AudioStreamPlayer（非空間化），沒有位置也沒有距離衰減。
+#   這裡一律用 AudioStreamPlayer3D：遠處的槍聲會變小、聽得出方向，
+#   這既是鐵律 0（聲音在空氣中會衰減），也是戰術資訊（槍聲暴露位置）。
+const SFX_DIR := "res://assets/audio/sfx/"
+var _sfx_cache := {}
+var _last_sfx: AudioStreamPlayer3D = null      # 給驗證台檢查參數用
+
+func sfx3d(name: String, pos: Vector3, db := 0.0, pitch := 1.0) -> AudioStreamPlayer3D:
+	var path: String = SFX_DIR + name + ".wav"
+	if not _sfx_cache.has(name):
+		_sfx_cache[name] = load(path) if ResourceLoader.exists(path) else null
+	var st = _sfx_cache[name]
+	if st == null:
+		return null
+	var host := get_tree().current_scene
+	if host == null:
+		return null
+	var pl := AudioStreamPlayer3D.new()
+	pl.stream = st
+	pl.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+	pl.unit_size = 7.0          # 7m 之內接近原音量，之後隨距離反比衰減
+	pl.max_distance = 140.0
+	pl.volume_db = db
+	pl.pitch_scale = pitch
+	host.add_child(pl)
+	pl.global_position = pos
+	pl.finished.connect(pl.queue_free)
+	pl.play()
+	_last_sfx = pl
+	return pl
+
+# 槍聲：依武器型別選音色，音高隨機微調（每一槍都一模一樣會像機器）
+func gun(wtype: String, pos: Vector3) -> void:
+	var name := "shot_rifle"
+	match wtype:
+		"carbine", "smg": name = "shot_carbine"
+		"sniper": name = "shot_sniper"
+		"lmg", "naval_mg": name = "shot_lmg"
+		"cannon", "mortar", "naval_gun": name = "shot_cannon"
+		"rocket", "agm", "antiship_missile", "sam_missile": name = "shot_rocket"
+	sfx3d(name, pos, 0.0, randf_range(0.94, 1.06))
+
+func impact(kind: String, pos: Vector3) -> void:
+	sfx3d("impact_" + kind, pos, -4.0, randf_range(0.9, 1.12))
+
+func boom(pos: Vector3) -> void:
+	sfx3d("explosion", pos, 2.0, randf_range(0.92, 1.08))
+
+func step(pos: Vector3, quiet := false) -> void:
+	sfx3d("step_%d" % (randi() % 3 + 1), pos, -16.0 if quiet else -9.0,
+			randf_range(0.88, 1.14))
+
+func reload_click(pos: Vector3) -> void:
+	sfx3d("reload", pos, -6.0, randf_range(0.96, 1.05))

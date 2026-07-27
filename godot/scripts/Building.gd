@@ -250,7 +250,10 @@ func _wall_piece(a: Vector2, b: Vector2, mat: BaseMaterial3D, y0: float, hh: flo
 	_emit_box(key, mat, Vector3(len_m, hh, WALL_T),
 			Transform3D(Basis(Vector3.UP, -ang), Vector3(mid.x, y0 + hh * 0.5, mid.y)))
 	if y0 <= 0.02:            # 落地的段才擋人、擋子彈
-		walls.append({"a": _local_to_px(a), "b": _local_to_px(b)})
+		# ⚠ 高度要記下來：窗台只有 1.0m 高，先前牆段沒有高度欄位，
+		#   `_shot_clear` 一律當成「從地板通到屋頂」→ **窗口射不出去也射不進來**。
+		#   有了高度，蹲在窗台後打不到、站起來從窗口射得出去，這才是窗戶的戰術意義。
+		walls.append({"a": _local_to_px(a), "b": _local_to_px(b), "h": y0 + hh})
 
 func _partition(half: Vector2, mat: BaseMaterial3D) -> void:
 	# 兩端內縮半個牆厚：與外牆重疊的共面會 z-fighting，畫面上是一片閃爍的雜點

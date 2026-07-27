@@ -805,6 +805,26 @@ func water_depth() -> float:
 		return 0.0        # 載具涉水另有規則（履帶車可涉 1m），目前不套
 	return float(water_sampler.call(global_position))
 
+# 負重（鐵律 0⑤）：背 12kg 機槍與彈藥的人跟輕裝偵察兵不可能同速。
+# 用 class_base 既有的 mobility 欄位當重量級別，不另外發明資料。
+func load_mul() -> float:
+	match String(GameData.class_base.get(cls, {}).get("mobility", "foot")):
+		"scout": return 1.12
+		"heavy": return 0.84
+		_: return 1.0
+
+# 傷勢（鐵律 0）：剩 1 滴血跟滿血跑一樣快是不合理的。
+var hp_ratio := 1.0            # 由 Main 在扣血時更新
+func hurt_mul() -> float:
+	return 0.62 + 0.38 * clampf(hp_ratio, 0.0, 1.0)
+
+# 加速度與慣性（鐵律 0：有質量的東西不會瞬間到全速、也不會瞬間停住）。
+# ⚠ 停止用較大的減速度：人煞停確實比起步快，而且拖太久會影響「停在障礙前幾公尺」
+#   這類量測的可讀性。3m/s 以 14m/s² 煞停＝滑行 0.32m，接近真實。
+const ACCEL := 9.0
+const DECEL := 14.0
+var _vel := Vector3.ZERO
+
 func wade_mul() -> float:
 	var dep: float = water_depth()
 	if dep <= 0.05:
@@ -814,6 +834,31 @@ func wade_mul() -> float:
 # 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
 func is_moving() -> bool:
 	return (_move_target != null or _dir_moving) and not _dead
+
+# 腳步聲（GDD/14 §音響）：依**實際走過的距離**計步，不是計時——
+# 這樣蹲行、涉水、受傷變慢時步頻會自動跟著慢下來，不會出現「腳在地上打滑卻照常噠噠噠」。
+var _step_acc := 0.0
+const STEP_LEN := 0.78          # 成年人步幅約 0.75~0.8m
+func _tick_steps(moved: float) -> void:
+	if _dead or _is_vehicle:
+		return
+	if _prone > 0.5:
+		return                  # 匍匐沒有腳步聲（這正是趴著前進的價值）
+	_step_acc += moved
+	if _step_acc < STEP_LEN:
+		return
+	_step_acc = 0.0
+	Audio.step(global_position, _crouch > 0.5)
+
+# 沒有輸入時把殘速滑完（由 _process 每幀呼叫）。人放開腳步不會瞬間釘在地上。
+func _coast(delta: float) -> void:
+	if _dead or _dir_moving or _move_target != null:
+		return
+	if _vel.length() < 0.01:
+		_vel = Vector3.ZERO
+		return
+	_vel = _vel.move_toward(Vector3.ZERO, DECEL * delta)
+	global_position += _vel * delta
 
 # 第三人稱直接操控（GDD/07）：每幀給一個世界方向就走，不設目的地。
 # 與點擊移動共用同一套 AP 扣除（Main._action_tick 量的是「實際位移」，兩種都吃得到）。
@@ -849,12 +894,14 @@ func move_dir(dir: Vector3, delta: float) -> void:
 			drive = cs            # 右腿正在往後蹬
 		# drive 在整個週期的平均是 1/π≈0.3183，除掉它才能維持設定的平均速度
 		var thrust: float = (0.12 + 0.88 * drive) / 0.4001
-		global_position += d * PRONE_SPEED * thrust * wade_mul() * delta
+		global_position += d * PRONE_SPEED * thrust * wade_mul() * hurt_mul() * delta
 		_prone_hold += delta        # 持續走就會超過門檻，_update_crouch 會讓他起身
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
 		return
-	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) * wade_mul()
-	global_position += d * spd * delta
+	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) 			* wade_mul() * load_mul() * hurt_mul()
+	_vel = _vel.move_toward(d * spd, ACCEL * delta)
+	global_position += _vel * delta
+	_tick_steps(_vel.length() * delta)
 	if _crouch > 0.5 and anim_names.has("crouch_walk"):
 		_play("crouch_walk")
 	else:
@@ -1061,6 +1108,11 @@ func _process(delta: float) -> void:
 			if _shots % SHOTS_PER_MAG == 0:
 				_reload_at = _busy_until          # 這一發打完接著換彈匣
 			_recoil = 1.0
+			_muzzle_flash()
+			# 槍聲從槍口發出（3D 音源）。先前開一槍是完全靜音的。
+			Audio.gun(String(GameData.class_base.get(cls, {}).get("wtype", "rifle")),
+					_muzzle_world if _muzzle_world != Vector3.ZERO
+					else global_position + Vector3(0, 1.35, 0))
 			shot_fired.emit(global_position + Vector3(0, 1.35, 0),
 					_shoot_target.global_position + Vector3(0, 1.2, 0))
 			_shoot_target = null
@@ -1069,11 +1121,13 @@ func _process(delta: float) -> void:
 	if _dir_moving:
 		_dir_moving = false          # 由 Main 每幀重新設定；沒設就代表玩家鬆開了方向鍵
 		return
+	_coast(delta)                    # 鬆開方向鍵後把殘速滑完（慣性）
 	if now < _busy_until:
 		return
 	# 換彈：射擊動作播完才接，否則會蓋掉開槍那一下
 	if _reload_at > 0.0 and now >= _reload_at:
 		_reload_at = 0.0
+		Audio.reload_click(global_position + Vector3(0, 1.1, 0))
 		if anim_names.has("reload"):
 			_play("reload", 0.12)
 			_busy_until = now + max(0.6, _clip_len("reload"))
@@ -1093,7 +1147,10 @@ func _process(delta: float) -> void:
 		if ang > 0.6:
 			_play("idle")        # 還沒轉正：原地轉身
 		else:
-			global_position += d.normalized() * (WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) * wade_mul()) * delta
+			var stp: float = (WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul)
+					* wade_mul() * load_mul() * hurt_mul()) * delta
+			global_position += d.normalized() * stp
+			_tick_steps(stp)
 			if _crouch > 0.5 and anim_names.has("crouch_walk"):
 				_play("crouch_walk")              # 蹲行：掩體後移動不站起來
 			elif speed_mul > 1.5 and anim_names.has("sprint"):
@@ -1480,3 +1537,22 @@ func _make_anim_source() -> void:
 	_retarget = true
 	anim = aps[0]
 	_map_anims()
+
+
+# 槍口火光要**照亮環境**（GDD/15 E2）。先前只有一片自發光貼片，
+# 夜戰或黃昏逆光時開槍，周圍完全沒有變化——現實中槍口焰是很強的瞬間光源，
+# 它同時也是「暴露自己位置」這件事在畫面上的表現。
+func _muzzle_flash() -> void:
+	if _is_vehicle:
+		return
+	var l := OmniLight3D.new()
+	l.light_color = Color(1.0, 0.86, 0.55)
+	l.light_energy = 8.0
+	l.omni_range = 5.0
+	l.shadow_enabled = false          # 一閃即逝，開陰影只是白付成本
+	get_tree().current_scene.add_child(l)
+	l.global_position = (_muzzle_world if _muzzle_world != Vector3.ZERO
+			else global_position + Vector3(0, 1.35, 0))
+	var tw := create_tween()
+	tw.tween_property(l, "light_energy", 0.0, 0.07)
+	tw.tween_callback(l.queue_free)

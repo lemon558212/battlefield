@@ -1507,6 +1507,34 @@ func _selftest() -> void:
 			fu["wy"] = fpx.y
 			await get_tree().create_timer(0.4).timeout
 			_unshield(fu, fsave)
+		# I-4b9) 音效必須是 3D 音源（GDD/15 F 整塊先前缺席：開槍是靜音的）。
+		#        沒有喇叭可以「聽」，所以驗的是：檔案載得到、播出來的是 AudioStreamPlayer3D、
+		#        而且距離衰減參數有設——這三件成立，距離衰減就是引擎在做。
+		var sfx_missing: Array = []
+		for nm in ["shot_rifle", "shot_carbine", "shot_sniper", "shot_lmg", "shot_cannon",
+				"shot_rocket", "explosion", "impact_dirt", "impact_metal", "impact_wood",
+				"step_1", "step_2", "step_3", "reload"]:
+			if not ResourceLoader.exists("res://assets/audio/sfx/%s.wav" % nm):
+				sfx_missing.append(nm)
+		print("[sfxchk] 音效檔 14 個缺 %d 個 %s" % [sfx_missing.size(),
+				"OK" if sfx_missing.is_empty() else "FAIL(缺 %s)" % str(sfx_missing)])
+		var sprobe = Audio.sfx3d("shot_rifle", _to3d(map_data.get("w", 960) * 0.5,
+				map_data.get("h", 600) * 0.5))
+		if sprobe == null:
+			print("[sfxchk] 播不出來 FAIL(sfx3d 回 null)")
+		else:
+			# ⚠ 屬性要**當場抓進區域變數**：音源播完會自我釋放，
+			#   晚一步再讀就是「previously freed instance」（本輪實際踩到）。
+			var s_cls: String = sprobe.get_class()
+			var s_att: int = sprobe.attenuation_model
+			var s_unit: float = sprobe.unit_size
+			var s_max: float = sprobe.max_distance
+			var s_is3d: bool = sprobe is AudioStreamPlayer3D
+			print("[sfxchk] 音源型別=%s 衰減模型=%d 單位距離=%.1fm 最遠=%.0fm %s" % [
+					s_cls, s_att, s_unit, s_max,
+					"OK(3D 音源，有距離衰減)"
+					if (s_is3d and s_max > 10.0 and s_unit > 0.5)
+					else "FAIL(不是 3D 或沒設衰減)"])
 		# I-4b8) 跑動中手臂與武器不可以消失（使用者 2026-07-27 截圖：畫面上只剩身體）。
 		#        真因是 IK 在手臂折疊時算出 NaN 四元數，寫進骨架後整條手臂的蒙皮塌陷。
 		#        NaN 不會噴任何錯誤訊息，只能靠「量骨頭座標是不是有限值」抓。
@@ -2326,7 +2354,19 @@ func _refresh_visibility() -> void:
 		for p in units:
 			if p["side"] != player_side or not p["alive"]:
 				continue
-			var sight := SIGHT
+			# 視野半徑改讀資料（鐵律 3）：class_base.json 每個兵種都寫了 sight
+			# （偵察兵 170、機槍兵 120…），先前全專案寫死 200，兵種差異等於不存在。
+			var sight: float = float(GameData.class_base.get(p["cls"], {}).get("sight", SIGHT))
+			# 視野扇形（鐵律 0：人看不到背後）。正前 ±60 度全視距，
+			# 側面砍到 0.55、背後只剩 0.3 的近距離察覺（餘光與聽覺）。
+			if is_instance_valid(p["node"]):
+				var pf: Vector3 = p["node"].facing_dir()
+				var pv := Vector3(float(u["wx"]) - float(p["wx"]), 0.0,
+						float(u["wy"]) - float(p["wy"]))
+				if pv.length() > 0.01:
+					var adeg: float = rad_to_deg(acos(clampf(pf.dot(pv.normalized()), -1.0, 1.0)))
+					sight *= (1.0 if adeg <= 60.0 else (0.55 if adeg <= 110.0 else 0.3))
+			sight *= weather_sight_mul()          # 雨雪壓低能見度
 			for c in _covers:
 				if c["type"] == "bush" and Vector2(c["wx"] - u["wx"], c["wy"] - u["wy"]).length() <= c["r"]:
 					# 草叢隱蔽（GDD/01 §5a）：蹲伏且尚未開火才真的藏得住（發現距離砍到 0.3）；
@@ -2517,6 +2557,10 @@ func _fire(shooter, target, part := "body") -> void:
 		return
 	# 彈道被實體吃掉＝這一槍打在障礙上（AI 與第三人稱自由射擊都會走到這裡）
 	if not _shot_clear_units(shooter, target, part):
+		# 打在掩體上也要有聲音——玩家要聽得出「這一槍沒過去」
+		var imp: Vector3 = _mid3(shooter, target)
+		Audio.impact("dirt", imp)
+		_bullet_mark(imp)
 		if shooter["side"] == player_side:
 			ui.flash_msg("子彈打在掩體上", Color(0.9, 0.8, 0.6))
 		_refresh_visibility()
@@ -2524,8 +2568,14 @@ func _fire(shooter, target, part := "body") -> void:
 	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
 	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
 	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, part) * (1.0 - cov * 0.6)
+	hc *= pow(0.7, float(_pen_count(_live_px(shooter), _live_px(target),
+			shooter["node"].muzzle_height() if not Unit.is_vehicle_cls(shooter["cls"]) else 1.9,
+			target["node"].torso_height() if not Unit.is_vehicle_cls(target["cls"]) else 1.4)))
 	if hc > randf():
+		Audio.impact("metal" if Unit.is_vehicle_cls(target["cls"]) else "wood",
+				target["node"].global_position + Vector3(0, 1.0, 0))
 		target["hp"] -= GameData.damage(_wrap(shooter), _wrap(target), part)
+		_sync_hp(target)
 		if part != "body":
 			ui.flash_msg("命中%s！" % ("頭部" if part == "head" else "散熱器"), Color(1.0, 0.9, 0.4))
 		if target["hp"] <= 0 and target["alive"]:
@@ -2533,8 +2583,214 @@ func _fire(shooter, target, part := "body") -> void:
 			target["node"].die()          # 淡出傾倒後自我移除
 		elif target["alive"]:
 			target["node"].take_hit()     # 受擊：立繪換 hurt 表情＋紅閃
+	_splash(shooter, target)
 	_refresh_visibility()
 	_check_end()
+
+# 範圍傷害（GDD/01 §4）。⚠ `data/weapons.json` 早就寫了 splash（迫砲 36、火箭 24、
+# 主砲 30），但**從來沒有被讀過**——迫砲打過去只傷一個人，跟步槍沒有差別。
+# 現實裡 60mm 迫砲彈殺傷半徑十幾公尺，範圍就是這類武器存在的理由。
+# 命中與否都會爆（沒中就是落在附近），線性衰減到邊緣為 0，掩體照樣減傷。
+# 把血量比例同步到 Unit：受傷會拖慢移動、也會拉低命中（鐵律 0）。
+func _sync_hp(u) -> void:
+	if not is_instance_valid(u["node"]):
+		return
+	var hp_max: float = float(GameData.class_base.get(u["cls"], {}).get("hp", 100))
+	u["node"].hp_ratio = clampf(float(u["hp"]) / maxf(hp_max, 1.0), 0.0, 1.0)
+
+# 彈痕（GDD/15 G2）：打過的地方要留下痕跡。沒有彈痕的戰場，
+# 打了十回合看起來還是全新的——使用者對場景的四條判準之一就是「使用痕跡」。
+# 用小片深色四邊形貼在命中點，總數有上限（超過就回收最舊的），不會累積成效能問題。
+const MARK_MAX := 48
+var _marks: Array = []
+func _bullet_mark(pos: Vector3) -> void:
+	if pos == Vector3.ZERO or world == null:
+		return
+	var q := QuadMesh.new()
+	q.size = Vector2(randf_range(0.10, 0.18), randf_range(0.10, 0.18))
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.06, 0.05, 0.05, 0.85)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.no_depth_test = false
+	var mi := MeshInstance3D.new()
+	mi.mesh = q
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	world.add_child(mi)
+	mi.global_position = pos
+	_marks.append(mi)
+	while _marks.size() > MARK_MAX:
+		var old = _marks.pop_front()
+		if is_instance_valid(old):
+			old.queue_free()
+
+# 天候（GDD/15 H5）。資料驅動：maps.json 的 weather＝clear/rain/snow。
+# ⚠ 不是只加特效：雨雪會壓低能見度、把地面弄濕變滑，這才是天候在戰術上的意義。
+#   粒子跟著鏡頭走（只在鏡頭附近下雨），全圖鋪粒子是純浪費。
+var weather := "clear"
+var _weather_node: GPUParticles3D = null
+func weather_sight_mul() -> float:
+	match weather:
+		"rain": return 0.72
+		"snow": return 0.62
+		_: return 1.0
+
+func weather_move_mul() -> float:
+	match weather:
+		"rain": return 1.12          # 泥濘
+		"snow": return 1.25
+		_: return 1.0
+
+func _build_weather() -> void:
+	weather = String(map_data.get("weather", "clear"))
+	if weather == "clear" or world == null:
+		return
+	var is_snow: bool = weather == "snow"
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3(0.12, -1, 0.08)
+	pm.spread = 3.0 if not is_snow else 22.0
+	pm.initial_velocity_min = 9.0 if not is_snow else 1.1
+	pm.initial_velocity_max = 13.0 if not is_snow else 2.0
+	pm.gravity = Vector3(0.6, -2.0 if not is_snow else -0.4, 0.4)
+	pm.scale_min = 0.5
+	pm.scale_max = 1.0
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(22, 1, 22)
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.02, 0.42) if not is_snow else Vector2(0.06, 0.06)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = (Color(0.72, 0.78, 0.85, 0.42) if not is_snow
+			else Color(1, 1, 1, 0.85))
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	qm.material = mat
+	var ps := GPUParticles3D.new()
+	ps.amount = 900 if not is_snow else 520
+	ps.lifetime = 1.4 if not is_snow else 5.0
+	ps.process_material = pm
+	ps.draw_pass_1 = qm
+	ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	ps.visibility_aabb = AABB(Vector3(-30, -30, -30), Vector3(60, 60, 60))
+	world.add_child(ps)
+	_weather_node = ps
+
+func _weather_follow() -> void:
+	if _weather_node == null or cam == null:
+		return
+	# 只在鏡頭上方 14m 的一塊區域降雨，跟著鏡頭移動
+	_weather_node.global_position = cam.global_position + Vector3(0, 14.0, 0)
+
+# 火與煙（GDD/15 G3）。程式生成的粒子，不需要素材：
+# 火＝往上飄的橘色小片（重力為負、隨高度變暗），煙＝更大更慢更暗、飄得更高。
+# 再加一盞會閃的暖光，夜/黃昏下才有「那邊在燒」的感覺。
+func _add_fire(pos: Vector3, radius: float) -> void:
+	if world == null:
+		return
+	# ⚠ 粒子數與燈的範圍都要克制：第一版（46+34 粒、燈半徑 12m、每幀改 energy）
+	#   讓 16 單位的幀時從 5.8ms 掉到 11.9ms。火只是背景元素，不值這個價。
+	for spec in [{"n": 22, "life": 1.4, "sz": 0.42, "up": 3.2, "col": Color(1.0, 0.55, 0.16),
+					"y": 0.0, "spread": radius},
+			{"n": 16, "life": 4.0, "sz": 1.5, "up": 2.0, "col": Color(0.20, 0.19, 0.18),
+					"y": 2.4, "spread": radius * 1.5}]:
+		var pm := ParticleProcessMaterial.new()
+		pm.direction = Vector3(0, 1, 0)
+		pm.spread = 14.0
+		pm.initial_velocity_min = float(spec["up"]) * 0.6
+		pm.initial_velocity_max = float(spec["up"])
+		pm.gravity = Vector3(0.4, 0.35, 0.2)          # 火與煙都被風帶著走
+		pm.scale_min = float(spec["sz"]) * 0.5
+		pm.scale_max = float(spec["sz"])
+		pm.color = spec["col"]
+		pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+		pm.emission_sphere_radius = float(spec["spread"])
+		var qm := QuadMesh.new()
+		qm.size = Vector2.ONE
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.blend_mode = (BaseMaterial3D.BLEND_MODE_ADD if spec["y"] == 0.0
+				else BaseMaterial3D.BLEND_MODE_MIX)
+		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		mat.vertex_color_use_as_albedo = true
+		mat.albedo_color = Color(1, 1, 1, 0.5 if spec["y"] == 0.0 else 0.28)
+		qm.material = mat
+		var ps := GPUParticles3D.new()
+		ps.amount = int(spec["n"])
+		ps.lifetime = float(spec["life"])
+		ps.process_material = pm
+		ps.draw_pass_1 = qm
+		ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# 明確給可見範圍，否則引擎每幀要重算粒子包圍盒
+		ps.visibility_aabb = AABB(Vector3(-8, -2, -8), Vector3(16, 18, 16))
+		world.add_child(ps)
+		ps.global_position = pos + Vector3(0, float(spec["y"]), 0)
+	var fl := OmniLight3D.new()
+	fl.light_color = Color(1.0, 0.6, 0.25)
+	fl.light_energy = 3.0
+	fl.omni_range = minf(radius * 3.2, 7.0)
+	fl.shadow_enabled = false
+	world.add_child(fl)
+	fl.global_position = pos + Vector3(0, 0.6, 0)
+	_fire_lights.append(fl)
+
+var _fire_lights: Array = []
+var _fire_t := 0.0
+var _flick_acc := 0.0
+func _flicker_fire(delta: float) -> void:
+	if _fire_lights.is_empty():
+		return
+	_fire_t += delta
+	# 12Hz 就夠：火光閃動是感覺，不是精確訊號。每幀改 light_energy 會逼引擎重算光照。
+	_flick_acc += delta
+	if _flick_acc < 0.083:
+		return
+	_flick_acc = 0.0
+	var k: float = 2.4 + 0.9 * sin(_fire_t * 11.0) + 0.5 * sin(_fire_t * 27.0)
+	for l in _fire_lights:
+		if is_instance_valid(l):
+			l.light_energy = k
+
+# 兩人之間的中點（打在掩體上的音源大致位置）
+func _mid3(a, b) -> Vector3:
+	if not is_instance_valid(a["node"]) or not is_instance_valid(b["node"]):
+		return Vector3.ZERO
+	return a["node"].global_position.lerp(b["node"].global_position, 0.6) + Vector3(0, 1.0, 0)
+
+func _splash(shooter, center) -> void:
+	var w: Dictionary = shooter.get("weapon", {})
+	var r_px: float = float(w.get("splash", 0))
+	if r_px <= 0.0:
+		return
+	if is_instance_valid(center["node"]):
+		Audio.boom(center["node"].global_position + Vector3(0, 0.6, 0))
+	var cx: float = float(center["wx"])
+	var cy: float = float(center["wy"])
+	var base: int = GameData.damage(_wrap(shooter), _wrap(center), "body")
+	var hit_any := 0
+	for u in units:
+		if u == center or u == shooter or not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		var d: float = Vector2(float(u["wx"]) - cx, float(u["wy"]) - cy).length()
+		if d >= r_px:
+			continue
+		var fall: float = 1.0 - d / r_px
+		var cov: float = cover_at(u["wx"], u["wy"], cx, cy)
+		var dmg: int = int(round(float(base) * fall * (1.0 - cov * 0.5)))
+		if dmg <= 0:
+			continue
+		u["hp"] -= dmg
+		_sync_hp(u)
+		hit_any += 1
+		if u["hp"] <= 0 and u["alive"]:
+			u["alive"] = false
+			u["node"].die()
+		else:
+			u["node"].take_hit()
+	if hit_any > 0 and shooter["side"] == player_side:
+		ui.flash_msg("爆炸波及 %d 人" % hit_any, Color(1.0, 0.75, 0.35))
 
 # 可瞄準的部位（GDD/01 §4）：軀幹永遠可選；步兵可瞄頭；
 # 坦克散熱器在尾部，射手必須位於車尾 ±60° 扇形內才打得到——繞背後才是坦克戰的解法。
@@ -2572,9 +2828,20 @@ func _wrap(u: Dictionary):
 class _UW:
 	var weapon: Dictionary
 	var cls: String
+	# 命中率要看姿勢、有沒有在動、還剩多少血（GDD/01 §4）
+	var stance_acc := 1.0
+	var moving := false
+	var hp_ratio := 1.0
 	func _init(u: Dictionary):
 		weapon = u["weapon"]
 		cls = u["cls"]
+		var n = u.get("node", null)
+		if n != null and is_instance_valid(n) and not Unit.is_vehicle_cls(cls):
+			# 臥射 1.25 / 蹲姿 1.12 / 站姿 1.0——支撐點越多越穩
+			stance_acc = 1.0 + 0.25 * n._prone + 0.12 * n._crouch * (1.0 - n._prone)
+			moving = n.is_moving()
+		var hp_max: float = float(GameData.class_base.get(cls, {}).get("hp", 100))
+		hp_ratio = clampf(float(u.get("hp", hp_max)) / maxf(hp_max, 1.0), 0.0, 1.0)
 
 func _on_shot(from_pos: Vector3, to_pos: Vector3) -> void:
 	var im := ImmediateMesh.new()
@@ -2645,6 +2912,8 @@ func _process(delta: float) -> void:
 	_solid_bodies()
 	_roof_fade(delta)
 	_tps_control(delta)
+	_flicker_fire(delta)
+	_weather_follow()
 	_action_tick(delta)
 	_intercept_tick(delta)
 	if st == St.ENEMY:
@@ -2743,7 +3012,8 @@ func _minimap_data() -> Dictionary:
 		act = [ap.x, ap.y, yaw]
 	return {"mw": float(map_data.get("w", 960)), "mh": float(map_data.get("h", 600)),
 			"units": us, "trenches": trs, "buildings": bls, "acting": act,
-			"sight": SIGHT}          # 雷達圈半徑（px）＝這個單位的偵測距離
+			"sight": (float(GameData.class_base.get(acting["cls"], {}).get("sight", SIGHT))
+					if acting != null else 0.0)}   # 雷達圈＝這個兵種自己的偵測距離
 
 # 滑鼠鎖定：第三人稱要自由轉視角就得鎖游標；但一開面板/回指令模式就要放開，否則點不到 UI。
 func _capture_mouse(on: bool) -> void:
@@ -2860,7 +3130,8 @@ func _action_tick(_delta: float) -> void:
 		# 地形成本（GDD/14 §3-4）：上坡 ×1.5、彈坑 ×2——同樣的距離，難走的地形就是吃更多 AP
 		var tcost := 1.0
 		if terrain != null:
-			tcost = terrain.move_cost(float(acting["wx"]), float(acting["wy"]))
+			tcost = terrain.move_cost(float(acting["wx"]), float(acting["wy"]),
+					String(GameData.class_base.get(acting["cls"], {}).get("mobility", "foot"))) 					* weather_move_mul()
 		acting["ap"] = maxf(0.0, float(acting["ap"]) - moved / (PX_PER_AP * WORLD_SCALE) * tcost)
 		var p := _live_px(acting)
 		acting["wx"] = p.x
@@ -3180,8 +3451,16 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 		ign_a = null, ign_b = null) -> bool:
 	for bd in _buildings:
 		for w in bd.walls:
-			if _seg_hit(a, b, w["a"], w["b"]):
-				return false          # 牆從地板通到屋頂，任何姿勢都擋
+			if not _seg_hit(a, b, w["a"], w["b"]):
+				continue
+			# ⚠ 牆段現在帶高度：整面牆通到屋頂照樣全擋，但**窗台只有 1.0m**。
+			#   先前一律全擋 → 窗口射不出去也射不進來，窗戶只是一個貼圖上的洞。
+			var wh: float = float(w.get("h", 99.0))
+			var tw: float = _seg_param(a, b, w["a"], w["b"])
+			if tw < 0.0:
+				tw = 0.5
+			if lerpf(ya, yb, tw) < wh:
+				return false
 	var d1: Vector2 = b - a
 	var l2: float = d1.length_squared()
 	if l2 < 0.0001:
@@ -3205,6 +3484,10 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 		if t <= 0.001 or t >= 1.0:
 			continue                  # 貼著障礙開火（t≈0）不算被自己的掩體擋住
 		if lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
+			# 木柵欄／木桿：子彈穿得過去（鐵律 0②材質差異），只是會偏、會減速。
+			# 命中率的懲罰在 _pen_count() 算，這裡只負責「擋不擋」。
+			if bool(bk.get("pen", false)):
+				continue
 			return false
 	# 單位本身也是固體（鐵律 0①）。射手與目標本身要排除。
 	# 載具＝3m 級的鋼鐵、2.4m 高，任何姿勢的彈道都擋。
@@ -3355,6 +3638,41 @@ func _sight_clear(observer, target) -> bool:
 # 兩個單位之間的彈道是否通暢：高度自動用雙方姿勢（槍口→被瞄的部位）
 # part＝瞄的部位：瞄頭的彈道比瞄軀幹高，所以「站在沙包後面的人軀幹打不到、頭打得到」，
 # 這正是掩體該有的樣子——不是無敵護盾，也不是裝飾。
+# 彈道上穿過幾層「可穿透」障礙（木柵欄、木電線桿）。
+# 穿得過去不代表沒有代價：子彈會偏、會減速，所以每穿一層命中率打七折。
+func _pen_count(a: Vector2, b: Vector2, ya: float, yb: float) -> int:
+	var d1: Vector2 = b - a
+	var l2: float = d1.length_squared()
+	if l2 < 0.0001:
+		return 0
+	var seg_len: float = sqrt(l2)
+	var n := 0
+	for bk in _blockers:
+		if not bool(bk.get("pen", false)):
+			continue
+		var t: float
+		if bk["t"] == "cir":
+			var c: Vector2 = bk["c"]
+			var rr: float = float(bk["r"])
+			var tc: float = (c - a).dot(d1) / l2
+			var perp: float = (a + d1 * tc).distance_to(c)
+			if perp >= rr:
+				continue
+			t = tc - sqrt(rr * rr - perp * perp) / seg_len
+		else:
+			t = _seg_param(a, b, bk["a"], bk["b"])
+		if t > 0.001 and t < 1.0 and lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
+			n += 1
+	return n
+
+# 這個目標是不是在室內（屋頂擋得住拋射彈）
+func _target_indoors(u) -> bool:
+	var p := _live_px(u)
+	for bd in _buildings:
+		if bd.inside(p.x, p.y):
+			return true
+	return false
+
 func _shot_clear_units(shooter, target, part := "body") -> bool:
 	# 載具用砲塔／車體高度，不吃姿勢（坦克不會蹲）
 	var ya: float = 1.90 if Unit.is_vehicle_cls(shooter["cls"]) else 1.32
@@ -3363,6 +3681,12 @@ func _shot_clear_units(shooter, target, part := "body") -> bool:
 		ya = shooter["node"].muzzle_height()
 	if not Unit.is_vehicle_cls(target["cls"]) and is_instance_valid(target["node"]):
 		yb = target["node"].eye_height() if part == "head" else target["node"].torso_height()
+	# 拋射武器（迫砲）＝間接射擊：砲彈從上方落下，掩體擋不住。
+	# ⚠ 先前迫砲吃直線判定，於是「arc 標記＋砲管 60 度仰角」全是裝飾，
+	#   它跟步槍一樣被 1.3m 的沙包擋住——那迫砲就沒有存在的理由。
+	#   屋頂仍然擋得住：躲進建築才不怕迫砲，這是進建築的價值之一。
+	if bool(shooter.get("weapon", {}).get("arc", false)):
+		return not _target_indoors(target)
 	return _shot_clear(_live_px(shooter), _live_px(target), ya, yb, shooter, target)
 
 # 這個目標有沒有任何部位打得到（開火入口用）
@@ -3681,6 +4005,7 @@ func _build_ground() -> void:
 	terrain.build(map_data, WORLD_SCALE)
 	_apply_sky(str(map_data.get("sky", "day")))
 	_build_water()
+	_build_weather()
 	# 腳下高度的唯一真相＝地形高度與建築樓板取高者（鐵律 0③）。
 	# ⚠ 先前只問地形，站在二樓的人高度照一樓地面算＝整個人陷進樓板裡。
 	Unit.ground_sampler = _ground_height
@@ -3710,6 +4035,9 @@ func _build_ground() -> void:
 	_buildings = []
 	_blockers = []          # 重建場景時一定要清，否則上一張地圖的障礙會留在新戰場上
 	_low_blk = []
+	_fire_lights = []
+	_marks = []
+	_weather_node = null
 	_low_grid = {}
 	_has_support = false
 	_tree_feet = []
@@ -3748,6 +4076,12 @@ func _build_ground() -> void:
 			bd.build(sdef, WORLD_SCALE, map_data.get("w", 960), map_data.get("h", 600),
 					gy, int(sdef.get("floors", 2 if i % 2 == 0 else 1)))
 			_buildings.append(bd)
+			# 劇情戰損（第一章開場第一句就是「雷達站起火了」）。
+			# 資料驅動：maps.json 的 solid 標 burning，場景層才長出火與煙——
+			# 劇本講的東西必須在戰場上看得到，否則對話與畫面是兩件事。
+			if bool(sdef.get("burning", false)):
+				_add_fire(bd.position + Vector3(0, float(bd.floors) * 3.1, 0),
+						maxf(float(sdef.get("w", 90)), 90.0) * WORLD_SCALE * 0.35)
 			# 室內家具進掩體表：進建築的戰術價值不能只有「牆擋子彈」，
 			# 屋裡要有東西可以蹲（木箱半身高＝硬掩體，桌子只算部分遮蔽）。
 			for fu in bd.furniture:
