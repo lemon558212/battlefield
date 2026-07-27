@@ -83,6 +83,7 @@ const BUILDING := preload("res://scripts/Building.gd")
 const PROPS := preload("res://scripts/Props.gd")
 const FORTIFY := preload("res://scripts/Fortify.gd")
 const TREES := preload("res://scripts/Trees.gd")
+const CITY := preload("res://scripts/CityBlocks.gd")
 var _buildings: Array = []             # 場上所有建築（牆線段＝視線與碰撞的真相）
 var terrain = null                     # 地形高度真相（GDD/14）
 # 中景物件與樹的實體障礙（形狀定義見 Props.blockers），座標為遊戲 px。
@@ -5333,6 +5334,7 @@ func _build_ground() -> void:
 	_rebuild_support_box()
 	# 植被：樹叢散佈（草叢掩蔽＋破除空曠感），樹幹本身也是實體
 	_scatter_trees(mw, mh)
+	_scatter_city(mw, mh)
 	# 草最後鋪：禁草區要用建築的實際佔地，樹腳的草也要等樹放好才知道位置
 	if terrain != null:
 		var no_rects: Array = []
@@ -5499,7 +5501,9 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 	var rmul: float = float(terrain.biome.get("rock_mult", 1.0))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
-	var want: int = int(gwp * ghp / 52000.0 * rmul * 5.5)   # 10.0 密到像一地鵝卵蛋（QA 實拍）
+	# ⚠ 5.5 在 48×30m 的舊圖上剛好，地圖放大到 70×50m 之後變成滿地鵝卵蛋（實拍）。
+	#   巨石是「點綴」不是地被——密度砍到 2.2，並且下面加上顏色與大小的變化。
+	var want: int = int(gwp * ghp / 52000.0 * rmul * 2.2)
 	var sm := SphereMesh.new()
 	sm.radial_segments = 7
 	sm.rings = 4
@@ -5507,9 +5511,11 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 	sm.height = 1.5
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
+	mat.vertex_color_use_as_albedo = true      # per-instance 顏色要吃得到
 	mat.roughness = 0.97
 	sm.material = mat
 	var xfs: Array = []
+	var cols: Array = []
 	var placed := 0
 	var guard := 0
 	while placed < want and guard < want * 25:
@@ -5533,7 +5539,7 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 				break
 		if too_close:
 			continue
-		var sc: float = rng.randf_range(0.30, 1.9)
+		var sc: float = rng.randf_range(0.28, 1.35)   # 上限 1.9 的巨石比人還高兩倍，太搶戲
 		var ty: float = terrain.height_at(px, py)
 		# ⚠ 縮放係數要留下來：碰撞半徑與高度必須跟**畫出來的那顆石頭**一致，
 		#   不能用 sc 亂猜（先前 r 寫 sc*0.9、h 寫 sc*1.0，兩個都不是實際尺寸）。
@@ -5553,6 +5559,9 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 		var rock_h: float = sc * (0.28 + 0.75 * ry)               # 露出地面的高度
 		if sc > 0.30:
 			_blockers.append({"t": "cir", "c": tp, "r": rock_r / WORLD_SCALE, "h": rock_h})
+		# 每顆石頭色偏不同：一整片同色的粉灰色圓球是本專案被指正過的「一片純色」
+		cols.append(Color(rng.randf_range(0.72, 1.16), rng.randf_range(0.74, 1.12),
+				rng.randf_range(0.70, 1.10)))
 		if rock_h > STEP_UP:
 			_covers.append({"wx": px, "wy": py, "r": rock_r * 1.05 / WORLD_SCALE,
 					"val": 0.5, "type": "sandbag"})
@@ -5561,10 +5570,12 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 		return
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
 	mm.mesh = sm
 	mm.instance_count = xfs.size()
 	for k in xfs.size():
 		mm.set_instance_transform(k, xfs[k])
+		mm.set_instance_color(k, cols[k])
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "Rocks"
 	mmi.multimesh = mm
@@ -5835,6 +5846,127 @@ void fragment() {
 	SPECULAR = mix(0.10, 0.35, far_fade);
 }
 """
+
+# ---------- 城市街區（town / urban；2026-07-27 使用者第 4 項）----------
+# `assets/kits/DowntownCity` 有 153 個模組件，但專案**只用到它的貼圖，模型一個都沒用**，
+# 於是 town/urban 就是「草原上放六棟程式生成的房子」，完全沒有城市感。
+# 三個原則見 CityBlocks.gd 檔頭；這裡負責「排在哪」。
+func _scatter_city(gwp: float, ghp: float) -> void:
+	if terrain == null or String(terrain.biome.get("key", "")) != "urban":
+		return
+	var whole := {}
+	for n in CITY.WHOLE:
+		var d: Dictionary = CITY.load_parts(self, n)
+		if not d.is_empty():
+			whole[n] = d
+	if whole.is_empty():
+		# ⚠ 大聲喊：素材沒載到就會靜默變回「空曠草原」，而那正是原本的症狀。
+		push_error("[city] 街區模型一個都沒載到（assets/models/city/ 是不是沒 --import？）")
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260728
+	var xf_by_mesh := {}
+	# 街廓格線：建築最寬 20.6m，留 13m 街道 → 34m 一格。
+	# 對齊格線是關鍵：隨機散佈會變成郊區獨棟，沿街連續才是城市。
+	var cell := 34.0 / WORLD_SCALE
+	var out_px: float = 150.0 / WORLD_SCALE          # 街廓帶往外鋪 150m，做出天際線
+	var placed := 0
+	var gx: float = -out_px
+	while gx < gwp + out_px:
+		var gy: float = -out_px
+		while gy < ghp + out_px:
+			gy += cell
+			# 戰場內（含 12m 緩衝）不放：戰場內的可進入建築是 Building.gd 那一套
+			if gx > -12.0 / WORLD_SCALE and gx < gwp + 12.0 / WORLD_SCALE 					and gy > -12.0 / WORLD_SCALE and gy < ghp + 12.0 / WORLD_SCALE:
+				continue
+			if rng.randf() < 0.16:
+				continue                              # 空地／停車場，不要排到滿
+			var name: String = CITY.WHOLE[rng.randi() % CITY.WHOLE.size()]
+			var d2: Dictionary = whole.get(name, {})
+			if d2.is_empty():
+				continue
+			var ab: AABB = d2["aabb"]
+			# 貼著街廓邊緣（沿街面），不是擺在格子正中央
+			var jx: float = gx + rng.randf_range(-0.10, 0.10) * cell
+			var jy: float = gy + rng.randf_range(-0.10, 0.10) * cell
+			var ty: float = terrain.height_at(jx, jy) if terrain != null else 0.0
+			var yaw: float = float(rng.randi() % 4) * PI * 0.5 + rng.randf_range(-0.04, 0.04)
+			var sc: float = rng.randf_range(0.85, 1.25)
+			var base := Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * sc),
+					Vector3((jx - gwp * 0.5) * WORLD_SCALE,
+							ty - ab.position.y * sc - 0.15, (jy - ghp * 0.5) * WORLD_SCALE))
+			for part in d2["parts"]:
+				var k = part[0]
+				if not xf_by_mesh.has(k):
+					xf_by_mesh[k] = []
+				xf_by_mesh[k].append(base * (part[1] as Transform3D))
+			placed += 1
+		gx += cell
+	# 戰場內：沿道路鋪人行道與街道小物（可通行、不擋路）
+	var ground := {}
+	for n2 in ["Sidewalk_Straight_3m"]:
+		var dg: Dictionary = CITY.load_parts(self, n2)
+		if not dg.is_empty():
+			ground[n2] = dg
+	var props := {}
+	for n3 in CITY.PROPS:
+		var dp: Dictionary = CITY.load_parts(self, n3)
+		if not dp.is_empty():
+			props[n3] = dp
+	for rd in map_data.get("roads", []):
+		var a := Vector2(float(rd.get("x1", 0)), float(rd.get("y1", 0)))
+		var b := Vector2(float(rd.get("x2", 0)), float(rd.get("y2", 0)))
+		var dirv: Vector2 = (b - a).normalized()
+		var nrm := Vector2(-dirv.y, dirv.x)
+		var total: float = a.distance_to(b)
+		var half: float = float(rd.get("w", 40)) * 0.5 + 1.5 / WORLD_SCALE
+		var stepp: float = 3.0 / WORLD_SCALE
+		var t := stepp
+		while t < total - stepp:
+			for sgn in [-1.0, 1.0]:
+				var q: Vector2 = a + dirv * t + nrm * half * sgn
+				if q.x < 6.0 or q.y < 6.0 or q.x > gwp - 6.0 or q.y > ghp - 6.0:
+					continue
+				if terrain.in_water(q.x, q.y):
+					continue
+				var yaw2: float = atan2(dirv.y, dirv.x)
+				var ty2: float = terrain.height_at(q.x, q.y)
+				var xf2 := Transform3D(Basis(Vector3.UP, -yaw2),
+						Vector3((q.x - gwp * 0.5) * WORLD_SCALE, ty2 + 0.02,
+								(q.y - ghp * 0.5) * WORLD_SCALE))
+				for key2 in ground:
+					var dd: Dictionary = ground[key2]
+					for part2 in dd["parts"]:
+						var k2 = part2[0]
+						if not xf_by_mesh.has(k2):
+							xf_by_mesh[k2] = []
+						xf_by_mesh[k2].append(xf2 * (part2[1] as Transform3D))
+				# 街道小物：每隔幾格放一個（不要每格都放，那會變成一排柱子）
+				if rng.randf() < 0.16 and not props.is_empty():
+					var pk: String = CITY.PROPS[rng.randi() % CITY.PROPS.size()]
+					if props.has(pk):
+						var xf3 := Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+								Vector3((q.x - gwp * 0.5) * WORLD_SCALE, ty2 + 0.03,
+										(q.y - ghp * 0.5) * WORLD_SCALE))
+						for part3 in (props[pk]["parts"] as Array):
+							var k3 = part3[0]
+							if not xf_by_mesh.has(k3):
+								xf_by_mesh[k3] = []
+							xf_by_mesh[k3].append(xf3 * (part3[1] as Transform3D))
+			t += stepp
+	for mk in xf_by_mesh.keys():
+		var list: Array = xf_by_mesh[mk]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = mk
+		mm.instance_count = list.size()
+		for k4 in list.size():
+			mm.set_instance_transform(k4, list[k4])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "CityBlocks"
+		mmi.multimesh = mm
+		world.add_child(mmi)
+	print("[city] 街廓建築 %d 棟、網格 %d 種" % [placed, xf_by_mesh.size()])
 
 func _scatter_trees(mw: float, mh: float) -> void:
 	# ★★2026-07-27 重寫（使用者：「樹木要做到細緻細膩」）。
