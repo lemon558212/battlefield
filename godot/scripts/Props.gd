@@ -242,7 +242,8 @@ func _wrecks(m: Dictionary) -> void:
 		_box("rust", Vector3(3.4, 1.0, 0.12),
 				Transform3D(b3 * Basis(Vector3.FORWARD, deg_to_rad(24.0)),
 				_pos(p.x, p.y, 1.15) + b3 * Vector3(-0.4, 0, 1.0)))
-		_blk_cir(p, 1.5, 1.90)
+		# 車體 4.6×2.1m（駕駛室往 +X 再突出到 2.2m）→ 半長 2.35、半寬 1.05
+		_blk_obb(p, ang, Vector2(2.35, 1.05), 1.90)
 		_scorch_at(p, 3.4)
 
 # 磚牆殘段：城鎮感最便宜的來源，而且是天然掩體
@@ -367,6 +368,13 @@ func _scorch_at(c: Vector2, r_m: float) -> void:
 func _blk_cir(c: Vector2, r_m: float, h_m: float, pen := false) -> void:
 	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m, "pen": pen})
 
+# 長條形物件（車輛殘骸）。用圓形近似會讓長軸兩端各有一段完全沒有實體——
+# 卡車殘骸 4.6m 長、圓半徑 1.5m ＝從車頭或車尾走進貨斗裡（使用者 2026-07-27 實測）。
+# ang＝長軸方向（px 平面的角度，與畫幾何用的 Basis(UP, -ang) 一致）。
+func _blk_obb(c: Vector2, ang: float, half_m: Vector2, h_m: float, pen := false) -> void:
+	blockers.append({"t": "obb", "c": c, "ax": Vector2(cos(ang), sin(ang)),
+			"e": half_m / _ws, "r": 0.0, "h": h_m, "pen": pen})
+
 func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false) -> void:
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
 	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen,
@@ -439,13 +447,17 @@ func _one_clutter(kind: String, p: Vector2, rng: RandomNumberGenerator) -> void:
 			var h: float = rng.randf_range(0.34, 0.46)
 			_box("wood", Vector3(w, h, w * rng.randf_range(0.6, 0.85)),
 					Transform3D(b, _pos(p.x, p.y, h * 0.5)))
+			# ⚠ 疊了第二層就不是「踩得上去的矮箱」了（頂端到 0.9m）。
+			#   碰撞高度一定要跟畫出來的一致，否則人會踩在半空中／半截身體插進上層箱子。
+			var top: float = h
 			if rng.randf() < 0.45:
 				var w2: float = w * rng.randf_range(0.7, 0.95)
 				_box("wood", Vector3(w2, h * 0.9, w2 * 0.8),
 						Transform3D(Basis(Vector3.UP, yaw + rng.randf_range(-0.5, 0.5)),
 						_pos(p.x + rng.randf_range(-0.1, 0.1), p.y + rng.randf_range(-0.1, 0.1),
 						h * 1.45)))
-			_blk_cir(p, 0.45, 0.42, true)              # 矮＝踩得上去，木頭＝擋不住彈
+				top = h * 1.45 + h * 0.45
+			_blk_cir(p, 0.45, top, true)               # 單層＝踩得上去；疊兩層＝擋人。木頭擋不住彈
 		"drum":             # 油桶：站立或倒下
 			if rng.randf() < 0.68:
 				_box("rust", Vector3(0.58, 0.88, 0.58), Transform3D(b, _pos(p.x, p.y, 0.44)))

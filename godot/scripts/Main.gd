@@ -108,7 +108,13 @@ var _low_grid := {}                  # Vector2i(格) -> Array[矮障礙]
 var _has_support := false
 var _tree_feet: Array = []             # 樹腳位置（px）：Terrain 在樹底補草做過渡
 const BODY_R := 0.42                   # 步兵肩寬半徑
-const VEHICLE_R := 1.6                 # 載具車體半徑（坦克 3.1m 寬）
+# ⚠ 2026-07-27 使用者實測：「從戰車後面可以穿過車尾走到車子中間」。
+#   真因＝載具的碰撞是**一個半徑 1.6m 的圓**，而車體是 3.1m 寬 × 6.0m 長的長方形：
+#   圓內切於「寬」，車頭與車尾各有約 1.4m 完全沒有實體。長條形的東西必須用長條形的碰撞。
+#   VEHICLE_R 保留給「載具本身當移動者」的粗略半徑（車去撞牆），擋人／擋彈改用 OBB。
+const VEHICLE_R := 1.6                 # 載具當移動者時的粗略半徑
+const VEHICLE_HL := 3.00               # 車體半長（履帶全長 6.0m）
+const VEHICLE_HW := 1.75               # 車體半寬（裙板外緣 1.7m、履帶外緣 1.87m）
 
 const GROUND_SHADER := """
 shader_type spatial;
@@ -607,32 +613,65 @@ func _playtest() -> void:
 	if veh == null:
 		print("[play][撞戰車] SKIP 這份資料沒有載具兵種")
 	else:
-		var vp := _live_px(veh)
-		var away := Vector2(1.0, 0.0)
-		_end_action()
-		await get_tree().create_timer(0.3).timeout
-		cp = 6
-		var sp2: Vector2 = vp + away * (5.0 / WORLD_SCALE)
-		pu["node"].global_position = _to3d(sp2.x, sp2.y)
-		pu["wx"] = sp2.x
-		pu["wy"] = sp2.y
-		_begin_action(pu)
-		pu["ap"] = 9999.0
-		pu["ap_max"] = 9999.0
-		var tov: Vector3 = veh["node"].global_position - pu["node"].global_position
-		cam.tps_yaw = rad_to_deg(atan2(tov.x, tov.z))
+		# ★★2026-07-27 使用者實測：「從戰車後面可以穿過車尾走到車子中間」。
+		#   舊斷言量的是「離車心的距離 > 車半徑 1.6m」——人站在車尾內部 1.6m 處
+		#   （車體半長 3.0m）照樣通過。**量錯維度＝白驗**，這是本專案第四次踩到。
+		#   改成兩件事：
+		#     ① 四個方向都撞（車頭／車尾／左側／右側），車尾正是他回報的那個方向
+		#     ② 判準改「在車體座標系裡有沒有進到盒子內」，不是離車心多遠
+		# ⚠ 走 6 秒會被敵方警戒射擊打死，下一行讀 _live_px 就炸「previously freed」
+		var tank_save := _shield(pu)
+		# ⚠ 先把車搬到淨空地：實測有一次起點在山坡裡，人 6 秒只走了 0.1m，
+		#   而「離車體很遠」在只有下限的舊斷言裡照樣印 OK ——前提不成立的測試等於沒測。
+		var tspot := _open_spot([10.0, 8.0, 6.0])
+		veh["node"].global_position = _to3d(tspot.x, tspot.y)
+		veh["wx"] = tspot.x
+		veh["wy"] = tspot.y
 		await get_tree().create_timer(0.4).timeout
-		await _hold_key(KEY_W, 5.0)
-		var gap_m: float = Vector2(_live_px(pu).x - vp.x, _live_px(pu).y - vp.y).length() * WORLD_SCALE
-		# ⚠ VEHICLE_R 的單位是**公尺**（`_shot_clear` 裡要 `/ WORLD_SCALE` 才變 px）。
-		#   第一版又乘了一次 WORLD_SCALE，門檻變成 0.07m ＝這條斷言等於永遠通過。
-		#   「這個數字在錯誤情況下會不會也通過？」——會，那就是量錯了。
-		print("[play][撞戰車] 對車體走 5 秒：離車心 %.2fm（車半徑 %.2fm）%s"
-				% [gap_m, VEHICLE_R,
-				"OK(被車擋住)" if gap_m > VEHICLE_R * 0.9 else "FAIL(穿過車體)"])
-		if gap_m <= VEHICLE_R * 0.9:
-			solid_fail += 1
-		await _snap("res://play_tank.png")
+		var dir_i := 0
+		for dir_name in ["車尾", "車頭", "左側", "右側"]:
+			dir_i += 1
+			var vobb := _vehicle_obb(veh)
+			var ax: Vector2 = vobb["ax"]                   # 車身前後軸（px 平面）
+			var ay := Vector2(-ax.y, ax.x)
+			var away: Vector2 = {"車尾": -ax, "車頭": ax, "左側": -ay, "右側": ay}[dir_name]
+			var start_m: float = (VEHICLE_HL if dir_name in ["車尾", "車頭"] else VEHICLE_HW) + 4.0
+			_end_action()
+			await get_tree().create_timer(0.3).timeout
+			cp = 6
+			var sp2: Vector2 = vobb["c"] + away * (start_m / WORLD_SCALE)
+			pu["node"].global_position = _to3d(sp2.x, sp2.y)
+			pu["wx"] = sp2.x
+			pu["wy"] = sp2.y
+			_begin_action(pu)
+			pu["ap"] = 9999.0
+			pu["ap_max"] = 9999.0
+			var tov: Vector3 = veh["node"].global_position - pu["node"].global_position
+			cam.tps_yaw = rad_to_deg(atan2(tov.x, tov.z))
+			await get_tree().create_timer(0.4).timeout
+			await _hold_key(KEY_W, 6.0)
+			# 換算到車體座標系：|沿車軸| 與 |沿車寬| 只要有一個超出盒子就是在車外
+			var fin: Vector2 = _live_px(pu) - vobb["c"]
+			var la: float = absf(fin.dot(ax)) * WORLD_SCALE      # 沿車身前後（半長 3.00m）
+			var lb: float = absf(fin.dot(ay)) * WORLD_SCALE      # 沿車身左右（半寬 1.75m）
+			# 離車體「表面」多遠：人是 0.42m 的圓，貼上去時應該正好停在 0.42m
+			var surf: float = maxf(la - VEHICLE_HL, lb - VEHICLE_HW)
+			# ⚠ 兩端都要驗（本專案第三次踩到單邊門檻）：
+			#   下限＝沒穿進車體；**上限＝真的走到車邊**。少了上限的話，
+			#   「人卡在別的東西上、根本沒走到坦克」也會印 OK ——前提不成立的測試等於沒測。
+			var reached: bool = surf < BODY_R + 0.8
+			var ok_tank: bool = surf > BODY_R - 0.1 and reached
+			var verdict: String = "OK(被車擋住)"
+			if surf <= BODY_R - 0.1:
+				verdict = "FAIL(穿進車體 %.2fm)" % (BODY_R - surf)
+			elif not reached:
+				verdict = "FAIL(前提不成立：走了 6 秒還離車體 %.2fm，根本沒撞到)" % surf
+			print("[play][撞戰車] 從%s走 6 秒：離車體表面 %.2fm｜車體座標 沿車軸 %.2fm(半長%.2f)／沿車寬 %.2fm(半寬%.2f) %s"
+					% [dir_name, surf, la, VEHICLE_HL, lb, VEHICLE_HW, verdict])
+			if not ok_tank:
+				solid_fail += 1
+			await _snap("res://play_tank_%d.png" % dir_i)
+		_unshield(pu, tank_save)
 	fails += solid_fail
 
 	print("[play] FAILS=%d" % fails)
@@ -1616,7 +1655,7 @@ func _selftest() -> void:
 					var c := Vector2(mwp * float(gx) / 30.0, mhp * float(gy) / 20.0)
 					var ok := true
 					for bk2 in _blockers:
-						var cp2: Vector2 = bk2["c"] if bk2["t"] == "cir" 								else Geometry2D.get_closest_point_to_segment(c, bk2["a"], bk2["b"])
+						var cp2: Vector2 = _blk_closest(bk2, c)
 						if c.distance_to(cp2) < clear_r:
 							ok = false
 							break
@@ -1645,12 +1684,20 @@ func _selftest() -> void:
 			cam.tps_yaw = 180.0
 			await get_tree().create_timer(0.4).timeout
 			await _hold_key(KEY_W, 5.0)
-			var tgap: float = (solu["wy"] - soltk["wy"]) * WORLD_SCALE
-			var tank_ok: bool = tgap > VEHICLE_R * 0.9 and tgap < 3.5 and float(solu["ap"]) > 1.0
-			print("[solidchk] 對著坦克走 5 秒：空地=%s 停在車體外 %.2fm、剩餘AP=%.0f %s"
-					% [found_spot, tgap, float(solu["ap"]),
-					("OK(載具是實體)" if tank_ok else "FAIL(穿過去了/沒走到/AP用盡)")
-					if found_spot else "SKIP(這張圖找不到 6m 淨空的空地，前提不成立)"])
+			# ⚠ 2026-07-27 改：舊寫法量「離車心的 Y 距離 > 1.6m」，人站在車尾內部 1.6m 處
+			#   （車體半長 3.0m）照樣通過——使用者實測就是從車尾走進車體中間。
+			#   改成換算到車體座標系，看有沒有進到 3.00×1.75 的盒子裡。
+			var tobb := _vehicle_obb(soltk)
+			var tax: Vector2 = tobb["ax"]
+			var tfin: Vector2 = _live_px(solu) - tobb["c"]
+			var tla: float = absf(tfin.dot(tax)) * WORLD_SCALE
+			var tlb: float = absf(tfin.dot(Vector2(-tax.y, tax.x))) * WORLD_SCALE
+			var tgap: float = maxf(tla - VEHICLE_HL, tlb - VEHICLE_HW)   # 離車體表面多遠
+			var tank_ok: bool = tgap > BODY_R - 0.1 and tgap < 1.5 and float(solu["ap"]) > 1.0
+			print("[solidchk] 對著坦克走 5 秒：空地=%s 離車體表面 %.2fm(沿軸%.2f/沿寬%.2f)、剩餘AP=%.0f %s"
+					% [found_spot, tgap, tla, tlb, float(solu["ap"]),
+				("OK(載具是實體)" if tank_ok else "FAIL(穿過去了/沒走到/AP用盡)")
+				if found_spot else "SKIP(這張圖找不到 6m 淨空的空地，前提不成立)"])
 			# ⚠ 這張不能用第三人稱拍：鏡頭會直接埋進車體，整張圖是一片灰＝沒有佐證力
 			#   （2026-07-26 實拍到）。切回俯瞰、框住人與坦克，才看得出人停在車體外。
 			_end_action()
@@ -4410,6 +4457,12 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 				if ts > 0.0 and ts < best:
 					best = ts
 				continue
+			if bk["t"] == "obb":
+				# 長條形障礙（車輛殘骸）：鏡頭一樣不能鑽進去
+				var tb: float = _blk_ray_t(bk, p1, p2)
+				if tb > 0.0 and tb < best:
+					best = tb
+				continue
 			if bk["t"] != "cir" or rr * WORLD_SCALE < 0.35:
 				continue
 			var c: Vector2 = bk["c"]
@@ -4450,20 +4503,7 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 		return true
 	var seg_len: float = sqrt(l2)
 	for bk in _blockers:
-		var t: float
-		if bk["t"] == "cir":
-			# 求「射線進入圓」的那個交點，不是最近點（_wall_ray 那條踩過的坑）
-			var c: Vector2 = bk["c"]
-			var rr: float = float(bk["r"])
-			var tc: float = (c - a).dot(d1) / l2
-			var perp: float = (a + d1 * tc).distance_to(c)
-			if perp >= rr:
-				continue
-			t = tc - sqrt(rr * rr - perp * perp) / seg_len
-		else:
-			if a.distance_squared_to(bk["m"]) > pow(float(bk["hl"]) + seg_len + float(bk["r"]), 2.0):
-				continue              # 粗剔除：整條彈道都到不了這段柵欄
-			t = _seg_param(a, b, bk["a"], bk["b"])
+		var t: float = _blk_ray_t(bk, a, b)
 		if t <= 0.001 or t >= 1.0:
 			continue                  # 貼著障礙開火（t≈0）不算被自己的掩體擋住
 		if lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
@@ -4483,10 +4523,15 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 	for v in units:
 		if v == ign_a or v == ign_b or not v["alive"] or not is_instance_valid(v["node"]):
 			continue
-		var is_veh: bool = Unit.is_vehicle_cls(v["cls"])
+		# 載具用實際車體盒（3.1×6.0m）——用圓的話車頭與車尾的彈道會直接穿過去
+		if Unit.is_vehicle_cls(v["cls"]):
+			var tvb: float = _blk_ray_t(_vehicle_obb(v), a, b)
+			if tvb > 0.001 and tvb < 1.0:
+				return false
+			continue
 		var vp := Vector2(v["node"].global_position.x / WORLD_SCALE + mw * 0.5,
 				v["node"].global_position.z / WORLD_SCALE + mh * 0.5)
-		var rv: float = (VEHICLE_R if is_veh else BODY_R) / WORLD_SCALE
+		var rv: float = BODY_R / WORLD_SCALE
 		var tcv: float = (vp - a).dot(d1) / l2
 		var pv: float = (a + d1 * tcv).distance_to(vp)
 		if pv >= rv:
@@ -4494,8 +4539,6 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 		var tv: float = tcv - sqrt(rv * rv - pv * pv) / seg_len
 		if tv <= 0.001 or tv >= 1.0:
 			continue
-		if is_veh:
-			return false
 		if lerpf(ya, yb, tv) < v["node"].body_top():
 			return false
 	return true
@@ -4510,12 +4553,7 @@ func _rebuild_support_box() -> void:
 	_low_grid = {}
 	_has_support = not _buildings.is_empty()
 	for bk in _low_blk:
-		var r: float = float(bk["r"])
-		var bb: Rect2
-		if bk["t"] == "cir":
-			bb = Rect2(bk["c"] - Vector2(r, r), Vector2(r, r) * 2.0)
-		else:
-			bb = Rect2(bk["a"], Vector2.ZERO).expand(bk["b"]).grow(r)
+		var bb: Rect2 = _blk_aabb(bk)
 		var x0: int = int(floor(bb.position.x / LOWGRID_PX))
 		var x1: int = int(floor(bb.end.x / LOWGRID_PX))
 		var y0: int = int(floor(bb.position.y / LOWGRID_PX))
@@ -4547,12 +4585,7 @@ func _ground_height(p: Vector3) -> float:
 	var cell: Array = _low_grid.get(Vector2i(int(floor(px / LOWGRID_PX)),
 			int(floor(py / LOWGRID_PX))), [])
 	for bk in cell:
-		var inside := false
-		if bk["t"] == "cir":
-			inside = q.distance_squared_to(bk["c"]) < pow(float(bk["r"]), 2.0)
-		else:
-			inside = Geometry2D.get_closest_point_to_segment(q, bk["a"], bk["b"]).distance_squared_to(q) 					< pow(float(bk["r"]), 2.0)
-		if not inside:
+		if not _blk_inside(bk, q):
 			continue
 		var top: float = (terrain.height_at(px, py) if terrain != null else 0.0) + float(bk.get("h", 0.2))
 		if top > g:
@@ -4576,17 +4609,7 @@ func _solid_ray(a: Vector3, b: Vector3) -> float:
 		return best
 	var seg_len: float = sqrt(l2)
 	for bk in _blockers:
-		var t2: float
-		if bk["t"] == "cir":
-			var c: Vector2 = bk["c"]
-			var rr: float = float(bk["r"])
-			var tc: float = (c - p1).dot(d1) / l2
-			var perp: float = (p1 + d1 * tc).distance_to(c)
-			if perp >= rr:
-				continue
-			t2 = tc - sqrt(rr * rr - perp * perp) / seg_len
-		else:
-			t2 = _seg_param(p1, p2, bk["a"], bk["b"])
+		var t2: float = _blk_ray_t(bk, p1, p2)
 		if t2 <= 0.0 or t2 >= best:
 			continue
 		# 高度：射線在該點離地多高，比障礙高就過得去
@@ -4633,17 +4656,7 @@ func _pen_count(a: Vector2, b: Vector2, ya: float, yb: float) -> int:
 	for bk in _blockers:
 		if not bool(bk.get("pen", false)):
 			continue
-		var t: float
-		if bk["t"] == "cir":
-			var c: Vector2 = bk["c"]
-			var rr: float = float(bk["r"])
-			var tc: float = (c - a).dot(d1) / l2
-			var perp: float = (a + d1 * tc).distance_to(c)
-			if perp >= rr:
-				continue
-			t = tc - sqrt(rr * rr - perp * perp) / seg_len
-		else:
-			t = _seg_param(a, b, bk["a"], bk["b"])
+		var t: float = _blk_ray_t(bk, a, b)
 		if t > 0.001 and t < 1.0 and lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
 			n += 1
 	return n
@@ -4736,6 +4749,159 @@ func _push_walls_px(p_in: Vector2, r_px: float) -> Vector2:
 				p = closest + ab.orthogonal().normalized() * r_px
 	return p
 
+# ---------- 障礙形狀通用工具（2026-07-27 新增第三種形狀 obb）----------
+# 為什麼要新增：長條形的東西用圓形碰撞，長軸兩端一定有一段是空的。
+#   坦克 3.1×6.0m 用 r=1.6 的圓 → 車尾 1.4m 可以走進去（使用者實測）。
+#   卡車殘骸 4.6×2.1m 用 r=1.5 的圓 → 貨斗兩端各 0.8m 可以走進去。
+# 形狀規格（座標一律遊戲 px）：
+#   {"t":"cir","c":中心,"r":半徑}
+#   {"t":"seg","a":,"b":,"r":半徑,"m":中點,"hl":半長}          ＝膠囊
+#   {"t":"obb","c":中心,"ax":單位向量(a 軸),"e":Vector2(半長a,半長b),"r":外皮半徑}
+# ⚠ 凡是掃 `_blockers` 的迴圈一律走下面這四支，不要再自己寫 `if bk["t"] == "cir"`——
+#   新增形狀時漏掉任何一處，症狀就是「畫得出來但穿得過去」，而且不會有任何錯誤訊息。
+func _obb_axes(bk: Dictionary) -> Array:
+	var ax: Vector2 = bk["ax"]
+	return [ax, Vector2(-ax.y, ax.x)]
+
+func _obb_local(bk: Dictionary, p: Vector2) -> Vector2:
+	var ab := _obb_axes(bk)
+	var d: Vector2 = p - bk["c"]
+	return Vector2(d.dot(ab[0]), d.dot(ab[1]))
+
+func _obb_world(bk: Dictionary, l: Vector2) -> Vector2:
+	var ab := _obb_axes(bk)
+	return bk["c"] + ab[0] * l.x + ab[1] * l.y
+
+# 障礙上離 p 最近的點（p 在障礙內部時回傳 p 自己夾限後的位置）
+func _blk_closest(bk: Dictionary, p: Vector2) -> Vector2:
+	match String(bk["t"]):
+		"cir":
+			return bk["c"]
+		"obb":
+			var e: Vector2 = bk["e"]
+			var l: Vector2 = _obb_local(bk, p)
+			return _obb_world(bk, Vector2(clampf(l.x, -e.x, e.x), clampf(l.y, -e.y, e.y)))
+		_:
+			return Geometry2D.get_closest_point_to_segment(p, bk["a"], bk["b"])
+
+# p 是否在障礙的實體範圍內（給「踩在矮障礙頂面」用）
+func _blk_inside(bk: Dictionary, p: Vector2) -> bool:
+	if String(bk["t"]) == "obb":
+		var e: Vector2 = bk["e"]
+		var l: Vector2 = _obb_local(bk, p)
+		return absf(l.x) <= e.x and absf(l.y) <= e.y
+	return _blk_closest(bk, p).distance_squared_to(p) < pow(float(bk["r"]), 2.0)
+
+# 障礙的外接矩形（給空間格網粗剔除用）
+func _blk_aabb(bk: Dictionary) -> Rect2:
+	var r: float = float(bk.get("r", 0.0))
+	match String(bk["t"]):
+		"cir":
+			return Rect2(bk["c"] - Vector2(r, r), Vector2(r, r) * 2.0)
+		"obb":
+			var ab := _obb_axes(bk)
+			var e: Vector2 = bk["e"]
+			var ext: Vector2 = (ab[0] * e.x).abs() + (ab[1] * e.y).abs()
+			return Rect2(bk["c"] - ext, ext * 2.0).grow(r)
+		_:
+			return Rect2(bk["a"], Vector2.ZERO).expand(bk["b"]).grow(r)
+
+# 把半徑 r_px 的圓（＝人）推到障礙外面。沒重疊就原樣回傳。
+# ⚠ 盒內的處理是關鍵：人已經在車體裡的時候要往**最近的那一面**推出去，
+#   照「離中心遠離方向」推會把人從車頭彈到車尾去。
+func _blk_push(bk: Dictionary, p: Vector2, r_px: float) -> Vector2:
+	var need: float = r_px + float(bk.get("r", 0.0))
+	if String(bk["t"]) == "obb":
+		var e: Vector2 = bk["e"]
+		var l: Vector2 = _obb_local(bk, p)
+		if absf(l.x) <= e.x and absf(l.y) <= e.y:
+			# 在盒內：比較兩個軸向要推多遠，走最淺的那一面
+			if (e.x - absf(l.x)) < (e.y - absf(l.y)):
+				l.x = (e.x + need) * (1.0 if l.x >= 0.0 else -1.0)
+			else:
+				l.y = (e.y + need) * (1.0 if l.y >= 0.0 else -1.0)
+			return _obb_world(bk, l)
+		var cl := Vector2(clampf(l.x, -e.x, e.x), clampf(l.y, -e.y, e.y))
+		var away: Vector2 = l - cl
+		var d: float = away.length()
+		if d >= need:
+			return p
+		return _obb_world(bk, cl + (away / d if d > 0.0001 else Vector2.RIGHT) * need)
+	var closest: Vector2 = _blk_closest(bk, p)
+	var away2: Vector2 = p - closest
+	var d2: float = away2.length()
+	if d2 >= need:
+		return p
+	return closest + (away2 / d2 if d2 > 0.0001 else Vector2.RIGHT) * need
+
+# 射線 a→b 進入這個障礙的比例。沒打到回 -1。
+# ⚠ 一定要回「進入點」而不是「最近點」：起點在障礙內部時最近點會算出 t≈1
+#   ＝判定成沒擋到（_wall_ray 那條坑，鏡頭因此停在樹幹裡）。
+func _blk_ray_t(bk: Dictionary, a: Vector2, b: Vector2) -> float:
+	var d: Vector2 = b - a
+	var l2: float = d.length_squared()
+	if l2 < 0.000001:
+		return -1.0
+	var seg_len: float = sqrt(l2)
+	match String(bk["t"]):
+		"cir":
+			var c: Vector2 = bk["c"]
+			var rr: float = float(bk["r"])
+			var tc: float = (c - a).dot(d) / l2
+			if (a + d * tc).distance_to(c) >= rr:
+				return -1.0
+			var perp: float = (a + d * tc).distance_to(c)
+			return tc - sqrt(rr * rr - perp * perp) / seg_len
+		"obb":
+			# 板塊法（slab）：在盒的座標系下對兩軸各求進出區間，取交集
+			var ab := _obb_axes(bk)
+			var e: Vector2 = bk["e"]
+			var rel: Vector2 = a - bk["c"]
+			var o := Vector2(rel.dot(ab[0]), rel.dot(ab[1]))
+			var dl := Vector2(d.dot(ab[0]), d.dot(ab[1]))
+			var t0 := -1.0e9
+			var t1 := 1.0e9
+			for i in 2:
+				var oi: float = o.x if i == 0 else o.y
+				var di: float = dl.x if i == 0 else dl.y
+				var ei: float = (e.x if i == 0 else e.y) + float(bk.get("r", 0.0))
+				if absf(di) < 0.000001:
+					if absf(oi) > ei:
+						return -1.0
+					continue
+				var ta: float = (-ei - oi) / di
+				var tb: float = (ei - oi) / di
+				if ta > tb:
+					var sw: float = ta
+					ta = tb
+					tb = sw
+				t0 = maxf(t0, ta)
+				t1 = minf(t1, tb)
+			if t0 > t1 or t1 < 0.0:
+				return -1.0
+			return t0
+		_:
+			# 粗剔除：整條射線都到不了這段柵欄
+			if a.distance_squared_to(bk["m"]) > pow(float(bk["hl"]) + seg_len + float(bk["r"]), 2.0):
+				return -1.0
+			return _seg_param(a, b, bk["a"], bk["b"])
+
+# 載具的碰撞盒（px，隨車身朝向轉）。
+# 為什麼是動態算而不是登記進 `_blockers`：車會開、砲塔會轉，登記的靜態盒隔一幀就過期。
+func _vehicle_obb(v) -> Dictionary:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var node = v["node"]
+	var fwd := Vector2(node.global_transform.basis.z.x, node.global_transform.basis.z.z)
+	if fwd.length() < 0.0001:
+		fwd = Vector2(0.0, 1.0)
+	return {"t": "obb",
+			"c": Vector2(node.global_position.x / WORLD_SCALE + mw * 0.5,
+					node.global_position.z / WORLD_SCALE + mh * 0.5),
+			"ax": fwd.normalized(),
+			"e": Vector2(VEHICLE_HL, VEHICLE_HW) / WORLD_SCALE,
+			"r": 0.0, "h": 2.4}
+
 # 完整實體解算＝建築牆 ＋ 中景物件／樹（Props.blockers）＋ 載具本身。
 # ⚠ 2026-07-26 只做了建築牆，結果護欄、拒馬、電線桿、樹、坦克全都能直接穿過去，
 #   在第三人稱裡看起來就是「這些東西是畫上去的」。障礙的真相要跟畫出來的一致。
@@ -4745,37 +4911,29 @@ func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 	var mh: float = map_data.get("h", 600)
 	var p := Vector2(pos.x / WORLD_SCALE + mw * 0.5, pos.z / WORLD_SCALE + mh * 0.5)
 	var r_px: float = radius / WORLD_SCALE
-	if not _buildings.is_empty():
-		p = _push_walls_px(p, r_px)
-	for bk in _blockers:
-		# ⚠ 深水圍欄的 h 登記成 0.0（它不擋子彈），但它擋人——不能被當成「矮到可以踩過去」。
-		#   高度欄位在這裡有兩種語意，必須用 k 區分，否則新規則會把海當平地。
-		if float(bk.get("h", 1.2)) <= STEP_UP and String(bk.get("k", "")) != "deepwater":
-			continue          # 矮障礙用「踩上去」處理（_ground_height），不水平推
-		var need: float = r_px + float(bk["r"])
-		var closest: Vector2
-		if bk["t"] == "cir":
-			closest = bk["c"]
-		else:
-			# 粗剔除：離線段中點超過（半長＋需要距離）就不可能碰到
-			if p.distance_squared_to(bk["m"]) > pow(float(bk["hl"]) + need, 2.0):
+	# ⚠ 要跑兩輪：被 A 推出去之後可能正好推進 B 裡（車體與牆之間、兩道柵欄的夾角）。
+	#   單輪解算的症狀就是「某些角落還是穿得過去」，而且只在特定夾角出現、很難重現。
+	#   第二輪沒有任何改變就提早結束，平時不花成本。
+	for _pass in 2:
+		var p0 := p
+		if not _buildings.is_empty():
+			p = _push_walls_px(p, r_px)
+		for bk in _blockers:
+			# ⚠ 深水圍欄的 h 登記成 0.0（它不擋子彈），但它擋人——不能被當成「矮到可以踩過去」。
+			#   高度欄位在這裡有兩種語意，必須用 k 區分，否則新規則會把海當平地。
+			if float(bk.get("h", 1.2)) <= STEP_UP and String(bk.get("k", "")) != "deepwater":
+				continue          # 矮障礙用「踩上去」處理（_ground_height），不水平推
+			# 粗剔除：外接框都碰不到就不必算
+			if not _blk_aabb(bk).grow(r_px).has_point(p):
 				continue
-			closest = Geometry2D.get_closest_point_to_segment(p, bk["a"], bk["b"])
-		var away: Vector2 = p - closest
-		var d: float = away.length()
-		if d < need:
-			p = closest + (away / d if d > 0.0001 else Vector2.RIGHT) * need
-	# 載具＝3m 級的鋼鐵，人不可能從中間穿過去（被撞的一方是人，坦克不讓路）
-	for v in units:
-		if v == ignore or not Unit.is_vehicle_cls(v["cls"]) or not is_instance_valid(v["node"]):
-			continue
-		var vp := Vector2(v["node"].global_position.x / WORLD_SCALE + mw * 0.5,
-				v["node"].global_position.z / WORLD_SCALE + mh * 0.5)
-		var need_v: float = r_px + VEHICLE_R / WORLD_SCALE
-		var away_v: Vector2 = p - vp
-		var dv: float = away_v.length()
-		if dv < need_v:
-			p = vp + (away_v / dv if dv > 0.0001 else Vector2.RIGHT) * need_v
+			p = _blk_push(bk, p, r_px)
+		# 載具＝3m 級的鋼鐵，人不可能從中間穿過去（被撞的一方是人，坦克不讓路）
+		for v in units:
+			if v == ignore or not Unit.is_vehicle_cls(v["cls"]) or not is_instance_valid(v["node"]):
+				continue
+			p = _blk_push(_vehicle_obb(v), p, r_px)
+		if p.distance_squared_to(p0) < 0.000001:
+			break
 	return Vector3((p.x - mw * 0.5) * WORLD_SCALE, pos.y, (p.y - mh * 0.5) * WORLD_SCALE)
 
 # 路徑是否走得通（AI09 尋路）：沿線每 0.6m 取樣，只要有一點會被實體推開就算不通。
@@ -4875,7 +5033,7 @@ func _open_spot(clears: Array, away_from_foes := 0.0) -> Vector2:
 								break
 				if not bad and cr > 0.0:
 					for bk2 in _blockers:
-						var pc: Vector2 = bk2["c"] if bk2["t"] == "cir" 								else Geometry2D.get_closest_point_to_segment(cand, bk2["a"], bk2["b"])
+						var pc: Vector2 = _blk_closest(bk2, cand)
 						if cand.distance_to(pc) < cr:
 							bad = true
 							break
@@ -5373,15 +5531,26 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 			continue
 		var sc: float = rng.randf_range(0.30, 1.9)
 		var ty: float = terrain.height_at(px, py)
+		# ⚠ 縮放係數要留下來：碰撞半徑與高度必須跟**畫出來的那顆石頭**一致，
+		#   不能用 sc 亂猜（先前 r 寫 sc*0.9、h 寫 sc*1.0，兩個都不是實際尺寸）。
+		var rx: float = rng.randf_range(0.8, 1.4)
+		var ry: float = rng.randf_range(0.5, 0.8)
 		var b := (Basis(Vector3.UP, rng.randf() * TAU)
 				* Basis(Vector3(1, 0, 0), rng.randf_range(-0.25, 0.25))).scaled(
-				Vector3(sc * rng.randf_range(0.8, 1.4), sc * rng.randf_range(0.5, 0.8), sc))
+				Vector3(sc * rx, sc * ry, sc))
 		# 半埋：底部沉進地面 1/3，石頭才是「長在地裡」不是「擺在地上」
 		xfs.append(Transform3D(b, Vector3((px - gwp * 0.5) * WORLD_SCALE,
 				ty + sc * 0.28, (py - ghp * 0.5) * WORLD_SCALE)))
-		if sc > 0.7:
-			_blockers.append({"t": "cir", "c": tp, "r": sc * 0.9 / WORLD_SCALE, "h": sc * 1.0})
-			_covers.append({"wx": px, "wy": py, "r": sc * 0.95 / WORLD_SCALE,
+		# ★2026-07-27：門檻原本是 sc > 0.7，於是**半徑近 1m 的石頭完全沒有碰撞**——
+		#   人直接走過去。石頭是石頭，不管大小都不能穿過（鐵律 0①）。
+		#   矮的（≤ STEP_UP）由 _ground_height 給頂面支撐＝踩上去，不是繞過去。
+		# 幾何：SphereMesh 半徑 1.0、高 1.5，再乘上面的縮放；埋進地裡 sc*0.28 之上。
+		var rock_r: float = sc * maxf(rx, 1.0)                    # 水平半徑（公尺）
+		var rock_h: float = sc * (0.28 + 0.75 * ry)               # 露出地面的高度
+		if sc > 0.30:
+			_blockers.append({"t": "cir", "c": tp, "r": rock_r / WORLD_SCALE, "h": rock_h})
+		if rock_h > STEP_UP:
+			_covers.append({"wx": px, "wy": py, "r": rock_r * 1.05 / WORLD_SCALE,
 					"val": 0.5, "type": "sandbag"})
 		placed += 1
 	if xfs.is_empty():
@@ -5630,7 +5799,7 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			blocked = true      # 壕溝與水裡不長樹（實拍海灘的樹站在海面上）
 		if not blocked:
 			for bk in _blockers:
-				var cq: Vector2 = bk["c"] if bk["t"] == "cir" 						else Geometry2D.get_closest_point_to_segment(tp, bk["a"], bk["b"])
+				var cq: Vector2 = _blk_closest(bk, tp)
 				if tp.distance_to(cq) < 2.2 / WORLD_SCALE:
 					blocked = true
 					break

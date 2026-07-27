@@ -857,10 +857,33 @@ const GRAVITY := 9.81          # m/s²，真實重力（鐵律 0：量級用現�
 const CLIMB_SPEED := 2.4       # 上坡被地面抬起的速度上限（m/s）
 var _fall_v := 0.0             # 目前垂直速度（往下為負）
 
+# 車體半長／半寬（同 Main.VEHICLE_HL / VEHICLE_HW，改一邊要改兩邊）
+const VEH_HL := 3.00
+const VEH_HW := 1.75
+
+# 支撐高度。步兵是一雙腳＝取一個點就夠；載具是 6.0×3.5m 的鋼板，
+# 只取車心的話地形一有起伏，車頭或車尾就會插進土裡（鐵律 0①：固體不可互穿）。
+# 取「車心」與「四角平均」的較高者：
+#   平面斜坡 → 四角平均＝車心，維持原樣（傾斜會把兩端補回去）
+#   凹地（車身橫跨一個坑）→ 平均較高，車被撐起來，不會沉進坑裡
+#   凸丘（車跨在峰上）→ 平均較低，仍然踩在峰頂，兩端懸空＝現實就是這樣
+func _support_height() -> float:
+	var gy: float = float(ground_sampler.call(global_position))
+	if not _is_vehicle:
+		return gy
+	var f: Vector3 = facing_dir()
+	var r := Vector3(f.z, 0.0, -f.x)
+	var sum := 0.0
+	for sa in [-1.0, 1.0]:
+		for sb in [-1.0, 1.0]:
+			sum += float(ground_sampler.call(
+					global_position + f * (VEH_HL * sa) + r * (VEH_HW * sb)))
+	return maxf(gy, sum * 0.25)
+
 func _stick_to_ground(delta: float) -> void:
 	if not ground_sampler.is_valid():
 		return
-	var gy: float = ground_sampler.call(global_position)
+	var gy: float = _support_height()
 	var dy: float = global_position.y - gy
 	if dy > 0.02:
 		# 在地面上方＝自由落體
@@ -889,7 +912,14 @@ func _tilt_to_slope(delta: float) -> void:
 	#   當初關掉是怕跟趴姿骨骼互相抵銷，但趴姿寫的是**骨骼**、這裡寫的是**模型節點**，
 	#   兩者不同層，不會打架。真正要改的是取樣尺度：站著只佔一個腳掌，
 	#   趴著身體有 1.9m 長，靠 ±0.35m 取樣量不出他實際躺在什麼坡面上。
-	var n: Vector3 = _ground_normal(lerpf(0.35, 0.95, clampf(_prone, 0.0, 1.0)))
+	# ⚠ 取樣尺度必須配合物體自己的尺寸（鐵律 0④）：站著只佔一個腳掌用 0.35m，
+	#   趴著身體 1.9m 長用 0.95m，而**載具 6m 長**還用 0.35m 的話，量到的是地形雜訊
+	#   而不是車身真正跨過的那片坡——結果就是車身傾斜角不對、一端插進土裡
+	#   （2026-07-27 我自己的測試截圖拍到坦克埋在土丘裡）。
+	var samp: float = lerpf(0.35, 0.95, clampf(_prone, 0.0, 1.0))
+	if _is_vehicle:
+		samp = VEH_HL * 0.7
+	var n: Vector3 = _ground_normal(samp)
 	# 把坡面法線轉到角色的局部座標，才知道要往前後還是左右傾
 	var fwd: Vector3 = facing_dir()
 	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)

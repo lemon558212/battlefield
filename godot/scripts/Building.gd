@@ -258,11 +258,22 @@ func _furnish(half: Vector2, im: BaseMaterial3D, fm: BaseMaterial3D) -> void:
 				furniture.append({"lx": bx, "lz": bz, "r": 0.9, "val": 0.5})
 				solids_local.append([bx, bz, bs * 0.72, bs * 1.35])  # 木箱堆（有時疊兩層）
 		# 翻倒的桌子：被打過的房子不會桌椅整齊
+		# ⚠ 2026-07-27：這張桌子**畫了卻沒登記碰撞**，是純裝飾——人直接穿過去。
+		#   立起來 84° 之後高度到 1.12m、正面 0.8m 寬，那是一面實實在在的擋板，
+		#   而且是室內最典型的半身掩體。畫得出來的東西就要擋得住人（鐵律 0①）。
 		var ox: float = rng.randf_range(-half.x * 0.6, half.x * 0.6)
 		var oz: float = rng.randf_range(-half.y * 0.6, half.y * 0.6)
+		for _try2 in 8:
+			if not _blocks_aisle(ox, oz, 0.42):
+				break
+			ox = rng.randf_range(-half.x * 0.75, half.x * 0.75)
+			oz = rng.randf_range(-half.y * 0.75, half.y * 0.75)
 		_emit_box("floor", fm, Vector3(1.4, 0.08, 0.8),
 				Transform3D(Basis(Vector3.FORWARD, deg_to_rad(84.0)).rotated(Vector3.UP, rng.randf() * TAU),
 				Vector3(ox, y0 + 0.42, oz)))
+		if f == 0 and not _blocks_aisle(ox, oz, 0.42):
+			furniture.append({"lx": ox, "lz": oz, "r": 0.8, "val": 0.40})
+			solids_local.append([ox, oz, 0.42, 1.12])
 
 # 一面牆：把門窗缺口扣掉後，剩下的實心段才建幾何、才登記進 walls
 # 牆腳碎料：沿四邊隨機丟幾塊小石/水泥塊，把「牆與地面的那條直線」打散。
