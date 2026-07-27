@@ -1,0 +1,4 @@
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+warn: Decoded EXT_meshopt_compression. Further compression will be lossy.
+info: 459cfa82-14fa-4cb5-9d13-2ab0a247d9c8_782fe4754375fec17dd51f6238e09cdb.glb (14.67 MB) → tripo_han.glb (3.23 MB)

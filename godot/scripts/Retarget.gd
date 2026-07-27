@@ -21,6 +21,8 @@ const MAP := {
 # 同一套 Quaternius 骨架在不同包裡手骨名不同（Hand.R / Wrist.R），找不到就試替代名
 const ALT := {"Hand.L": "Wrist.L", "Hand.R": "Wrist.R"}
 
+static var DBG := OS.get_cmdline_user_args().has("ikdbg")
+
 var _src: Skeleton3D
 var _dst: Skeleton3D
 var _pairs: Array = []      # [src_idx, dst_idx]
@@ -112,10 +114,30 @@ func apply() -> void:
 	for p in _detached:
 		_copy_position(p[0], p[1])
 
-# 解析式雙骨 IK（含極向量約束肘部朝向）。
-# CCD 沒有肘部約束，會收斂到「手臂扭轉一圈」的怪解——蒙皮會塌成一條細長怪物（2026-07-25 實測）。
-# 此版本先把手臂指向目標，再依 pole 指定的方向把肘彎到正確的解。
-func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vector3, pole_world: Vector3) -> bool:
+# 解析式雙骨 IK。
+#
+# ★★2026-07-27 重寫（使用者第四輪「手臂與武器不見」的真因）：
+#   舊版是「疊加式」——① 把整條手臂指向目標 ② 用餘弦定理彎肘 ③ **繞手臂軸把肘轉到極向量側**
+#   ④ 前臂補齊。骨頭數字全部是對的（實測骨長不變、手誤差 0.00000、無縮放），
+#   但畫面上手臂是一根細針、上臂整段不見。
+#   真因是**線性混合蒙皮的 candy-wrapper 塌陷**：步驟 ③ 那一下最多繞骨軸扭 180°，
+#   而父骨（Shoulder）沒有跟著扭 → 上臂靠近肩膀那圈頂點在「肩的朝向」與「上臂的朝向」
+#   之間做線性內插，兩者相差 180° 時內插結果全部縮到骨軸上＝肉沒了。
+#   ⚠ 教訓：骨骼數值正確 ≠ 蒙皮正確。驗 IK 一定要看**渲染出來的圖**，
+#     量骨長／手誤差在這種錯誤下 100% 通過。
+#
+# 現版是「解析式」：直接算出肘該在的座標，再對上臂、前臂各下**一次最小扭轉的擺動**
+#   （`Quaternion(from, to)` 本身就是最短弧＝零額外扭轉），全程不繞骨軸旋轉，
+#   所以不可能再產生 candy-wrapper。
+#
+# `shoulder`/`shoulder_k`：讓肩（鎖骨）骨分攤一部分擺動。
+#   即使是純擺動，只要上臂相對肩骨轉了接近 180°，肩關節那一圈的蒙皮頂點就會在
+#   兩個相反朝向之間做線性內插 → 平均起來長度趨近 0，整段肉塌成一片破碎的薄片
+#   （2026-07-27 實拍：右臂修好後左臂仍是一片鋸齒狀薄板，因為左臂要從 rest 的
+#   「往左外側」橫越到槍的前護木，擺動角遠大於右臂）。
+#   人真的做這動作時肩膀本來就會跟著轉，所以把一部分角度交給肩骨既治病又更真實。
+func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vector3,
+		pole_world: Vector3, shoulder: String = "", shoulder_k: float = 0.0) -> bool:
 	var ui := _dst.find_bone(upper)
 	var li := _dst.find_bone(lower)
 	var hi := _dst.find_bone(hand)
@@ -125,6 +147,18 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	var to_skel := xf.affine_inverse()
 	var target: Vector3 = to_skel * target_world
 	var pole: Vector3 = (to_skel.basis * pole_world).normalized()
+
+	# 0) 肩骨先分攤：以「肩→手」轉到「肩→目標」所需的擺動，取 shoulder_k 比例套在肩骨上。
+	if shoulder != "" and shoulder_k > 0.001:
+		var sh_i := _dst.find_bone(shoulder)
+		if sh_i >= 0:
+			var a0: Vector3 = _dst.get_bone_global_pose(ui).origin
+			var c0: Vector3 = _dst.get_bone_global_pose(hi).origin
+			var from0: Vector3 = c0 - a0
+			var to0: Vector3 = target - a0
+			if from0.length() > 0.000001 and to0.length() > 0.000001:
+				var q0 := Quaternion(from0.normalized(), to0.normalized())
+				_rotate_bone(sh_i, Quaternion.IDENTITY.slerp(q0, clampf(shoulder_k, 0.0, 1.0)))
 
 	var a: Vector3 = _dst.get_bone_global_pose(ui).origin
 	var b: Vector3 = _dst.get_bone_global_pose(li).origin
@@ -146,48 +180,42 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 	var d: float = clampf(to_t.length(), absf(l1 - l2) + reach * 0.02, reach * 0.98)
 	var dir := to_t.normalized()
 
-	# 1) 先讓整條手臂指向目標
-	# ⚠⚠ 這裡曾經是「跑步時手臂與武器整個消失」的真兇（使用者 2026-07-27 截圖）：
-	#   手臂完全折疊時 c（手）會落回 a（肩）附近，(c-a).normalized() 變成零向量，
-	#   Quaternion(零向量, dir) 產出 NaN → 骨骼 global pose 變 NaN →
-	#   蒙皮頂點跑到無限遠＝**整條手臂連同掛在手上的槍一起從畫面上消失**（身體還在）。
-	#   NaN 一旦寫進骨架就會沿著子骨傳下去，所以退化情況一定要在寫入前擋掉。
-	var arm_vec: Vector3 = c - a
-	if arm_vec.length() < eps:
-		return false
-	_rotate_bone(ui, Quaternion(arm_vec.normalized(), dir))
-	b = _dst.get_bone_global_pose(li).origin
-	c = _dst.get_bone_global_pose(hi).origin
-
-	# 2) 依餘弦定理把肘彎到該有的角度，彎曲平面由 pole 決定
+	# 1) 算出肘該在的世界（骨架空間）座標。
+	#    餘弦定理給「上臂與 dir 的夾角 want」，彎曲平面由極向量在垂直於 dir 的分量決定。
 	var want := acos(clampf((l1 * l1 + d * d - l2 * l2) / (2.0 * l1 * d), -1.0, 1.0))
-	var cur := acos(clampf((b - a).normalized().dot(dir), -1.0, 1.0))
-	# 同上：叉積的量級跟骨長成正比，門檻也要相對化
-	var axis: Vector3 = dir.cross(b - a)
-	if axis.length() < eps * 0.01:
-		axis = dir.cross(pole)
-	if axis.length() < eps * 0.01:
-		axis = dir.cross(Vector3.UP)
-	if axis.length() < eps * 0.01:
-		return false
-	_rotate_bone(ui, Quaternion(axis.normalized(), want - cur))
-	b = _dst.get_bone_global_pose(li).origin
-
-	# 2.5) 繞手臂軸旋轉，把肘部轉到極向量那一側。
-	# 少了這步，肘會停在數學上任意的一側——外觀就是手臂扭轉一圈、蒙皮塌成細長條。
-	var e_perp: Vector3 = (b - a) - dir * (b - a).dot(dir)
 	var p_perp: Vector3 = pole - dir * pole.dot(dir)
-	if e_perp.length() > eps * 0.01 and p_perp.length() > 0.0001:
-		e_perp = e_perp.normalized()
-		p_perp = p_perp.normalized()
-		var ang := atan2(e_perp.cross(p_perp).dot(dir), e_perp.dot(p_perp))
-		_rotate_bone(ui, Quaternion(dir, ang))
-		b = _dst.get_bone_global_pose(li).origin
+	if p_perp.length() < 0.0001:
+		# 極向量與手臂共線＝彎曲平面沒定義，隨便取一個與 dir 垂直的方向，別讓解爆掉
+		p_perp = dir.cross(Vector3.UP)
+		if p_perp.length() < 0.0001:
+			p_perp = dir.cross(Vector3.RIGHT)
+	p_perp = p_perp.normalized()
+	var elbow: Vector3 = a + dir * (l1 * cos(want)) + p_perp * (l1 * sin(want))
+
+	# 2) 上臂：從「目前肩→肘方向」擺到「肩→目標肘方向」，最短弧＝不帶額外扭轉。
+	#    ⚠ 退化保護：手臂完全折疊時 b 會落回 a，零向量進 Quaternion 會產出 NaN，
+	#      NaN 一旦寫進骨架就沿子骨傳下去，畫面上是整條手臂連同槍一起消失。
+	var up_cur: Vector3 = b - a
+	if up_cur.length() < eps * 0.01:
+		return false
+	_rotate_bone(ui, Quaternion(up_cur.normalized(), (elbow - a).normalized()))
+	b = _dst.get_bone_global_pose(li).origin
 	c = _dst.get_bone_global_pose(hi).origin
 
-	# 3) 前臂補齊，讓手落在目標
-	if (c - b).length() > eps * 0.01 and (target - b).length() > eps * 0.01:
-		_rotate_bone(li, Quaternion((c - b).normalized(), (target - b).normalized()))
+	# 3) 前臂：同樣一次最小扭轉的擺動，把手擺到目標
+	var lo_cur: Vector3 = c - b
+	var lo_want: Vector3 = target - b
+	if lo_cur.length() > eps * 0.01 and lo_want.length() > eps * 0.01:
+		_rotate_bone(li, Quaternion(lo_cur.normalized(), lo_want.normalized()))
+	if DBG:
+		var a2: Vector3 = _dst.get_bone_global_pose(ui).origin
+		var b2: Vector3 = _dst.get_bone_global_pose(li).origin
+		var c2: Vector3 = _dst.get_bone_global_pose(hi).origin
+		var sc_u: Vector3 = _dst.get_bone_global_pose(ui).basis.get_scale()
+		var sc_l: Vector3 = _dst.get_bone_global_pose(li).basis.get_scale()
+		print("[ik] %s l1=%.5f l2=%.5f |to_t|=%.5f d=%.5f want=%.1f | after l1=%.5f l2=%.5f err=%.5f scaleU=%s scaleL=%s"
+				% [upper, l1, l2, to_t.length(), d, rad_to_deg(want),
+				a2.distance_to(b2), b2.distance_to(c2), c2.distance_to(target), sc_u, sc_l])
 	return true
 
 # 對骨骼疊加一段「骨架空間」的旋轉（換算成該骨相對父骨的 local 姿勢）

@@ -175,6 +175,19 @@ var _crouch := 0.0             # 0=站 1=蹲（平滑過渡）
 func facing_dir() -> Vector3:
 	return Vector3(sin(rotation.y), 0.0, cos(rotation.y))
 
+# 角色自己的右手邊。
+# ⚠⚠ 絕不可用 `global_basis.x` 當「右」（2026-07-27 手臂塌陷的真因）：
+#   Godot 的 basis.x 是「正面為 -Z」慣例下的右方，而本專案的角色正面是 **+Z**，
+#   兩者剛好差 180°。實測 Shoulder.L 在 +X、Shoulder.R 在 -X，
+#   也就是 basis.x 指的是角色的**左**邊。
+#   後果：右肘的極向量被推到身體左側、左肘推到右側 → 兩條手臂都被逼著橫越胸腔，
+#   相對肩骨的擺動角接近 180°，線性混合蒙皮把那一圈頂點平均成長度 0 → 手臂消失。
+#   （Main.gd 的移動早在 50928ac 修過同一個錯，Unit.gd 這半邊當時沒跟著修。）
+# ⚠ 只用於「位置／方向」。當**旋轉軸**用的地方（俯仰、後座、抬槍）沿用 basis.x：
+#   那些角度是照著反的軸調出來的，換軸必須同時反號，等於白改。
+func right_dir() -> Vector3:
+	return facing_dir().cross(Vector3.UP)
+
 # tripo 系骨架(Hip/L_Upperarm/L_Thigh)網格正面朝 +X → 模型需轉 -90° 才對齊 +Z；
 # Quaternius 系(Hips/UpperArm.L)本就朝 +Z → 0。
 static func _forward_fix(model: Node) -> float:
@@ -1344,7 +1357,8 @@ func _aim_pose() -> void:
 	#   再把整個人降到地面高度。腿必須一起 orbit，因為它們掛在 Root 不跟髖部走。
 	if _prone > 0.001:
 		var fwd := facing_dir()
-		var rgt := global_basis.x.normalized()
+		var rgt := global_basis.x.normalized()        # 旋轉軸用（角度照這個軸調出來的）
+		var rgt_pos := right_dir()                    # ★位置用：大腿左右擺放，用錯會兩腿交叉
 		var hips: Vector3 = _rig.bone_pos("Hips")
 		# 軀幹：脊椎方向指向前上方（臥射是上身微抬、以雙肘撐地，不是整個人壓平）
 		_rig.point_bone("Hips", "Abdomen", (fwd * 0.92 + Vector3.UP * 0.39).normalized(), _prone)
@@ -1378,7 +1392,7 @@ func _aim_pose() -> void:
 			var ph: float = _crawl + (0.0 if sd == "L" else PI)
 			var ab: float = maxf(sin(ph), 0.0) * _crawl_amt      # 0=併攏 1=張到最開
 			_rig.place_bone("UpperLeg." + sd,
-					hips + rgt * sgn * (0.07 + 0.06 * ab) - fwd * 0.02, _prone)
+					hips + rgt_pos * sgn * (0.07 + 0.06 * ab) - fwd * 0.02, _prone)
 			# 大腿：由「正後方」在水平面往外轉（髖外展 12°→42°），全程貼地
 			var abd: float = deg_to_rad(PRONE_HIP_BACK
 					+ (PRONE_HIP_UP - PRONE_HIP_BACK) * ab)
@@ -1506,25 +1520,29 @@ func _aim_pose() -> void:
 	# 3) 兩手抓上槍（右手握把、左手前護木）＋手指握攏
 	# ★先把手臂鏈重置回 rest：IK 是疊加式的，直接疊在動畫的擺臂扭轉上會讓上臂
 	#   local 旋轉極端到蒙皮塌陷（畫面上手臂整條消失，只剩一小截手浮在槍上）。
-	# ⚠ 不要重置 Shoulder：上臂的蒙皮權重有一部分綁在肩骨上，把肩骨拉回 rest
-	#   會讓上臂網格留在原處、只有前臂跟著 IK 跑，看起來就是「上臂消失」。
-	_rig.reset_bones(["UpperArm.R", "LowerArm.R", _hand_r])
+	# ⚠ 肩骨現在也要重置：2026-07-27 起 ik_two_bone 會讓肩骨分攤一部分擺動，
+	#   而 _rotate_bone 是疊加式的。不是每支動畫都會 key 到 Shoulder，
+	#   沒 key 到的那幾支會逐幀累加，肩膀幾秒內就轉到背後去。
+	_rig.reset_bones(["Shoulder.R", "UpperArm.R", "LowerArm.R", _hand_r])
 	if not (_state in LEFTHAND_FREE):
-		_rig.reset_bones(["UpperArm.L", "LowerArm.L", _hand_l])
+		_rig.reset_bones(["Shoulder.L", "UpperArm.L", "LowerArm.L", _hand_l])
 	# 肘部極向量：兩肘都朝下外側，這是持槍的自然姿勢；沒有約束會扭成怪解
 	# 肘部極向量：⚠ 不可以只用「往下」——實拍放大看到肘被壓到臀部高度、前臂幾乎垂直，
 	# 遠景讀起來就是「沒有手臂」（使用者說的「跑步兩隻手不見」有一半是這個）。
 	# 真實持槍是肘部收在**肋骨高度的後外側**，所以極向量要含「往後」的成分。
 	var down := (-Vector3.UP * 0.5 - facing_dir() * 0.55).normalized()
-	var rightv := global_basis.x.normalized()
+	var rightv := right_dir()          # ★位置用途，必須是真正的右邊（見 right_dir 註解）
 	# ⚠⚠ 肘部極向量必須把手肘推到**身體輪廓之外**（使用者 2026-07-27 第二次指正
 	#   「還是沒有手臂」的真因）。舊值只有「下＋外」，握把離肩膀只有 0.35m、
 	#   手臂卻有 0.55m，手肘一定要折出去；缺少「往後」的分量時它就折進胸腔，
 	#   從背後看＝軀幹上直接長出一把槍和兩隻手，上臂前臂整段藏在身體剪影裡。
 	#   真實抵肩射擊的右肘是「外展、略微下垂、明顯在身體後方」。
-	var back: Vector3 = -facing_dir()
+	# ⚠ 2026-07-27 再修：舊極向量「往後」的合成分量（0.88）比「往外」（0.72）還大，
+	#   肘被推到軀幹正後方 → 正面看整條上臂藏在身體剪影裡，只剩兩隻手浮在槍上（實拍證實）。
+	#   實際抵肩射擊的持槍肘是**明顯向側外抬起**，往後只是輔助。改成以外展為主。
 	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip,
-			(down * 0.45 + rightv * 0.72 + back * 0.55).normalized())
+			(rightv * 0.95 - Vector3.UP * 0.34 - facing_dir() * 0.22).normalized(),
+			"Shoulder.R", 0.30)
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
 	# 匍匐時左手離開前護木，往前撐地拉行（右手仍握把把槍拖著走）。
 	# ★這是趴姿唯一「看得見」的推進動作——腿在身體後方被身體與草擋住，
@@ -1545,9 +1563,18 @@ func _aim_pose() -> void:
 		#   （使用者 2026-07-26 指正）。右臂朝右外側，兩邊是鏡像。
 		# 左肘：托前護木的手肘是「往下、略微內收、在身體前下方」——
 		# 跟右肘鏡像但不對稱，這是抵肩姿勢的實際樣子。
+		# 托前護木的手肘＝**明顯往下**、略往左外側；朝後的分量會把它塞進軀幹（同右肘）。
 		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore,
-				(down * 0.80 - rightv * 0.50 + facing_dir() * 0.25).normalized())
+				(-Vector3.UP * 0.62 - rightv * 0.74 + facing_dir() * 0.10).normalized(),
+				"Shoulder.L", 0.42)
 		_rig.curl_fingers(".L", 0, 55.0, 35.0)
+	# ★★收尾一定要強制刷新骨架（2026-07-27，左臂撕裂的真因，查了四輪）。
+	#   本函式是在 `skeleton_updated` 訊號「裡面」改骨頭的，蒙皮矩陣已經為這一幀算過；
+	#   最後寫入的那條鏈（左臂晚於右臂）趕不上，於是**一部分頂點跟著骨頭、
+	#   一部分留在 rest**，畫面上就是兩條從手肘拉到 A-pose 位置的長薄片。
+	#   ⚠ 這種錯誤下所有骨骼指標都正常（骨長不變、手誤差 0、無縮放、無鏡像、
+	#     相對 rest 的角度左右對稱），只有**看渲染結果**才抓得到。
+	sk.force_update_all_bone_transforms()
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf
 	_gun_src_world = pocket
@@ -1561,7 +1588,7 @@ func _stow_gun(sk: Skeleton3D) -> void:
 		return
 	var chest: Vector3 = sk.global_transform * sk.get_bone_global_pose(ci).origin
 	var fwd := facing_dir()
-	var rightv := global_basis.x.normalized()
+	var rightv := right_dir()          # ★位置用途：槍要斜背在右肩，用 basis.x 會背到左肩
 	var anchor: Vector3 = chest - fwd * 0.15 + Vector3.UP * 0.02
 	var axis: Vector3 = (Vector3.UP * 0.72 + rightv * 0.62).normalized()   # 槍口朝右上斜掛
 	var z_axis := axis.cross(fwd).normalized()

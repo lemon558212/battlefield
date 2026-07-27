@@ -1,0 +1,143 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+[selftest] saved res://qa/st_menu.png
+[selftest] saved res://qa/st_brief.png
+[selftest] saved res://qa/st_dialogue1.png
+[selftest] saved res://qa/st_dialogue2.png
+[rig] mg 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] assault 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] engineer 重定向骨對數=20
+[selftest] saved res://qa/st_deploy.png
+[selftest] saved res://qa/st_battle.png
+[facechk] move=(200,0) 正面與移動夾角=0.0度 OK
+[facechk] move=(-200,0) 正面與移動夾角=0.0度 OK
+[facechk] move=(0,200) 正面與移動夾角=2.5度 OK
+[facechk] move=(0,-200) 正面與移動夾角=0.0度 OK
+[movechk] 合成點擊選取 selected=OK
+[movechk] 點兵後進入第三人稱 OK
+[movechk] 第三人稱前進位移=2.18m OK
+[apchk] 下令扣 CP：本回合上限=6 現在=5 OK
+[apchk] 進入行動模式 acting=有 AP=69/100 OK
+[selftest] saved res://qa/ap_mode.png
+[apchk] AP 上限內移動：可走 10.3m 實走 9.0m 剩餘 AP=0 FAIL
+[apchk] 每次行動只能開火一次 fired=true OK
+[apchk] 重複下令 AP 上限 100→70（應為 0.7 倍） OK
+[apchk] 結束行動 acting=無 OK
+[coverchk] 沙包正面遮蔽=0.55 OK
+[coverchk] 繞背後遮蔽=0.00 OK
+[coverchk] 空曠地遮蔽=0.00 OK
+[coverchk] 掩體旁自動蹲姿 crouch=1.00 OK
+[selftest] saved res://qa/cover_crouch.png
+[coverchk] 移動中站起 crouch=0.00 OK
+[selftest] saved res://qa/close_stand.png
+[selftest] saved res://qa/close_crouch.png
+[pronechk] 兵種=sniper 掩體= want_prone=true OK
+[pronechk] 趴姿混合值=1.00 OK
+[selftest] saved res://qa/close_prone.png
+[pronechk] 解除後起身=0.00 OK
+[selftest] saved res://qa/close_alert.png
+[alertchk] 敵人移動遭迎擊 次數=4 OK
+[alertchk] 迎擊有扣血 120→93 OK
+[alertchk] 狙擊手(sniper,alert=false)不參與警戒 OK
+[alertchk] 建築擋視線 穿過牆被擋=true 從旁邊繞過看得到=true OK
+[aiplanchk] rifleman hp=100% → 推進到射程 0.6 倍 OK
+[aiplanchk] rifleman hp=20% → 殘血撤退 OK
+[aiplanchk] sniper hp=100% → 狙擊手找血最少的 OK
+[aiplanchk] mg hp=100% → 機槍兵佔掩體警戒 OK
+[aiplanchk] at hp=100% → 火箭兵無坦克可打 OK
+[aiplanchk] 狙擊手指名血最少者 是 OK
+[tankchk] 步槍打坦克=1（應為 1 刮漆） OK
+[tankchk] 火箭打坦克=150 步槍打步兵=20 OK
+[tankchk] 火箭打步兵=106（有 ×0.6 濺傷減半） OK
+[tankchk] 坦克下令成本=2 CP OK
+[tankchk] 坦克警戒用 lmg(atk 14) 而非主砲(atk 220) OK
+[selftest] saved res://qa/tank_ingame.png
+[tankchk] 坦克在遊戲內生成並移動 1.8m OK
+[partchk] 頭部命中 95%→52%（應為 0.55 倍） OK
+[partchk] 頭部傷害 83→165（應為 2 倍） OK
+[partchk] 散熱器傷害 150→450（應為 3 倍） OK
+[partchk] 正面可選部位=1 背面=2 OK
+[partchk] 點敵人跳出射擊面板 OK
+[selftest] saved res://qa/fire_panel.png
+[partchk] 點部位後真的開火 fired=true 面板已關=true OK
+[terrainchk] 壕溝內 -1.67m vs 溝外 0.09m（應低於 1m 以上） OK
+[terrainchk] 壕溝登記為掩體 OK
+[terrainchk] 單位在溝內高度 -1.67m（應貼著溝底 -1.67m） OK
+[terrainchk] 溝內自動取得掩體 cover=trench OK
+[selftest] saved res://qa/terrain_trench.png
+[terrainchk] 這張圖(tutorial)沒有 hills 資料，只有基礎起伏
+[fortdiag] 沙包中心 px=(702,476) w=44 h=12
+[selftest] saved res://qa/fort_sandbag.png
+[selftest] saved res://qa/fort_trench.png
+[selftest] saved res://qa/terrain_overview.png
+[buildingchk] 牆段=13 門=1 窗=3 樓層=2 OK
+[buildingchk] 牆擋視線 穿越=true 從旁邊過=true OK
+[buildingchk] 牆推開人 0.56m、門口不推 0.00m OK
+[solidchk] 對著牆走 4 秒：進到室內=false OK(牆是實體)
+[selftest] saved res://qa/solid_wall.png
+[solidchk] 對著門走 4 秒：進到室內=true OK(門是唯一入口)
+[buildingchk] 進屋後屋頂淡出 alpha=0.00 OK
+[selftest] saved res://qa/bld_ingame.png
+[selftest] saved res://qa/bld_ingame_out.png
+[solidchk] 對著障礙走 5 秒：走了 4.54m、停在前方 0.62m、越過=false、剩餘AP=253 OK(擋住了)
+[selftest] saved res://qa/solid_prop.png
+[solidchk] 對著坦克走 5 秒：空地=true 停在車體外 2.38m、剩餘AP=264 OK(載具是實體)
+[selftest] saved res://qa/solid_tank.png
+[sandchk] 對著沙包走 5 秒：走了 4.28m、停在沙包前 0.72m、越過=false OK(沙包是實體)
+[selftest] saved res://qa/solid_sandbag.png
+[sandchk] 沙包高 1.32m 彈道：站軀幹=false(應false) 站頭部=true(應true) 蹲=false(應false) 同側=true(應true) OK(擋子彈且瞄頭仍打得到)
+[clipchk] 貼牆 4 秒：身體中心離牆面 0.44m 進到室內=false OK(人沒進牆)
+[clipchk] 槍：抵肩→槍口穿過固體比例 t=1.00（1＝沒穿）槍口在室內=false 抬槍量=68.09 OK(槍沒插進牆)
+[selftest] saved res://qa/clip_wall.png
+[physchk] 從 3m 落地：實測 0.77s 理論 0.78s OK(自由落體)
+[physchk] 站在 54 度的坡上：身體軸與坡面法線夾角 32.3 度 OK(身體跟著坡傾斜)
+[selftest] saved res://qa/phys_slope.png
+[navchk] 穿過障礙的直線可行=false（應為 false） OK
+[navchk] 繞路後換了方向=true、新路徑可行=true OK(會繞開)
+[camchk] 貼牆時鏡頭離頭 2.53m、肩側=+1.00（-1=左肩） OK(沒被牆擠到臉上)
+[selftest] saved res://qa/cam_wall.png
+[crawlchk] 測試地點在室內=false OK(在戶外空地)
+[selftest] saved res://qa/crawl_1.png
+[selftest] saved res://qa/crawl_side1.png
+[selftest] saved res://qa/crawl_2.png
+[selftest] saved res://qa/crawl_side2.png
+[selftest] saved res://qa/crawl_3.png
+[selftest] saved res://qa/crawl_side3.png
+[crawlchk] 趴著走 2.1 秒：位移 1.36m、動畫=idle、髖高 0.26m OK(是匍匐不是趴著跑)
+[crawlchk] 膝蓋外張量 0.19/0.10/0.15 m（差 0.10） OK(雙腿在交替蹬地)
+[crawlchk] 右膝相對髖部前後 -0.31/-0.41/-0.41 m（正=在前方蹬地） FAIL(膝蓋往側後張＝剪刀腳)
+[crawlchk] 左手前伸距離 0.89/0.50/0.41 m（擺幅 0.48） OK(手在往前撐地拉行)
+[crawlchk] 右膝(動力腿)彎曲角 44/16/16 度（0=伸直，最大 44） OK(膝蓋真的有彎)
+[crawlchk] 每段位移 min=0.041 max=0.194 落差=4.8倍 OK(一蹬一停，不是等速滑行)
+[crawlchk] 連續走 3.5 秒後 趴姿值=0.00、髖高 0.41m（趴著是 0.26） OK(自動起身了)
+[selftest] saved res://qa/crawl_standup.png
+[keychk] 方向鍵↑ 走 1 秒位移 3.01m OK
+[keychk] Q 轉視角 57 度 OK
+[selftest] saved res://qa/key_prone.png
+[keychk] C 蹲=1.00 → Z 趴=1.00 → Space 站起(蹲+趴)=0.00 OK(三個姿勢鍵都有效)
+[selftest] saved res://qa/ai_turn.png
+[aichk] 敵方 CP 起始=6 剩餘=2 OK
+[aichk] 敵方單位真的移動 4 個 OK
+[aichk] 敵方階段結束回到指令模式 st=5 耗時=24.9s OK
+[aichk] 新回合 CP=7 回合數=2 OK
+[selftest] saved res://qa/close_hit.png
+[anichk] 受擊動作 state=hit OK
+[selftest] saved res://qa/close_death.png
+[anichk] 陣亡倒地 頭高 0.28→0.13 OK
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[selftest] saved res://qa/perf16.png
+[perf] units=16 平均幀時=5.9ms (169 FPS) OK
+[selftest] DONE units=16

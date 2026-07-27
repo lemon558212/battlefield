@@ -1,0 +1,26 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+[armdiag] 模型=res://assets/models/chars/hr_w_Swat.fbx 存在=true
+[rig] sniper 重定向骨對數=20
+[armdiag] Shoulder.R   世界=(-0.082,1.316,-0.032) 縮放=(1.000,1.000,1.000)
+[armdiag] UpperArm.R   世界=(-0.138,1.346,-0.036) 縮放=(1.000,1.000,1.000)
+[armdiag] LowerArm.R   世界=(-0.070,1.256,0.101) 縮放=(1.000,1.000,1.000)
+[armdiag] Hand.R       世界=(-0.077,1.218,0.326) 縮放=(1.000,1.000,1.000)
+[armdiag] Shoulder.L   世界=(0.070,1.296,0.083) 縮放=(1.000,1.000,1.000)
+[armdiag] UpperArm.L   世界=(0.118,1.332,0.104) 縮放=(1.000,1.000,1.000)
+[armdiag] LowerArm.L   世界=(0.022,1.275,0.241) 縮放=(1.000,1.000,1.000)
+[armdiag] Hand.L       世界=(-0.051,1.252,0.456) 縮放=(1.000,1.000,1.000)
+[armdiag] Hips         世界=(0.002,0.832,0.024) 縮放=(1.000,1.000,1.000)
+[armdiag] Head         世界=(-0.013,1.489,0.066) 縮放=(1.000,1.000,1.000)
+[armdiag] mesh Swat_Body              可見=true 表面=3 skin=true AABB=[P: (-0.008377, -0.001936, 0.010301), S: (0.016755, 0.002602, 0.005499)]
+[armdiag] mesh Swat_Feet              可見=true 表面=1 skin=true AABB=[P: (-0.001916, -0.00278, -0.000014), S: (0.003831, 0.002789, 0.00288)]
+[armdiag] mesh Swat_Head              可見=true 表面=3 skin=true AABB=[P: (-0.001187, -0.001919, 0.01482), S: (0.002374, 0.002757, 0.003704)]
+[armdiag] mesh Swat_Legs              可見=true 表面=2 skin=true AABB=[P: (-0.002035, -0.001739, 0.002204), S: (0.00407, 0.002384, 0.00839)]
+[armdiag] mesh @MeshInstance3D@6      可見=true 表面=5 skin=false AABB=[P: (-2.043425, -0.78785, -0.154958), S: (7.294633, 1.483973, 0.45931)]
+[armdiag] mesh Mannequin              可見=false 表面=2 skin=true AABB=[P: (-0.972227, 0.000461, -0.164154), S: (1.944454, 1.828717, 0.369598)]
+[armdiag] mesh Ring                   可見=true 表面=1 skin=false AABB=[P: (-0.72, -0.05, -0.72), S: (1.44, 0.1, 1.44)]
+[armdiag] mesh @MeshInstance3D@7      可見=true 表面=1 skin=false AABB=[P: (-0.7, -0.5, 0.0), S: (1.4, 1.0, 0.0)]
+[armdiag] 無瞄準時 上臂→手 距離=0.0040（骨架空間）
+[armdiag] DONE
