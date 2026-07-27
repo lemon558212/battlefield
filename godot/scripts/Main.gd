@@ -109,6 +109,7 @@ const LOWGRID_PX := 100.0            # 格子邊長（px）＝5m
 var _low_grid := {}                  # Vector2i(格) -> Array[矮障礙]
 var _has_support := false
 var _tree_feet: Array = []             # 樹腳位置（px）：Terrain 在樹底補草做過渡
+const MAX_BUILDINGS := 24              # 一張圖最多幾棟可進入建築（村莊/街廓要用到十幾棟）
 const BODY_R := 0.42                   # 步兵肩寬半徑
 # ⚠ 2026-07-27 使用者實測：「從戰車後面可以穿過車尾走到車子中間」。
 #   真因＝載具的碰撞是**一個半徑 1.6m 的圓**，而車體是 3.1m 寬 × 6.0m 長的長方形：
@@ -198,7 +199,12 @@ func _click_btn(txt: String) -> bool:
 func _mapshots() -> void:
 	await get_tree().create_timer(0.6).timeout
 	ui.root.visible = false      # 主選單 UI 會整面蓋住場景（第一輪拍出來全是選單）
+	# 只拍章節圖（ch01~ch15）；舊的 10 張是自由模式用的，不必每次都拍。
+	# 用 `-- mapshots all` 才拍全部。
+	var only_ch: bool = not ("all" in OS.get_cmdline_user_args())
 	for id in GameData.maps.keys():
+		if only_ch and not String(id).begins_with("ch"):
+			continue
 		map_data = GameData.maps[id]
 		_teardown_world()
 		await get_tree().process_frame
@@ -5599,11 +5605,15 @@ func _build_ground() -> void:
 	_tree_feet = []
 	var solids = map_data.get("solids", [])
 	if solids is Array:
+		# ⚠ 2026-07-28：上限原本寫死 6 棟。第四章是**村莊**（13 棟民宅）、
+		#   第十四章是首都圈街廓（18 棟）——6 棟的村莊不是村莊。
+		#   上限拉到 24 並改成「超過才喊」，實際幀時由 [perf] 把關。
 		var i := 0
 		for sdef in solids:
-			if i >= 6:
-				push_error("[bldskip] 超過 6 棟上限，略過 %s" % String(sdef.get("note", "?")))
-				print("[bldskip] FAIL 超過 6 棟上限 → ", String(sdef.get("note", "?")))
+			if i >= MAX_BUILDINGS:
+				push_error("[bldskip] 超過 %d 棟上限，略過 %s"
+						% [MAX_BUILDINGS, String(sdef.get("note", "?"))])
+				print("[bldskip] FAIL 超過上限 → ", String(sdef.get("note", "?")))
 				break
 			# ⚠⚠ 2026-07-27：這一行曾經**靜默吃掉兩棟劇情建築**（武器庫、鐘樓）——
 			#   40px 邊界讓 x 570~710 的建築被 x 740 起的部署區判定成重疊。
@@ -6089,7 +6099,19 @@ func _build_deepwater_fence() -> void:
 	# ⚠ 一根樁都沒有時要大聲喊：深水圍欄「登記了卻從來沒生效」是本專案的舊病，
 	#   症狀是玩家可以走進外海，而測試看起來一片安靜。
 	if n == 0:
-		push_error("[water] 深水圍欄一根樁都沒立（這張圖真的沒有深過 %.2fm 的水嗎？）" % WADE_MAX)
+		# 只有「資料上宣告過比涉水上限更深的水」卻立不出樁，才是真的壞掉。
+		# 第二章的小溪只有 0.8m 深，本來就不該有圍欄——那不是錯誤。
+		var declared_deep := false
+		var co = map_data.get("coast", null)
+		if co != null and float(co.get("depth", 0.0)) > WADE_MAX:
+			declared_deep = true
+		for rv2 in map_data.get("rivers", []):
+			if float(rv2.get("depth", 0.0)) > WADE_MAX:
+				declared_deep = true
+		if declared_deep:
+			push_error("[water] 宣告了深過 %.2fm 的水，卻一根樁都立不出來" % WADE_MAX)
+		else:
+			print("[water] 這張圖沒有深過 %.2fm 的水，不需要深水圍欄" % WADE_MAX)
 	else:
 		print("[water] 深水圍欄 %d 根樁（水深 > %.2fm 的邊界）" % [n, WADE_MAX])
 

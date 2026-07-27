@@ -62,6 +62,10 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"brick": BattleMats.pbr("RedBrick", 1.6, 0.96, Color(1.30, 1.10, 0.98)),
 		"brick2": BattleMats.pbr("RedBrick", 1.6, 0.97, Color(1.05, 0.86, 0.76)),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
+		"steel": _mat(Color(0.42, 0.44, 0.46), 0.55),
+		"cargo1": _mat(Color(0.55, 0.24, 0.18), 0.88),
+		"cargo2": _mat(Color(0.18, 0.36, 0.44), 0.88),
+		"cargo3": _mat(Color(0.52, 0.48, 0.22), 0.88),
 		# 地面痕跡專用（2026-07-27 使用者：「深色小方塊，還要更淡」）：
 		# 先前借用 "dirt"＝柏油貼圖，比土地暗一大截，於是每一片都讀成一個深色方塊。
 		# 痕跡本來就只是「土被踩過、顏色深一點」，對比要小到幾乎看不出邊界。
@@ -74,6 +78,11 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	_poles(map_data)
 	_rubble(map_data)
 	_wrecks(map_data)
+	_wires(map_data)
+	_pillboxes(map_data)
+	_containers(map_data)
+	_quays(map_data)
+	_bridges(map_data)
 	_walls_brick(map_data)
 	_cables(map_data)
 	_scorch(map_data)
@@ -379,6 +388,175 @@ func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false) -> v
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
 	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen,
 			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
+
+
+# ---------- 劇本要求的地形元素（2026-07-28）----------
+# 使用者：「該出現什麼就要有什麼」。以下是劇本明講、引擎先前完全沒有的幾件。
+
+# 鐵絲網：樁 + 三條刺線 + 交叉線。
+# 物理上它**擋人但不擋子彈**（pen=true）——這正是鐵絲網的戰術意義：
+# 它不保護你，它只是把你留在機槍的射界裡。高度 1.0m（跨不過去）。
+func _wires(m: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5150
+	for w in m.get("wires", []):
+		var pts: Array = w.get("pts", [])
+		if pts.size() < 2:
+			continue
+		var hgt: float = float(w.get("h", 1.0))
+		for i in range(pts.size() - 1):
+			var a := Vector2(float(pts[i][0]), float(pts[i][1]))
+			var b := Vector2(float(pts[i + 1][0]), float(pts[i + 1][1]))
+			var seg_len: float = a.distance_to(b)
+			if seg_len < 1.0:
+				continue
+			var n: int = maxi(2, int(seg_len * _ws / 2.2))
+			var dirv: Vector2 = (b - a).normalized()
+			var ang: float = atan2(dirv.y, dirv.x)
+			for k in range(n + 1):
+				var q: Vector2 = a.lerp(b, float(k) / float(n))
+				if _off_limits(q):
+					continue
+				var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.12, 0.12))
+				_box("steel", Vector3(0.07, hgt, 0.07), Transform3D(lean, _pos(q.x, q.y, hgt * 0.5)))
+			var mid_p: Vector2 = (a + b) * 0.5
+			for lvl in [0.28, 0.58, 0.90]:
+				_box("cable", Vector3(seg_len * _ws, 0.035, 0.035),
+						Transform3D(Basis(Vector3.UP, -ang), _pos(mid_p.x, mid_p.y, hgt * float(lvl))))
+			var cross: int = maxi(1, n / 2)
+			for k2 in cross:
+				var tm: float = (float(k2) + 0.5) / float(cross)
+				var mp: Vector2 = a.lerp(b, tm)
+				var span: float = seg_len * _ws / float(cross)
+				var rise: float = hgt * 0.62
+				var diag: float = sqrt(span * span + rise * rise)
+				for sgn in [-1.0, 1.0]:
+					var tilt: float = atan2(rise * sgn, span)
+					_box("cable", Vector3(diag, 0.03, 0.03),
+							Transform3D(Basis(Vector3.UP, -ang) * Basis(Vector3(0, 0, 1), tilt),
+							_pos(mp.x, mp.y, hgt * 0.59)))
+			_blk_seg(a, b, 0.35, hgt, true)
+
+# 機槍堡（碉堡）：混凝土盒 + 射孔帶 + 帽簷。
+# 射孔朝 `face`（度數）：碉堡的正面與背面戰術價值完全不同，玩家要看得出它對著哪邊。
+func _pillboxes(m: Dictionary) -> void:
+	for pb in m.get("pillboxes", []):
+		var c := Vector2(float(pb.get("x", 0)), float(pb.get("y", 0)))
+		var face: float = deg_to_rad(float(pb.get("face", 0)))
+		var sz: float = float(pb.get("size", 1.0))
+		var b := Basis(Vector3.UP, -face)
+		var w: float = 3.4 * sz
+		var d: float = 2.6 * sz
+		var h: float = 1.9 * sz
+		_box("concrete", Vector3(w, h * 0.55, d), Transform3D(b, _pos(c.x, c.y, h * 0.275)))
+		_box("concrete", Vector3(w, h * 0.28, d), Transform3D(b, _pos(c.x, c.y, h * 0.86)))
+		# ⚠ 射孔要是一條**窄縫**，不是整面開口。第一版留了整面開口，
+		#   從外面看進去是一團沒有打光的黑洞（實拍第三章俯瞰）。
+		#   真的碉堡射孔寬約 0.9m，兩側是厚實的混凝土。
+		var slit: float = 0.9 * sz
+		for sgn in [-1.0, 1.0]:
+			var pier: float = (w - slit) * 0.5
+			_box("concrete", Vector3(pier, h * 0.17, d),
+					Transform3D(b, _pos(c.x, c.y, h * 0.635)
+					+ b * Vector3(sgn * (w - pier) * 0.5, 0, 0)))
+		# 內部樓板與後牆：沒有這兩件，從射孔看進去仍是空的
+		_box("concrete", Vector3(w, 0.18 * sz, d),
+				Transform3D(b, _pos(c.x, c.y, h * 0.55)))
+		_box("concrete", Vector3(w, h * 0.17, 0.5 * sz),
+				Transform3D(b, _pos(c.x, c.y, h * 0.635) + b * Vector3(0, 0, -d * 0.5 + 0.25 * sz)))
+		_box("concrete", Vector3(w * 1.12, 0.18 * sz, d * 1.12),
+				Transform3D(b, _pos(c.x, c.y, h + 0.09 * sz)))
+		# 與地面的過渡：土堤堆在四周（碉堡不會是「放在草地上的水泥盒」）
+		var rng2 := RandomNumberGenerator.new()
+		rng2.seed = int(absf(c.x) * 7.0 + absf(c.y) * 13.0)
+		for k in 8:
+			var a2: float = TAU * float(k) / 8.0 + rng2.randf_range(-0.2, 0.2)
+			var rr: float = (maxf(w, d) * 0.5 + 0.35) * rng2.randf_range(0.9, 1.15)
+			var msz: float = rng2.randf_range(0.5, 1.0) * sz
+			_box("dirt", Vector3(msz, msz * 0.34, msz * 0.8),
+					Transform3D(Basis(Vector3.UP, a2),
+					_pos(c.x + cos(a2) * rr / _ws, c.y + sin(a2) * rr / _ws, msz * 0.12)))
+		_blk_cir(c, maxf(w, d) * 0.52, h)
+
+# 貨櫃：港口與城區最好用的掩體，也是第 10 章的劇情道具（走私貨櫃）。
+# 40 呎櫃真實尺寸 12.2 x 2.44 x 2.59m。
+func _containers(m: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 8891
+	var keys := ["cargo1", "cargo2", "cargo3"]
+	for ct in m.get("containers", []):
+		var c := Vector2(float(ct.get("x", 0)), float(ct.get("y", 0)))
+		var ang: float = deg_to_rad(float(ct.get("rot", 0)))
+		var stack: int = maxi(1, int(ct.get("stack", 1)))
+		var b := Basis(Vector3.UP, -ang)
+		for lvl in stack:
+			var key: String = keys[rng.randi() % keys.size()]
+			var yy: float = 1.3 + float(lvl) * 2.62
+			var off: Vector3 = b * Vector3(rng.randf_range(-0.12, 0.12), 0.0,
+					rng.randf_range(-0.08, 0.08))
+			_box(key, Vector3(12.2, 2.59, 2.44), Transform3D(b, _pos(c.x, c.y, yy) + off))
+			for sgn in [-1.0, 1.0]:
+				_box("steel", Vector3(0.12, 2.59, 2.5),
+						Transform3D(b, _pos(c.x, c.y, yy) + off + b * Vector3(sgn * 6.05, 0, 0)))
+		_blk_obb(c, ang, Vector2(6.2, 1.3), 2.59 + float(stack - 1) * 2.62)
+
+# 碼頭：伸進水裡的混凝土平台＋繫船柱。是**可以走上去的平台**，不是障礙。
+func _quays(m: Dictionary) -> void:
+	for q in m.get("quays", []):
+		var x: float = float(q.get("x", 0))
+		var y: float = float(q.get("y", 0))
+		var w: float = float(q.get("w", 200))
+		var h: float = float(q.get("h", 60))
+		var cx: float = x + w * 0.5
+		var cy: float = y + h * 0.5
+		_box("concrete", Vector3(w * _ws, 1.4, h * _ws), Transform3D(Basis(), _pos(cx, cy, 0.7)))
+		var n: int = maxi(2, int(w * _ws / 6.0))
+		for i in range(n + 1):
+			var px: float = x + w * float(i) / float(n)
+			_box("steel", Vector3(0.34, 0.62, 0.34), Transform3D(Basis(), _pos(px, y + 4.0, 1.65)))
+			_box("steel", Vector3(0.34, 0.62, 0.34),
+					Transform3D(Basis(), _pos(px, y + h - 4.0, 1.65)))
+		blockers.append({"t": "obb", "c": Vector2(cx, cy), "ax": Vector2(1, 0),
+				"e": Vector2(w * 0.5, h * 0.5), "r": 0.0, "h": 1.4, "k": "quay"})
+
+# 橋：橋面＋護欄＋橋墩。broken > 0 時中段缺一塊（第 7 章「斷橋之城」）。
+func _bridges(m: Dictionary) -> void:
+	for bg in m.get("bridges", []):
+		var a := Vector2(float(bg.get("x1", 0)), float(bg.get("y1", 0)))
+		var b := Vector2(float(bg.get("x2", 0)), float(bg.get("y2", 0)))
+		var w: float = float(bg.get("w", 70)) * _ws
+		var broken: float = clampf(float(bg.get("broken", 0.0)), 0.0, 0.9)
+		var total: float = a.distance_to(b)
+		if total < 1.0:
+			continue
+		var dirv: Vector2 = (b - a).normalized()
+		var ang: float = atan2(dirv.y, dirv.x)
+		var segs: int = maxi(4, int(total * _ws / 3.0))
+		var gap0: float = 0.5 - broken * 0.5
+		var gap1: float = 0.5 + broken * 0.5
+		for i in segs:
+			var tm: float = (float(i) + 0.5) / float(segs)
+			if broken > 0.01 and tm > gap0 and tm < gap1:
+				continue
+			var p: Vector2 = a.lerp(b, tm)
+			var seg_m: float = total * _ws / float(segs)
+			_box("concrete", Vector3(seg_m + 0.1, 0.55, w),
+					Transform3D(Basis(Vector3.UP, -ang), _pos(p.x, p.y, 1.9)))
+			for sgn in [-1.0, 1.0]:
+				_box("steel", Vector3(seg_m + 0.1, 0.65, 0.14),
+						Transform3D(Basis(Vector3.UP, -ang), _pos(p.x, p.y, 2.5)
+						+ Basis(Vector3.UP, -ang) * Vector3(0, 0, sgn * w * 0.5)))
+			blockers.append({"t": "obb", "c": p, "ax": Vector2(cos(ang), sin(ang)),
+					"e": Vector2(seg_m * 0.5 / _ws, w * 0.5 / _ws), "r": 0.0,
+					"h": 2.18, "k": "bridge"})
+		var piers: int = maxi(2, segs / 3)
+		for k in range(1, piers):
+			var pt: float = float(k) / float(piers)
+			if broken > 0.01 and pt > gap0 and pt < gap1:
+				continue
+			var pp: Vector2 = a.lerp(b, pt)
+			_box("concrete", Vector3(1.6, 4.0, w * 0.5),
+					Transform3D(Basis(Vector3.UP, -ang), _pos(pp.x, pp.y, -0.6)))
 
 # ---------- 小件雜物（GDD/14 §使用痕跡；使用者 2026-07-27：「場景細膩感還沒有很完全」）----------
 # 使用者的四條判準：細節層次（大形＋中形＋小件）、使用痕跡（不會是新的、不會排整齊）、

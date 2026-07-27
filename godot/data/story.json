@@ -2,7 +2,7 @@
  {
   "n": 1,
   "title": "灰色黎明",
-  "map": "tutorial",
+  "map": "ch01",
   "player": "taiwan",
   "enemy": "china",
   "side": 1,
@@ -94,7 +94,7 @@
  {
   "n": 2,
   "title": "平原上的旗",
-  "map": "plain",
+  "map": "ch02",
   "player": "usa",
   "enemy": "russia",
   "side": 0,
@@ -180,7 +180,7 @@
  {
   "n": 3,
   "title": "絞肉機重演",
-  "map": "verdun",
+  "map": "ch03",
   "player": "uk",
   "enemy": "germany",
   "side": 0,
@@ -266,7 +266,7 @@
  {
   "n": 4,
   "title": "無聲的村莊",
-  "map": "town",
+  "map": "ch04",
   "player": "france",
   "enemy": "germany",
   "side": 0,
@@ -350,7 +350,7 @@
  {
   "n": 5,
   "title": "沙暴走廊",
-  "map": "desert",
+  "map": "ch05",
   "player": "usa",
   "enemy": "iran",
   "side": 0,
@@ -435,7 +435,7 @@
  {
   "n": 6,
   "title": "林海伏擊",
-  "map": "forest",
+  "map": "ch06",
   "player": "vietnam",
   "enemy": "thailand",
   "side": 1,
@@ -517,7 +517,7 @@
  {
   "n": 7,
   "title": "斷橋之城",
-  "map": "urban",
+  "map": "ch07",
   "player": "germany",
   "enemy": "france",
   "side": 0,
@@ -609,7 +609,7 @@
  {
   "n": 8,
   "title": "紅色灘頭",
-  "map": "beach",
+  "map": "ch08",
   "player": "japan",
   "enemy": "china",
   "side": 0,
@@ -685,7 +685,7 @@
  {
   "n": 9,
   "title": "海峽封鎖線",
-  "map": "strait",
+  "map": "ch09",
   "player": "korea",
   "enemy": "japan",
   "side": 0,
@@ -756,7 +756,7 @@
  {
   "n": 10,
   "title": "霧港疑雲",
-  "map": "harbor",
+  "map": "ch10",
   "player": "uk",
   "enemy": "russia",
   "side": 0,
@@ -842,7 +842,7 @@
  {
   "n": 11,
   "title": "群山之肩",
-  "map": "verdun",
+  "map": "ch11",
   "player": "taiwan",
   "enemy": "korea",
   "side": 0,
@@ -913,7 +913,7 @@
  {
   "n": 12,
   "title": "鋼鐵洪流",
-  "map": "plain",
+  "map": "ch12",
   "player": "ukraine",
   "enemy": "russia",
   "side": 1,
@@ -1007,7 +1007,7 @@
  {
   "n": 13,
   "title": "孤島要塞",
-  "map": "strait",
+  "map": "ch13",
   "player": "usa",
   "enemy": "iran",
   "side": 0,
@@ -1083,7 +1083,7 @@
  {
   "n": 14,
   "title": "灰幕之後",
-  "map": "urban",
+  "map": "ch14",
   "player": "israel",
   "enemy": "germany",
   "side": 0,
@@ -1164,7 +1164,7 @@
  {
   "n": 15,
   "title": "黎明線",
-  "map": "urban",
+  "map": "ch15",
   "player": "usa",
   "enemy": "russia",
   "side": 0,
