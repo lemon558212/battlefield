@@ -158,6 +158,8 @@ func _ready() -> void:
 		_mapshots()
 	elif "play" in OS.get_cmdline_user_args():
 		_playtest()
+	elif "scene" in OS.get_cmdline_user_args():
+		_sceneshots()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -206,6 +208,93 @@ func _mapshots() -> void:
 		await _snap("res://map_%s_eye.png" % id)
 		print("[mapshots] %s biome=%s sky=%s OK" % [id, terrain.biome.get("key", "?"),
 				map_data.get("sky", "day")])
+	get_tree().quit(0)
+
+# ---------- 場景 vs 劇本稽核（-- scene）----------
+# 使用者 2026-07-27：「場景也沒有像你說的有被和劇情修正好」。
+# maps.json 裡每個 solid 都寫了 note（正門哨所／營舍A／武器庫／雷達站／鐘樓），
+# 但沒有人真的一棟一棟拍過看它「認不認得出來」。這裡對第一章的地圖：
+#   ① 正上方俯拍整張圖（看得出基地的格局嗎）
+#   ② 每一棟 solid 各拍一張人眼高度的近照，檔名帶 note
+# 光有資料不算做好——玩家看不出那是雷達站，劇情就沒有落地。
+func _sceneshots() -> void:
+	await get_tree().create_timer(0.6).timeout
+	ui.root.visible = false
+	var ch: Dictionary = GameData.story[0]
+	var mid: String = String(ch.get("map", "tutorial"))
+	map_data = GameData.maps[mid]
+	_teardown_world()
+	await get_tree().process_frame
+	_build_ground()
+	# 部署藍框不是「場景」的一部分：稽核圖裡留著它會蓋在海面上，
+	# 看起來像水域鋪了一張藍地毯（本輪一度誤判成水面的問題）。
+	if is_instance_valid(_zone_mesh):
+		_zone_mesh.visible = false
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	cam.clear_tps()
+	cam.set_follow(null)
+	# 正上方：pitch 88 度（90 度時 look_at 的 up 向量會退化）
+	cam.focus = _to3d(mwp * 0.5, mhp * 0.5)
+	cam.dist = 42.0
+	cam.pitch_deg = 88.0
+	cam.yaw = 0.0
+	await get_tree().create_timer(1.2).timeout
+	await _snap("res://scene_ch1_top.png")
+	# 斜俯瞰：看得出高低與體積
+	cam.dist = 40.0
+	cam.pitch_deg = 34.0
+	cam.yaw = 0.5
+	await get_tree().create_timer(0.8).timeout
+	await _snap("res://scene_ch1_iso.png")
+	var i := 0
+	for sd in map_data.get("solids", []):
+		i += 1
+		var cx: float = float(sd.get("x", 0)) + float(sd.get("w", 120)) * 0.5
+		var cy: float = float(sd.get("y", 0)) + float(sd.get("h", 120)) * 0.5
+		# ⚠ dist 15／pitch 14 會把鏡頭放進隔壁那棟房子裡（實拍：整張是一面牆）。
+		#   建築群很密，稽核鏡頭要拉遠並抬高才拍得到「這一棟長什麼樣」。
+		cam.focus = _to3d(cx, cy) + Vector3(0, 2.4, 0)
+		cam.dist = 26.0
+		cam.pitch_deg = 26.0
+		cam.yaw = 0.8
+		await get_tree().create_timer(0.7).timeout
+		await _snap("res://scene_ch1_%d.png" % i)
+		print("[scene] %d %s kind=%s floors=%s burning=%s"
+				% [i, String(sd.get("note", "?")), String(sd.get("kind", "民房")),
+				sd.get("floors", 1), sd.get("burning", false)])
+	# 劇情要的「工事」拍給人看：沙包線、壕溝、道路。資料有 23 段沙包與 2 條壕溝，
+	# 但從來沒有人拍過近照確認它們真的在畫面上。
+	# ⚠ pitch 要夠高（鏡頭抬到屋頂之上），否則稽核鏡頭會鑽進隔壁那棟房子裡，
+	#   拍出來整張都是一面牆（本輪連續踩到兩次）。
+	var spots := [["sandbag", 366.0, 300.0, 13.0, 42.0], ["trench", 520.0, 300.0, 13.0, 44.0],
+			["road", 700.0, 300.0, 15.0, 40.0], ["shore", 300.0, 300.0, 17.0, 30.0]]
+	for sp in spots:
+		cam.focus = _to3d(float(sp[1]), float(sp[2])) + Vector3(0, 0.8, 0)
+		cam.dist = float(sp[3])
+		cam.pitch_deg = float(sp[4])
+		cam.yaw = 1.55
+		await get_tree().create_timer(0.6).timeout
+		await _snap("res://scene_ch1_%s.png" % String(sp[0]))
+	# 火與煙：粒子要時間長出來（煙的壽命 5.5 秒），等滿一輪再拍，否則拍到的是剛冒頭的幾顆
+	var fire_at := Vector2(630.0, 110.0)
+	for sd2 in map_data.get("solids", []):
+		if bool(sd2.get("burning", false)):
+			fire_at = Vector2(float(sd2.get("x", 0)) + float(sd2.get("w", 120)) * 0.5,
+					float(sd2.get("y", 0)) + float(sd2.get("h", 120)) * 0.5)
+	cam.focus = _to3d(fire_at.x, fire_at.y) + Vector3(0, 6.0, 0)
+	cam.dist = 24.0
+	cam.pitch_deg = 16.0
+	cam.yaw = 1.2
+	await get_tree().create_timer(7.0).timeout
+	await _snap("res://scene_ch1_fire.png")
+	cam.dist = 12.0
+	await get_tree().create_timer(1.5).timeout
+	await _snap("res://scene_ch1_fire_near.png")
+	print("[scene] 建築數=%d 沙包段=%d 壕溝=%d 道路=%d" % [
+			map_data.get("solids", []).size(), map_data.get("sandbags", []).size(),
+			map_data.get("trenches", []).size(), map_data.get("roads", []).size()])
+	print("[scene] DONE")
 	get_tree().quit(0)
 
 # ---------- 實際遊玩驗證（-- play）----------
@@ -2561,6 +2650,11 @@ func _ground_rect_mesh(z: Dictionary, lift: float) -> ArrayMesh:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in nx:
 		for j in ny:
+			# 水裡不畫：部署區壓到海面上時，那片半透明藍蓋在水上就是一張藍地毯
+			#   （使用者 2026-07-27「部署／水面那片不透明藍色塊」的一半原因）。
+			if terrain != null and terrain.water_depth(x0 + w * (i + 0.5) / nx,
+					y0 + h * (j + 0.5) / ny) > 0.05:
+				continue
 			var a := _ground_pt(_to3d(x0 + w * i / nx, y0 + h * j / ny), lift)
 			var b := _ground_pt(_to3d(x0 + w * (i + 1) / nx, y0 + h * j / ny), lift)
 			var c := _ground_pt(_to3d(x0 + w * (i + 1) / nx, y0 + h * (j + 1) / ny), lift)
@@ -3114,39 +3208,115 @@ func _wind() -> Vector2:
 		return Vector2(float(w[0]), float(w[1]))
 	return Vector2(0.4, 0.2)
 
+# 柔邊圓形貼圖（程式生成，全場共用一張）。
+# ★這是「火看起來很假」的第一名原因（使用者 2026-07-27）：粒子用的是**沒有貼圖的方片**，
+#   不管顏色調得多好，畫面上每一顆都是一個硬邊的發光正方形＝發光方塊。
+#   火與煙的形狀感幾乎全部來自「邊緣要柔」這件事。
+static var _soft_tex: GradientTexture2D = null
+
+static func _soft_dot() -> GradientTexture2D:
+	if _soft_tex != null:
+		return _soft_tex
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.45, 1.0])
+	g.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0.55), Color(1, 1, 1, 0)])
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.width = 64
+	t.height = 64
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	_soft_tex = t
+	return _soft_tex
+
+static func _ramp(offsets: Array, cols: Array) -> GradientTexture1D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array(offsets)
+	g.colors = PackedColorArray(cols)
+	var t := GradientTexture1D.new()
+	t.gradient = g
+	t.width = 64
+	return t
+
+static func _curve_tex(pts: Array) -> CurveTexture:
+	var c := Curve.new()
+	c.min_value = 0.0
+	c.max_value = 1.0
+	for p in pts:
+		c.add_point(Vector2(float(p[0]), float(p[1])))
+	var t := CurveTexture.new()
+	t.curve = c
+	return t
+
+# 火與煙（2026-07-27 重做）。真實的火在畫面上讀得出來，靠的是四件事，缺一件就變成方塊：
+#   ① 邊緣柔（柔邊圓貼圖）    ② 生命週期內變色（白熱→橘→暗紅→消失）
+#   ③ 生命週期內變大小（火焰往上收細、煙往上擴散變大）  ④ 亂流（直線上升的是噴射口不是火）
+# 另外**一定要有煙**：只有火沒有煙時，遠看只是一團亮點，讀不出「這裡在燒」。
 func _add_fire(pos: Vector3, radius: float) -> void:
 	if world == null:
 		return
 	# ⚠ 粒子數與燈的範圍都要克制：第一版（46+34 粒、燈半徑 12m、每幀改 energy）
 	#   讓 16 單位的幀時從 5.8ms 掉到 11.9ms。火只是背景元素，不值這個價。
-	# ⚠ 使用者 2026-07-27 截圖：屋頂上一團「發亮的大方塊」。原因是火焰用了
-	#   0.42~1.5m 的加法混合方片——那個尺寸的方片就是一個發光的箱子。
-	#   火的粒子要**小而多**，煙要大但**很淡**，才會讀成火與煙而不是幾何體。
-	for spec in [{"n": 34, "life": 1.1, "sz": 0.16, "up": 2.8, "col": Color(1.0, 0.55, 0.16),
-					"y": 0.0, "spread": radius * 0.6},
-			{"n": 20, "life": 4.0, "sz": 0.95, "up": 2.0, "col": Color(0.22, 0.21, 0.20),
-					"y": 2.2, "spread": radius * 1.2}]:
+	var wind := _wind()
+	# [粒數, 壽命, 尺寸, 初速, y 偏移, 散佈, 是否加法混合, 顏色帶, 尺寸曲線]
+	var specs := [
+		# 火焰：小而多、白熱底→橘→暗紅，往上收細
+		{"n": 52, "life": 1.1, "sz": 0.55, "up": 2.8, "y": 0.0, "spread": radius * 0.55,
+			"add": true, "grav": 0.25,
+			"ramp": _ramp([0.0, 0.22, 0.62, 1.0], [
+				Color(1.0, 0.95, 0.70, 0.95), Color(1.0, 0.62, 0.18, 0.85),
+				Color(0.85, 0.22, 0.05, 0.45), Color(0.35, 0.06, 0.02, 0.0)]),
+			"curve": _curve_tex([[0.0, 0.55], [0.35, 1.0], [1.0, 0.12]])},
+		# 餘燼：偶爾飄出來的火星，火有生命感全靠這個
+		{"n": 14, "life": 2.2, "sz": 0.075, "up": 3.4, "y": 0.3, "spread": radius * 0.5,
+			"add": true, "grav": 0.10,
+			"ramp": _ramp([0.0, 0.55, 1.0], [Color(1.0, 0.85, 0.45, 1.0),
+				Color(1.0, 0.45, 0.12, 0.8), Color(0.6, 0.15, 0.03, 0.0)]),
+			"curve": _curve_tex([[0.0, 1.0], [1.0, 0.25]])},
+		# 濃煙：大而淡、往上擴散，被風帶著斜飄。煙柱是「遠處看得到這裡在燒」的唯一線索。
+		{"n": 72, "life": 7.0, "sz": 3.0, "up": 2.6, "y": 1.2, "spread": radius * 0.85,
+			"add": false, "grav": 0.75,
+			"ramp": _ramp([0.0, 0.10, 0.45, 1.0], [
+				Color(0.14, 0.12, 0.11, 0.0), Color(0.12, 0.11, 0.10, 0.88),
+				Color(0.30, 0.29, 0.28, 0.52), Color(0.55, 0.54, 0.53, 0.0)]),
+			"curve": _curve_tex([[0.0, 0.18], [1.0, 1.0]])},
+	]
+	for spec in specs:
 		var pm := ParticleProcessMaterial.new()
 		pm.direction = Vector3(0, 1, 0)
-		pm.spread = 14.0
-		pm.initial_velocity_min = float(spec["up"]) * 0.6
+		pm.spread = 18.0
+		pm.initial_velocity_min = float(spec["up"]) * 0.55
 		pm.initial_velocity_max = float(spec["up"])
-		pm.gravity = Vector3(_wind().x, 0.35, _wind().y)   # 火與煙被風帶著走
-		pm.scale_min = float(spec["sz"]) * 0.5
+		# 風把火與煙帶著走；煙越輕、被帶得越明顯
+		var wk: float = 2.2 if not bool(spec["add"]) else 1.0
+		pm.gravity = Vector3(wind.x * wk, float(spec["grav"]), wind.y * wk)
+		pm.scale_min = float(spec["sz"]) * 0.55
 		pm.scale_max = float(spec["sz"])
-		pm.color = spec["col"]
+		pm.scale_curve = spec["curve"]
+		pm.color_ramp = spec["ramp"]
 		pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 		pm.emission_sphere_radius = float(spec["spread"])
+		# 亂流：少了它，粒子沿直線上升，看起來像蒸汽噴嘴而不是火
+		pm.turbulence_enabled = true
+		pm.turbulence_noise_strength = 0.55 if bool(spec["add"]) else 1.1
+		pm.turbulence_noise_scale = 2.4
+		pm.angle_min = -180.0
+		pm.angle_max = 180.0
+		pm.angular_velocity_min = -35.0
+		pm.angular_velocity_max = 35.0
 		var qm := QuadMesh.new()
 		qm.size = Vector2.ONE
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.blend_mode = (BaseMaterial3D.BLEND_MODE_ADD if spec["y"] == 0.0
+		mat.blend_mode = (BaseMaterial3D.BLEND_MODE_ADD if bool(spec["add"])
 				else BaseMaterial3D.BLEND_MODE_MIX)
 		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		mat.billboard_keep_scale = true
 		mat.vertex_color_use_as_albedo = true
-		mat.albedo_color = Color(1, 1, 1, 0.30 if spec["y"] == 0.0 else 0.14)
+		mat.albedo_texture = _soft_dot()          # ★柔邊：治「發光方塊」
+		mat.disable_receive_shadows = true
 		qm.material = mat
 		var ps := GPUParticles3D.new()
 		ps.amount = int(spec["n"])
@@ -3154,8 +3324,8 @@ func _add_fire(pos: Vector3, radius: float) -> void:
 		ps.process_material = pm
 		ps.draw_pass_1 = qm
 		ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# 明確給可見範圍，否則引擎每幀要重算粒子包圍盒
-		ps.visibility_aabb = AABB(Vector3(-8, -2, -8), Vector3(16, 18, 16))
+		# 明確給可見範圍，否則引擎每幀要重算粒子包圍盒。煙柱會飄很高，盒子要夠大。
+		ps.visibility_aabb = AABB(Vector3(-10, -2, -10), Vector3(20, 30, 20))
 		world.add_child(ps)
 		ps.global_position = pos + Vector3(0, float(spec["y"]), 0)
 	var fl := OmniLight3D.new()
@@ -4567,8 +4737,17 @@ func _build_ground() -> void:
 		var i := 0
 		for sdef in solids:
 			if i >= 6:
+				push_error("[bldskip] 超過 6 棟上限，略過 %s" % String(sdef.get("note", "?")))
+				print("[bldskip] FAIL 超過 6 棟上限 → ", String(sdef.get("note", "?")))
 				break
+			# ⚠⚠ 2026-07-27：這一行曾經**靜默吃掉兩棟劇情建築**（武器庫、鐘樓）——
+			#   40px 邊界讓 x 570~710 的建築被 x 740 起的部署區判定成重疊。
+			#   使用者玩到的是「劇情講武器庫與鐘樓，戰場上根本沒有」。
+			#   資料是規格，被場景層丟掉一定要大聲喊，不可以只是 continue。
 			if _in_any_deploy(sdef):
+				push_error("[bldskip] 壓在部署區被丟掉：%s（改 maps.json 的 deploy 讓開，別讓劇情建築消失）"
+						% String(sdef.get("note", "?")))
+				print("[bldskip] FAIL 壓在部署區 → ", String(sdef.get("note", "?")))
 				continue
 			# 蓋在水裡的房子跳過（QA 反驗證：海峽圖一棟民房泡在深水正中央）。
 			# 房子不會蓋在海裡——佈局資料是舊陸戰版沿用的，場景層要自己守。
@@ -4584,6 +4763,8 @@ func _build_ground() -> void:
 				if wet:
 					break
 			if wet:
+				push_error("[bldskip] 泡在水裡被丟掉：%s" % String(sdef.get("note", "?")))
+				print("[bldskip] FAIL 泡在水裡 → ", String(sdef.get("note", "?")))
 				continue
 			var bd = BUILDING.new()
 			world.add_child(bd)
@@ -4689,7 +4870,7 @@ func _build_ground() -> void:
 	zone_edge.name = "DeployZoneEdge"
 	zone_edge.mesh = _ground_rect_border(z, 0.30)
 	var emat := StandardMaterial3D.new()
-	emat.albedo_color = Color(0.55, 0.86, 1.0, 0.75)
+	emat.albedo_color = Color(0.55, 0.86, 1.0, 0.50)
 	emat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	emat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	emat.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -4892,42 +5073,50 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 func _build_water() -> void:
 	_water_blk = []
 	var rects: Array = []
+	var deep_rects: Array = []
 	for wkey in ["waters", "deepwaters", "shallows"]:
 		for wr in map_data.get(wkey, []):
-			rects.append([Rect2(float(wr.get("x", 0)), float(wr.get("y", 0)),
-					float(wr.get("w", 60)), float(wr.get("h", 60))), wkey])
+			var rr := Rect2(float(wr.get("x", 0)), float(wr.get("y", 0)),
+					float(wr.get("w", 60)), float(wr.get("h", 60)))
+			rects.append(rr)
+			if wkey == "deepwaters":
+				deep_rects.append(rr)
 	if rects.is_empty():
 		return
-	for pair in rects:
-		var r: Rect2 = pair[0]
-		var mi := MeshInstance3D.new()
-		mi.mesh = _water_mesh(r)
-		if mi.mesh == null:
-			continue
+	# ★★水域一律合成**一片**網格（2026-07-27）。
+	#   舊做法是「一個矩形一個 PlaneMesh」，而 maps.json 的 waters/deepwaters/shallows
+	#   是三條相鄰（有時重疊）的長條，加上 shallows 還故意下移 6cm →
+	#   畫面上是三層半透明的塑膠片疊在一起、有硬接縫、還互相透出對方的邊。
+	#   合成一片之後接縫就不存在了；「哪裡是水」交給 terrain.water_depth 逐點判定
+	#   （水深 0 的格子直接不畫），所以不需要知道原始矩形怎麼切。
+	var uni: Rect2 = rects[0]
+	for rr2 in rects:
+		uni = uni.merge(rr2)
+	var mi := MeshInstance3D.new()
+	mi.name = "Water"
+	mi.mesh = _water_mesh(uni)
+	if mi.mesh != null:
 		var wmat := ShaderMaterial.new()
 		var wsh := Shader.new()
 		wsh.code = WATER_SHADER
 		wmat.shader = wsh
 		# 流向：長條形＝河，沿長邊流；接近正方＝湖／海灣，不流
-		var flow_v := Vector2(1.0, 0.0) if r.size.x >= r.size.y else Vector2(0.0, 1.0)
-		if absf(r.size.x - r.size.y) / maxf(r.size.x, r.size.y) < 0.35:
+		var flow_v := Vector2(1.0, 0.0) if uni.size.x >= uni.size.y else Vector2(0.0, 1.0)
+		if absf(uni.size.x - uni.size.y) / maxf(uni.size.x, uni.size.y) < 0.35:
 			flow_v = Vector2.ZERO
 		wmat.set_shader_parameter("flow", flow_v)
 		mi.material_override = wmat
-		# 網格已經是世界座標（頂點就帶著水深），節點放原點即可
-		mi.position = Vector3(0, -(0.06 if pair[1] == "shallows" else 0.0), 0)
 		world.add_child(mi)
-		# 深水圍欄：四邊線段障礙（高度 3m＝人與彈道都擋不住的別想，這是水不是牆，
-		# 但步兵確實過不去；日後做船再改成「載具可通行」）
-		if pair[1] == "deepwaters":
-			var corners := [r.position, Vector2(r.end.x, r.position.y), r.end,
-					Vector2(r.position.x, r.end.y)]
-			for i in 4:
-				var a2: Vector2 = corners[i]
-				var b2: Vector2 = corners[(i + 1) % 4]
-				_water_blk.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
-						"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
-						"hl": a2.distance_to(b2) * 0.5})
+	# 深水圍欄：四邊線段障礙（步兵過不去；日後做船再改成「載具可通行」）
+	for r in deep_rects:
+		var corners := [r.position, Vector2(r.end.x, r.position.y), r.end,
+				Vector2(r.position.x, r.end.y)]
+		for i in 4:
+			var a2: Vector2 = corners[i]
+			var b2: Vector2 = corners[(i + 1) % 4]
+			_water_blk.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
+					"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
+					"hl": a2.distance_to(b2) * 0.5})
 
 # 水面網格：把「這一點的水深」烤進頂點色的 alpha，shader 直接拿它當透明度與深淺色。
 # ⚠ 為什麼不是一片 PlaneMesh（使用者 2026-07-27：「水面那片不透明藍色塊，像藍地毯」）：
@@ -4988,21 +5177,34 @@ void fragment() {
 	// d ＝這一點的實際水深（0=岸邊、1=深水），建網格時就烤進頂點色 alpha。
 	// 用真實水深而不是「離矩形邊界多遠」，水線才會跟著地形走而不是跟著矩形走。
 	float d = COLOR.a;
-	vec3 shallow_c = vec3(0.34, 0.52, 0.47);
-	vec3 deep_c = vec3(0.05, 0.15, 0.26);
-	// ⚠ 菲涅耳權重要小：0.7 在俯瞰的掠角下整片水變乳白（實拍海灘像牛奶）
+	vec3 shallow_c = vec3(0.22, 0.42, 0.40);
+	vec3 deep_c = vec3(0.03, 0.10, 0.19);
+	// ⚠ 菲涅耳權重要很小：0.28 在斜俯瞰下已經讓整片水變成淡灰紫（實拍第一章海灘），
+	//   0.7 更是像牛奶。水在掠角下確實會反射天空，但那是**高光**不是整片染色。
 	ALBEDO = mix(mix(shallow_c, deep_c, smoothstep(0.06, 0.85, d)),
-			vec3(0.58, 0.70, 0.76), fres * 0.28);
+			vec3(0.46, 0.58, 0.66), fres * 0.12);
 	// 岸邊白沫：水最淺的那一圈加白，浪花線讓水與地有交界而不是硬切。
 	// 白沫要弱、要窄——太強會變成一圈白色鑲邊（實拍）。
-	float foam = (1.0 - smoothstep(0.0, 0.10, d))
-			* (0.45 + 0.55 * sin(VERTEX.x * 5.5 + VERTEX.z * 4.2 + TIME * 2.2));
-	ALBEDO = mix(ALBEDO, vec3(0.88, 0.92, 0.93), clamp(foam, 0.0, 0.34));
-	// ★透明度跟著水深走：淺灘幾乎全透明（看得到水底的沙），深水才不透明。
-	//   這是「一片不透明藍色塊」與「真的是水」之間唯一的差別。
-	ALPHA = clamp(0.16 + 0.72 * smoothstep(0.0, 0.55, d), 0.0, 0.88);
-	ROUGHNESS = 0.06;
-	SPECULAR = 0.7;
+	float foam = (1.0 - smoothstep(0.0, 0.055, d))
+			* (0.35 + 0.65 * sin(VERTEX.x * 5.5 + VERTEX.z * 4.2 + TIME * 2.2));
+	ALBEDO = mix(ALBEDO, vec3(0.86, 0.90, 0.91), clamp(foam, 0.0, 0.26));
+	// ★透明度跟著水深走：淺灘**完全**透明（看得到水底的沙），深水才不透明。
+	//   ⚠ 不可以留 0.16 的底：水深 0 的那一圈還有 16% 不透明就是一條硬邊，
+	//     畫面上水域仍然是「一塊貼上去的色片」（2026-07-27 實拍）。
+	ALPHA = clamp(0.92 * smoothstep(0.0, 0.42, d), 0.0, 0.92);
+	// ⚠ ROUGHNESS 0.06 ＝鏡面。水面的頂點波只有 2.5cm，整片幾乎是平的，
+	//   於是變成一整面鏡子把天空照下來——實拍是一片淡灰紫的塑膠片，完全不像水。
+	//   真水面的高光是被小漣漪打碎的，所以要 ① 粗糙一點 ② 在法線上加漣漪。
+	// ⚠ 兩組同振幅的正弦疊起來會出現規則的斜格紋（實拍是一片格子布）。
+	//   三組**不同頻率且不成整數倍**、振幅遞減，才看得出是漣漪。
+	vec2 rp = VERTEX.xz;
+	float n1 = sin(rp.x * 3.1 + TIME * 1.30) * 0.055
+			+ sin(rp.x * 7.3 - rp.y * 1.9 + TIME * 2.05) * 0.028;
+	float n2 = sin(rp.y * 4.7 - TIME * 1.05) * 0.048
+			+ sin(rp.x * 1.3 + rp.y * 5.9 + TIME * 1.55) * 0.022;
+	NORMAL = normalize(NORMAL + vec3(n1, 0.0, n2));
+	ROUGHNESS = 0.22;
+	SPECULAR = 0.45;
 }
 """
 

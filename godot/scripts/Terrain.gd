@@ -55,6 +55,7 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 			_waters.append({"r": Rect2(float(wr.get("x", 0)), float(wr.get("y", 0)),
 					float(wr.get("w", 60)), float(wr.get("h", 60))),
 					"deep": (1.9 if wkey == "deepwaters" else (0.5 if wkey == "shallows" else 1.2))})
+	_group_waters()
 	_build_mesh()
 	# ⚠ 草不在這裡生成：建築的實際佔地要等 Building 建完才知道
 	#   （Building.rect 有「最小 120px」的規則，比 maps.json 的原始尺寸大），
@@ -102,14 +103,24 @@ func height_at(px: float, py: float) -> float:
 		if d2 < r2:
 			var k2: float = 1.0 - (d2 / r2) * (d2 / r2)
 			h -= CRATER_DEPTH * k2
-	# 水域下陷：離岸越遠越深（平滑過渡），deepwaters 最深 1.9m
-	for w in _waters:
-		var wr: Rect2 = w["r"]
-		var inner: Rect2 = wr.grow(-28.0)
-		if wr.has_point(Vector2(px, py)):
-			var edge_d: float = minf(minf(px - wr.position.x, wr.end.x - px),
-					minf(py - wr.position.y, wr.end.y - py))
-			h -= float(w["deep"]) * clampf(edge_d / 28.0, 0.0, 1.0)
+	# 水域下陷：離岸越遠越深（平滑過渡），deepwaters 最深 1.9m。
+	# ⚠⚠ 2026-07-27 修正：舊版是「每個矩形各自從自己的邊界往內下陷」，
+	#   但 maps.json 的海是 deepwaters／waters／shallows 三條**相鄰**的長條 →
+	#   每兩條的交界處海床又升回 0，水下多出兩道暗礁，水面因此出現深淺硬邊的條帶，
+	#   遠看就是「好幾片藍色塑膠片疊在一起」（使用者說的藍地毯的一半原因）。
+	#   正解：下陷量取「含這個點的矩形裡最深的那一個」，斜坡距離量到**整片相連水域**的邊界。
+	var best_deep := 0.0
+	var grp := -1
+	for wi in _waters.size():
+		if (_waters[wi]["r"] as Rect2).has_point(Vector2(px, py)):
+			if float(_waters[wi]["deep"]) > best_deep:
+				best_deep = float(_waters[wi]["deep"])
+			grp = int(_waters[wi]["g"])
+	if best_deep > 0.0 and grp >= 0:
+		var ub: Rect2 = _water_groups[grp]
+		var edge_d: float = minf(minf(px - ub.position.x, ub.end.x - px),
+				minf(py - ub.position.y, ub.end.y - py))
+		h -= best_deep * clampf(edge_d / 34.0, 0.0, 1.0)
 	for t in _trenches:
 		var d3: float = _dist_to_path(Vector2(px, py), t["pts"])
 		var hw: float = t["hw"]
@@ -447,6 +458,36 @@ func _indoors(px: float, py: float) -> bool:
 # 水面高度（公尺）。Main._build_water 畫水面時用同一個值，兩邊不可各寫各的，
 # 否則「畫出來的水面」和「算出來的水深」會對不起來。
 const WATER_SURFACE_Y := -0.30
+
+# 把相連（或重疊）的水域矩形分組，每組存一個外框。
+# 分組是必要的：直接用「全部水域的外框」會讓兩個相距很遠的獨立水塘共用一個大外框，
+# 各自的岸邊就會突然變深。
+var _water_groups: Array[Rect2] = []
+
+func _group_waters() -> void:
+	_water_groups = []
+	var gid: Array[int] = []
+	for i in _waters.size():
+		gid.append(-1)
+	for i in _waters.size():
+		if gid[i] >= 0:
+			continue
+		var g: int = _water_groups.size()
+		var bb: Rect2 = _waters[i]["r"]
+		gid[i] = g
+		var changed := true
+		while changed:
+			changed = false
+			for j in _waters.size():
+				if gid[j] >= 0:
+					continue
+				if bb.grow(2.0).intersects(_waters[j]["r"]):
+					gid[j] = g
+					bb = bb.merge(_waters[j]["r"])
+					changed = true
+		_water_groups.append(bb)
+	for i in _waters.size():
+		_waters[i]["g"] = gid[i]
 
 # 這個點的水深（公尺，不在水裡回 0）＝水面高度減地面高度。
 # 鐵律 0⑤：人在及腰的水裡不可能維持 3m/s 行軍。先前 waters/shallows 只是一張

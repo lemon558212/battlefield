@@ -75,10 +75,13 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	_emit_box("floor", im, Vector3(sizex + 0.34, 0.9, sizez + 0.34),
 			Transform3D(Basis(), Vector3(0, -0.40, 0)))
 	_footing_debris(Vector2(sizex * 0.5, sizez * 0.5), im)
+	# 武器庫不開窗（軍事顧問16：彈藥庫是實心厚牆＋唯一一道門，開一排窗才是怪事），
+	# 這也是玩家「一眼認出那是武器庫」的唯一線索——六棟長一樣就等於劇情沒落地。
+	var solid_walls: bool = kind == "depot"
 	_side(Vector2(-half.x, half.y), Vector2(half.x, half.y), wm, true)     # +Z（南）：門
-	_side(Vector2(half.x, -half.y), Vector2(half.x, half.y), wm, false)    # +X
-	_side(Vector2(-half.x, -half.y), Vector2(half.x, -half.y), wm, false)  # -Z
-	_side(Vector2(-half.x, -half.y), Vector2(-half.x, half.y), wm, false)  # -X
+	_side(Vector2(half.x, -half.y), Vector2(half.x, half.y), wm, false, solid_walls)    # +X
+	_side(Vector2(-half.x, -half.y), Vector2(half.x, -half.y), wm, false, solid_walls)  # -Z
+	_side(Vector2(-half.x, -half.y), Vector2(-half.x, half.y), wm, false, solid_walls)  # -X
 	# 室內隔牆：一道帶門洞的牆，讓室內有兩個空間可以互相掩護
 	_partition(half, im)
 	# 樓梯（兩層以上）
@@ -110,17 +113,33 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	roof.name = "Roof"
 	add_child(roof)
 	var top: float = float(floors) * FLOOR_H
-	if kind == "tower" or kind == "radar":
+	if kind == "tower" or kind == "radar" or kind == "depot" or kind == "gate":
 		# 軍用設施是平頂＋女兒牆（屋頂要能站人、架天線），不是紅瓦斜頂
 		var deck := _box(sizex + 0.4, 0.22, sizez + 0.4, _wall_mat)
 		deck.position = Vector3(0, top + 0.11, 0)
 		roof.add_child(deck)
+		# 女兒牆高度依用途：塔樓／雷達站是要站人的射擊位（0.55m 及膝掩體），
+		# 哨所與武器庫只是屋頂收邊（0.24m）。
+		# ⚠ 0.55m 的女兒牆蓋在 6m 見方的小屋頂上，比例上就是一個浴缸／游泳池
+		#   （2026-07-27 實拍第一章哨所，一眼就看出不對）。
+		var par_h: float = 0.55 if (kind == "tower" or kind == "radar") else 0.24
 		for e in [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]:
-			var along := Vector3(absf(e.z) * sizex + 0.4, 0.55, absf(e.x) * sizez + 0.4)
+			var along := Vector3(absf(e.z) * sizex + 0.4, par_h, absf(e.x) * sizez + 0.4)
 			var par := _box(maxf(along.x, 0.18), along.y, maxf(along.z, 0.18), _wall_mat)
-			par.position = Vector3(e.x * (sizex * 0.5 + 0.1), top + 0.5,
+			par.position = Vector3(e.x * (sizex * 0.5 + 0.1), top + 0.22 + par_h * 0.5,
 					e.z * (sizez * 0.5 + 0.1))
 			roof.add_child(par)
+		if kind == "depot":
+			# 彈藥庫屋頂的通風口：兩個小方箱。平頂＋無窗＋通風口＝一眼認得出是武器庫。
+			for vx in [-0.25, 0.25]:
+				var vent := _box(0.55, 0.42, 0.55, _wall_mat)
+				vent.position = Vector3(sizex * vx, top + 0.43, sizez * 0.18)
+				roof.add_child(vent)
+		if kind == "gate":
+			# 哨所：屋頂一根旗桿。劇本說這是「正門」，要讓玩家從遠處就分辨得出來。
+			var pole := _box(0.10, 3.4, 0.10, _wall_mat)
+			pole.position = Vector3(sizex * 0.30, top + 1.9, 0)
+			roof.add_child(pole)
 		if kind == "radar":
 			var mast := _box(0.26, 1.6, 0.26, _wall_mat)
 			mast.position = Vector3(0, top + 1.0, 0)
@@ -231,10 +250,13 @@ func _footing_debris(half: Vector2, mat: BaseMaterial3D) -> void:
 		_emit_box("floor", mat, Vector3(sx, sy, sx * rng.randf_range(0.6, 1.0)),
 				Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(p.x, sy * 0.3, p.y)))
 
-func _side(a: Vector2, b: Vector2, mat: BaseMaterial3D, is_door: bool) -> void:
+func _side(a: Vector2, b: Vector2, mat: BaseMaterial3D, is_door: bool, no_win := false) -> void:
 	var len_m: float = a.distance_to(b)
 	var dir: Vector2 = (b - a) / maxf(len_m, 0.001)
 	var gaps: Array = []      # [起, 迄]（沿牆的長度座標）
+	if no_win and not is_door:
+		_wall_piece(a, b, mat, 0.0, FLOOR_H * float(floors))
+		return
 	if is_door:
 		# ⚠ 門不能開在牆正中央：室內隔牆就在中線上，門會被隔牆堵住
 		#   （第一版實拍就是「門變成兩條細縫」）。偏到 32% 處讓進門動線是順的。
@@ -540,4 +562,11 @@ func _deco_mm(key: String, xfs: Array) -> void:
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "Deco_" + key
 	mmi.multimesh = mm
+	# ⚠ 門扇模組件自帶的材質幾乎是純黑，在黃昏側逆光下就是門洞上貼了一塊黑板
+	#   （實拍第一章營舍：門口是一片純黑長方形）。**視覺元素不可用純黑**——
+	#   跟焦土黑洞是同一條教訓。統一覆蓋成深木色。
+	if key == "door":
+		var dm := BattleMats.pbr("Concrete", 1.2, 0.85, Color(0.42, 0.30, 0.20)).duplicate()
+		dm.albedo_texture = null
+		mmi.material_override = dm
 	add_child(mmi)
