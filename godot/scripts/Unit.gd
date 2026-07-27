@@ -1046,12 +1046,16 @@ static var _drop_tex: GradientTexture2D = null
 static func _drop_dot() -> GradientTexture2D:
 	if _drop_tex != null:
 		return _drop_tex
+	# ⚠⚠ 一定要用 offsets/colors **陣列**一次設定。
+	#   我第一版寫 set_offset(0,..) / add_point(..) / set_color(1,..)——
+	#   `add_point` 是**依 offset 排序插入**的，插完之後索引 1 已經不是最後一點了，
+	#   於是「最後一點設成全透明」實際上改到了中間那點，真正的最後一點保持
+	#   Gradient 預設的**不透明白**。結果每一顆水珠外緣都是一圈實心白，
+	#   十幾顆疊起來就是使用者截圖裡那團白色物體。
+	#   （Main._soft_dot 當年就是用陣列寫的，我沒照抄才踩到。）
 	var g := Gradient.new()
-	g.set_offset(0, 0.0)
-	g.set_color(0, Color(1, 1, 1, 1))
-	g.add_point(0.55, Color(1, 1, 1, 0.85))
-	g.set_offset(1, 1.0)
-	g.set_color(1, Color(1, 1, 1, 0.0))
+	g.offsets = PackedFloat32Array([0.0, 0.42, 1.0])
+	g.colors = PackedColorArray([Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.42), Color(1, 1, 1, 0.0)])
 	var t := GradientTexture2D.new()
 	t.gradient = g
 	t.width = 48
@@ -1071,6 +1075,7 @@ func _splash_quad(sz: Vector2, col: Color, unshaded := true) -> QuadMesh:
 	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mt.albedo_color = col
 	mt.albedo_texture = _drop_dot()          # ★柔邊：治「白色方片」
+	mt.blend_mode = BaseMaterial3D.BLEND_MODE_ADD if not unshaded else mt.blend_mode
 	mt.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
 	qm.material = mt
@@ -1089,20 +1094,23 @@ func _splash_fx(dep: float) -> void:
 	pm.initial_velocity_min = 0.9 * k
 	pm.initial_velocity_max = 2.6 * k
 	pm.gravity = Vector3(0, -9.8, 0)
-	pm.scale_min = 0.018
-	pm.scale_max = 0.055                              # 2~5.5cm 的水珠（先前 4~11cm 太大）
+	# ⚠ 實測 ParticleProcessMaterial 的 scale_min/max 沒有生效（粒子仍以 1m 的方片在畫，
+	#   用 1.75m 比例尺量出白團直徑 1.2m）。尺寸改成寫進 **QuadMesh 本身**，
+	#   scale 只做小幅隨機——這樣不管那個屬性有沒有效，大小都是對的。
+	pm.scale_min = 0.7
+	pm.scale_max = 1.6                              # 2~5.5cm 的水珠（先前 4~11cm 太大）
 	pm.damping_min = 0.4
 	pm.damping_max = 1.2
 	pm.color = Color(0.88, 0.94, 0.98)
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 	pm.emission_sphere_radius = 0.16
 	var ps := GPUParticles3D.new()
-	ps.amount = 18
+	ps.amount = 22
 	ps.lifetime = 0.7
 	ps.one_shot = true
 	ps.explosiveness = 0.95
 	ps.process_material = pm
-	ps.draw_pass_1 = _splash_quad(Vector2.ONE, Color(0.90, 0.95, 1.0, 0.80))
+	ps.draw_pass_1 = _splash_quad(Vector2(0.045, 0.045), Color(0.92, 0.96, 1.0, 0.75))
 	ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	host.add_child(ps)
 	ps.global_position = Vector3(global_position.x, surf_y, global_position.z)
@@ -1114,20 +1122,20 @@ func _splash_fx(dep: float) -> void:
 	pm2.initial_velocity_min = 1.2 * k
 	pm2.initial_velocity_max = 2.4 * k
 	pm2.gravity = Vector3(0, -6.0, 0)
-	pm2.scale_min = 0.06
-	pm2.scale_max = 0.16
+	pm2.scale_min = 0.7
+	pm2.scale_max = 1.5
 	pm2.damping_min = 2.0
 	pm2.damping_max = 4.0
 	pm2.color = Color(0.92, 0.96, 1.0)
 	pm2.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 	pm2.emission_sphere_radius = 0.20
 	var ps2 := GPUParticles3D.new()
-	ps2.amount = 10
+	ps2.amount = 12
 	ps2.lifetime = 0.42
 	ps2.one_shot = true
 	ps2.explosiveness = 1.0
 	ps2.process_material = pm2
-	ps2.draw_pass_1 = _splash_quad(Vector2.ONE, Color(0.94, 0.97, 1.0, 0.55))
+	ps2.draw_pass_1 = _splash_quad(Vector2(0.10, 0.075), Color(0.94, 0.97, 1.0, 0.40))
 	ps2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	host.add_child(ps2)
 	ps2.global_position = Vector3(global_position.x, surf_y + 0.02, global_position.z)
@@ -1139,12 +1147,12 @@ func _splash_fx(dep: float) -> void:
 	# ③ 水面漣漪：一個貼著水面擴散的圓環。少了這件，水花像「在玻璃上撒白點」。
 	var ring := MeshInstance3D.new()
 	var rq := QuadMesh.new()
-	rq.size = Vector2(0.5, 0.5)
+	rq.size = Vector2(0.42, 0.42)
 	ring.mesh = rq
 	var rmat := StandardMaterial3D.new()
 	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	rmat.albedo_color = Color(0.95, 0.98, 1.0, 0.55)
+	rmat.albedo_color = Color(0.95, 0.98, 1.0, 0.38)
 	rmat.albedo_texture = _ring_tex()
 	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	rq.material = rmat
@@ -1154,7 +1162,7 @@ func _splash_fx(dep: float) -> void:
 	ring.global_position = Vector3(global_position.x, surf_y + 0.012, global_position.z)
 	var tw := ring.create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(ring, "scale", Vector3.ONE * (3.2 * k), 0.85).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(ring, "scale", Vector3.ONE * (2.4 * k), 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(rmat, "albedo_color:a", 0.0, 0.85)
 	tw.chain().tween_callback(ring.queue_free)
 
@@ -1163,17 +1171,15 @@ static var _ring_texture: GradientTexture2D = null
 static func _ring_tex() -> GradientTexture2D:
 	if _ring_texture != null:
 		return _ring_texture
+	# 中空的環（實心圓擴散起來是一團白霧，不是漣漪）。同樣用陣列設定。
 	var g := Gradient.new()
-	g.set_offset(0, 0.0)
-	g.set_color(0, Color(1, 1, 1, 0.0))
-	g.add_point(0.72, Color(1, 1, 1, 0.0))
-	g.add_point(0.86, Color(1, 1, 1, 1.0))
-	g.set_offset(1, 1.0)
-	g.set_color(1, Color(1, 1, 1, 0.0))
+	g.offsets = PackedFloat32Array([0.0, 0.70, 0.84, 0.94, 1.0])
+	g.colors = PackedColorArray([Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.0),
+			Color(1, 1, 1, 0.85), Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.0)])
 	var t := GradientTexture2D.new()
 	t.gradient = g
-	t.width = 64
-	t.height = 64
+	t.width = 96
+	t.height = 96
 	t.fill = GradientTexture2D.FILL_RADIAL
 	t.fill_from = Vector2(0.5, 0.5)
 	t.fill_to = Vector2(1.0, 0.5)

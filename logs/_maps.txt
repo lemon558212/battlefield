@@ -1,0 +1,10 @@
+plain     1920x1200 bld= 4 avg=15800 max=(140, 140) water=0/0/0 river=0 coast=-
+verdun    1920x1200 bld= 2 avg= 6400 max=(80, 80) water=0/0/0 river=0 coast=-
+town      1632x1020 bld= 7 avg=22955 max=(204, 136) water=0/0/0 river=0 coast=-
+desert    1920x1200 bld= 5 avg=32160 max=(220, 240) water=0/0/0 river=0 coast=-
+forest    1824x1140 bld= 4 avg=11010 max=(114, 114) water=0/0/0 river=0 coast=-
+urban     1632x1020 bld= 9 avg=21964 max=(204, 119) water=0/0/0 river=0 coast=-
+beach     2016x1260 bld= 3 avg=26166 max=(168, 210) water=1/1/1 river=0 coast=-
+strait    1920x1200 bld= 3 avg= 8496 max=(100, 100) water=0/1/1 river=0 coast=-
+harbor    1920x1200 bld= 5 avg=27680 max=(240, 180) water=1/1/1 river=0 coast=-
+tutorial  1400x1000 bld= 6 avg=41133 max=(280, 185) water=0/0/0 river=1 coast=Y

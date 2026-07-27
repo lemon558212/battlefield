@@ -376,72 +376,33 @@ func _walk_all() -> void:
 	await get_tree().create_timer(0.5).timeout
 
 	var bad := {"solid": [], "air": [], "deep": [], "stuck": [], "cam": [], "oob": []}
-	var checked := 0
+	_walk_bad = bad
+	_walk_checked = 0
 	var reached := 0
 	for i in range(start_i + 1, pts.size()):
 		var goal: Vector2 = pts[i]
-		var from: Vector2 = _live_px(pu)
-		var dist_m: float = from.distance_to(goal) * WORLD_SCALE
-		# 鏡頭朝目標（玩家就是這樣轉視角再按前進的）
-		var g3: Vector3 = _to3d(goal.x, goal.y)
-		var dv: Vector3 = g3 - pu["node"].global_position
-		cam.tps_yaw = rad_to_deg(atan2(dv.x, dv.z))
-		await get_tree().create_timer(0.12).timeout
-		# 這一段的直線本來走不走得通？走不通就不該當成卡死——
-		# 玩家會繞路，而測試是按著 W 直線走的。（河、建築、石頭都會擋直線。）
-		var line_ok: bool = _path_clear(pu["node"].global_position, g3, BODY_R)
-		# 涉水會慢到 1/2 速，預算要給夠，否則「走得到但太慢」會被誤判成卡死
-		var budget: float = dist_m / 1.0 + 3.0
-		var t := 0.0
-		var slow := 0.0
-		var air_run := 0
-		var last: Vector2 = _live_px(pu)
-		_press_key(KEY_W, true)
-		while t < budget:
-			await get_tree().create_timer(0.2).timeout
-			t += 0.2
-			var now: Vector2 = _live_px(pu)
-			var moved: float = now.distance_to(last) * WORLD_SCALE
-			last = now
-			checked += 1
-			# ---- 六條不變量 ----
-			var wp: Vector3 = pu["node"].global_position
-			var fixed: Vector3 = _resolve_solids(wp, BODY_R, pu)
-			if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
-				bad["solid"].append(now)
-			# ⚠ 「離地 0.3m」單次成立不是 bug——從 0.5m 的河堤走下來本來就有 0.3 秒在自由落體，
-			#   0.2 秒取樣一定會抓到那一幀。判準要問「這是短暫的墜落還是卡在半空」，
-			#   所以改成**連續四次（0.8 秒）都離地**才算。0.8 秒的自由落體是 3.1m，
-			#   比最深的壕溝（1.4m）還深，任何正常落差早就落地了。
-			#   （三次＝0.6 秒還會抓到 1.4m 壕溝的墜落，實測過。）
-			var gnd: float = _ground_height(wp)
-			if absf(wp.y - gnd) > 0.30:
-				air_run += 1
-				if air_run >= 4:
-					bad["air"].append([now, wp.y - gnd])
-					air_run = 0
-			else:
-				air_run = 0
-			var wd: float = terrain.water_depth(now.x, now.y) if terrain != null else 0.0
-			if wd > WADE_MAX:
-				bad["deep"].append([now, wd])
-			if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
-				bad["oob"].append(now)
-			var head: Vector3 = wp + Vector3(0, 1.6, 0)
-			if _wall_ray(head, cam.global_position) < 0.92:
-				bad["cam"].append(now)
-			if now.distance_to(goal) * WORLD_SCALE < 0.9:
-				break
-			slow = (slow + 0.2) if moved < WALK_SPEED_MIN * 0.2 else 0.0
-			if slow >= 2.0:
-				break                                    # 兩秒沒動＝卡住，交給下面判定
-		_press_key(KEY_W, false)
-		var end_gap: float = _live_px(pu).distance_to(goal) * WORLD_SCALE
-		if end_gap < 1.2:
+		# ★★覆蓋率（2026-07-28 自我檢討）：第一版是「按著 W 直線走」，河變成真障礙之後
+		#   129 段只抵達 20 段——**測試沒有真的走遍每個角落，那就等於沒測**。
+		#   改成跟玩家（與 AI）一樣會繞路：直線不通就用遊戲自己的 `_avoid_goal`
+		#   找一個中繼點，走過去再重新對準目標，最多繞兩次。
+		var ok: bool = await _walk_leg(pu, goal)
+		if not ok:
+			for _detour in 2:
+				var way: Vector3 = _avoid_goal(pu["node"].global_position,
+						_to3d(goal.x, goal.y), BODY_R)
+				var wp2 := Vector2(way.x / WORLD_SCALE + mwp * 0.5,
+						way.z / WORLD_SCALE + mhp * 0.5)
+				if wp2.distance_to(_live_px(pu)) * WORLD_SCALE < 1.0:
+					break                      # 繞路點就在腳下＝繞不出去
+				await _walk_leg(pu, wp2)
+				ok = await _walk_leg(pu, goal)
+				if ok:
+					break
+		if ok:
 			reached += 1
 		else:
-			# 走不到不一定是 bug：目標可能在建築裡、在深水裡、在障礙後面。
-			# 只有「目標是一塊乾淨的空地」卻走不到，才是真的卡死。
+			# 走不到不一定是 bug：目標可能在建築裡、水裡、障礙後面。
+			# 只有「目標是一塊乾淨的空地、而且直線本來就通」卻走不到，才是真的卡死。
 			var gw: Vector3 = _to3d(goal.x, goal.y)
 			var gfix: Vector3 = _resolve_solids(gw, BODY_R, pu)
 			var goal_blocked: bool = Vector2(gfix.x - gw.x, gfix.z - gw.z).length() > 0.06
@@ -451,8 +412,9 @@ func _walk_all() -> void:
 				if bd.rect.has_point(goal):
 					goal_in_bld = true
 					break
-			if line_ok and not (goal_blocked or goal_wet or goal_in_bld):
-				bad["stuck"].append([_live_px(pu), goal, end_gap])
+			if _path_clear(pu["node"].global_position, gw, BODY_R) 					and not (goal_blocked or goal_wet or goal_in_bld):
+				bad["stuck"].append([_live_px(pu), goal, _live_px(pu).distance_to(goal) * WORLD_SCALE])
+	var checked: int = _walk_checked
 	print("[walk] 走完 %d 段，抵達 %d 段；共 %d 次取樣檢查" % [pts.size() - 1, reached, checked])
 	var total := 0
 	for k in bad:
@@ -486,6 +448,63 @@ func _walk_all() -> void:
 	print("[walk] FAILS=%d（拍了 %d 張現場照）" % [total, shot])
 	print("[walk] DONE")
 	get_tree().quit(0)
+
+var _walk_bad := {}
+var _walk_checked := 0
+
+# 走一段（按 W，跟玩家同一條路徑），沿途每 0.2 秒檢查六條不變量。
+# 回傳是否抵達（離目標 1.2m 內）。
+func _walk_leg(pu, goal: Vector2) -> bool:
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	var g3: Vector3 = _to3d(goal.x, goal.y)
+	var dv: Vector3 = g3 - pu["node"].global_position
+	if Vector2(dv.x, dv.z).length() < 0.4:
+		return true
+	cam.tps_yaw = rad_to_deg(atan2(dv.x, dv.z))
+	await get_tree().create_timer(0.12).timeout
+	var dist_m: float = _live_px(pu).distance_to(goal) * WORLD_SCALE
+	var budget: float = dist_m / 1.0 + 3.0        # 涉水會慢到一半，預算要給夠
+	var t := 0.0
+	var slow := 0.0
+	var air_run := 0
+	var last: Vector2 = _live_px(pu)
+	_press_key(KEY_W, true)
+	while t < budget:
+		await get_tree().create_timer(0.2).timeout
+		t += 0.2
+		var now: Vector2 = _live_px(pu)
+		var moved: float = now.distance_to(last) * WORLD_SCALE
+		last = now
+		_walk_checked += 1
+		var wp: Vector3 = pu["node"].global_position
+		var fixed: Vector3 = _resolve_solids(wp, BODY_R, pu)
+		if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
+			_walk_bad["solid"].append(now)
+		# ⚠ 「離地 0.3m」單次成立不是 bug——從 0.5m 河堤走下來本來就在自由落體。
+		#   連續四次（0.8 秒）才算：0.8 秒的自由落體是 3.1m，比最深的壕溝還深。
+		var gnd: float = _ground_height(wp)
+		if absf(wp.y - gnd) > 0.30:
+			air_run += 1
+			if air_run >= 4:
+				_walk_bad["air"].append([now, wp.y - gnd])
+				air_run = 0
+		else:
+			air_run = 0
+		var wd: float = terrain.water_depth(now.x, now.y) if terrain != null else 0.0
+		if wd > BattleTerrain.WADE_MAX:
+			_walk_bad["deep"].append([now, wd])
+		if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
+			_walk_bad["oob"].append(now)
+		if _wall_ray(wp + Vector3(0, 1.6, 0), cam.global_position) < 0.92:
+			_walk_bad["cam"].append(now)
+		if now.distance_to(goal) * WORLD_SCALE < 0.9:
+			break
+		slow = (slow + 0.2) if moved < WALK_SPEED_MIN * 0.2 else 0.0
+		if slow >= 2.0:
+			break                                  # 兩秒沒動：交給呼叫端決定要不要繞路
+	_press_key(KEY_W, false)
+	return _live_px(pu).distance_to(goal) * WORLD_SCALE < 1.2
 
 # 使用者 2026-07-27：「反驗證是要實際你自己玩過全部的功能都沒有問題才叫修好」。
 # 這裡不驗任何內部指標，只做玩家會做的事：切換單位、走進屋子、停下來、按姿勢鍵，
@@ -6524,7 +6543,9 @@ func _scatter_trees(mw: float, mh: float) -> void:
 	var tmat := StandardMaterial3D.new()
 	tmat.vertex_color_use_as_albedo = true
 	tmat.roughness = 0.94
-	tmat.specular = 0.08
+	# ⚠ StandardMaterial3D 沒有 `specular`（那是 Godot 3 的 SpatialMaterial），
+	#   寫了會噴 remap 警告而且**完全沒作用**。Godot 4 用 metallic_specular。
+	tmat.metallic_specular = 0.15
 	# 葉子要雙面：低多邊形葉片只有一層，背面剔除會讓樹從某些角度變成半棵
 	tmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	for mesh_key2 in xf_by_mesh.keys():
