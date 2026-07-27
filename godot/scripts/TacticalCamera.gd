@@ -24,6 +24,8 @@ var _shoulder := 1.0              # 目前在哪一側肩膀（1＝右、-1＝�
 #   ground_probe.call(pos) -> float     該點的地面高度
 var wall_probe: Callable = Callable()
 var ground_probe: Callable = Callable()
+#   inside_probe.call(pos) -> bool        這個世界座標是不是在某棟建築室內
+var inside_probe: Callable = Callable()
 
 func set_tps(n: Node3D) -> void:
 	tps_node = n
@@ -143,6 +145,13 @@ func _apply_tps(delta: float) -> void:
 		var k2: float = float(wall_probe.call(head, global_position))
 		if k2 < 1.0:
 			global_position = head.lerp(global_position, clampf(k2 - 0.12, 0.04, 1.0))
+	# ★最後一道保險（2026-07-27 實拍：室內四面環顧有一個方向整格畫面是紅磚）：
+	#   `wall_probe` 是線段對牆線段求交，鏡頭若剛好從門窗缺口穿出去再停在牆體裡，
+	#   那條線段是「沒有命中任何牆段」的，判定不出來。
+	#   所以再加一條幾何條件：**角色在室內時，鏡頭必須也在同一個房間裡**。
+	if inside_probe.is_valid() and bool(inside_probe.call(tps_node.global_position)):
+		if not bool(inside_probe.call(global_position)):
+			global_position = head.lerp(global_position, 0.10)
 	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * _shoulder * 0.5
 	look_at(look_at_p, Vector3.UP)
 

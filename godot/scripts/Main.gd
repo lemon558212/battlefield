@@ -337,6 +337,7 @@ func _playtest() -> void:
 	#   必須按住至少一幀以上（這是測試寫法的坑，不是遊戲的 bug）。
 	await _hold_key(KEY_C, 0.12); await get_tree().create_timer(1.2).timeout
 	var c_c: float = pu["node"]._crouch
+	var st_c: String = str(pu["node"]._state)
 	await _snap("res://play_key_c.png")
 	await _hold_key(KEY_Z, 0.12); await get_tree().create_timer(1.4).timeout
 	var c_z: float = pu["node"]._prone
@@ -344,10 +345,13 @@ func _playtest() -> void:
 	await _hold_key(KEY_SPACE, 0.12); await get_tree().create_timer(1.4).timeout
 	var c_s: float = maxf(pu["node"]._crouch, pu["node"]._prone)
 	await _snap("res://play_key_space.png")
-	print("[play][姿勢鍵] C→_crouch=%.2f %s ／ Z→_prone=%.2f %s ／ Space→最大姿勢值=%.2f %s"
-			% [c_c, "OK" if c_c > 0.8 else "FAIL", c_z, "OK" if c_z > 0.8 else "FAIL",
-			c_s, "OK" if c_s < 0.05 else "FAIL"])
-	if c_c <= 0.8 or c_z <= 0.8 or c_s >= 0.05: fails += 1
+	# ⚠ 混合值到 1 不等於畫面上蹲下去了：按 C 走的是 stance_cmd，
+	#   而動畫分支以前只看 want_cover → 人站著、_crouch=1.00，斷言照樣通過。
+	#   所以要連「動畫狀態真的切到 crouch」一起驗。
+	print("[play][姿勢鍵] C→_crouch=%.2f 動畫=%s %s ／ Z→_prone=%.2f %s ／ Space→最大姿勢值=%.2f %s"
+			% [c_c, st_c, "OK" if (c_c > 0.8 and st_c == "crouch") else "FAIL(值對但動畫沒切)",
+			c_z, "OK" if c_z > 0.8 else "FAIL", c_s, "OK" if c_s < 0.05 else "FAIL"])
+	if c_c <= 0.8 or st_c != "crouch" or c_z <= 0.8 or c_s >= 0.05: fails += 1
 
 	# E) 走進最近的建築：驗屋頂淡出、鏡頭不穿牆
 	# 走進屋子要走一段路，AP 會先用完（AP 用盡＝停下，看起來像被擋住）。
@@ -377,14 +381,21 @@ func _playtest() -> void:
 		print("[play][鏡頭穿牆] 頭→鏡頭的牆體命中比例=%.2f（1.00＝沒穿牆）%s"
 				% [k, "OK" if k > 0.985 else "FAIL(鏡頭在牆外/牆裡)"])
 		if k <= 0.985: fails += 1
-		# 屋頂要因為「有我方單位在裡面」淡出，而不是因為他剛好被選取
 		var bi := _buildings.find(bd)
-		var alpha: float = float(_roof_a.get(bi, 1.0))
-		print("[play][屋頂淡出] 屋頂 alpha=%.2f %s" % [alpha, "OK" if alpha < 0.35 else "FAIL(屋頂還蓋著)"])
-		if alpha >= 0.35: fails += 1
-		# 屋裡的人要點得到（走真實點擊路徑）
+		# ★鏡頭在屋裡時屋頂**要留著**（不然室內變成一個沒有蓋子的箱子，
+		#   使用者：「在裡面會變成感覺沒有牆壁一樣可以看到外面」）
+		var a_in: float = float(_roof_a.get(bi, 1.0))
+		print("[play][室內留屋頂] 鏡頭在屋裡時屋頂 alpha=%.2f %s"
+				% [a_in, "OK(室內是室內)" if a_in > 0.65 else "FAIL(屋頂被淡掉，室內看得到天空)"])
+		if a_in <= 0.65: fails += 1
+		# 離開行動模式（鏡頭回到俯瞰）後，屋頂才該淡出——那是給俯瞰看屋裡有誰用的
 		_end_action()
-		await get_tree().create_timer(0.4).timeout
+		await get_tree().create_timer(1.2).timeout
+		var alpha: float = float(_roof_a.get(bi, 1.0))
+		print("[play][俯瞰淡屋頂] 鏡頭在屋外時屋頂 alpha=%.2f %s"
+				% [alpha, "OK(看得到屋裡的人)" if alpha < 0.35 else "FAIL(屋頂還蓋著，屋內的人點不到)"])
+		if alpha >= 0.35: fails += 1
+		await get_tree().create_timer(0.2).timeout
 		selected = null
 		_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
 		await get_tree().create_timer(0.4).timeout
@@ -392,6 +403,94 @@ func _playtest() -> void:
 				% [(selected["cls"] if selected != null else "null"), "OK" if selected != null else "FAIL(點不到)"])
 		if selected == null: fails += 1
 		await _snap("res://play_indoor_pick.png")
+
+	# F) 屋內四面環顧：使用者 2026-07-27「建築物裡人物在裡面會變成感覺沒有牆壁一樣可以看到外面」。
+	#    站在屋子正中央，把鏡頭轉四個方向各拍一張——四張都該看到牆。
+	if bd != null:
+		_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
+		await get_tree().create_timer(0.4).timeout
+		acting["ap"] = 9999.0
+		await _walk_to_px(pu, bd.rect.get_center(), 8.0)
+		for k in 4:
+			cam.tps_yaw = float(k) * 90.0
+			await get_tree().create_timer(0.7).timeout
+			await _snap("res://play_in_look%d.png" % k)
+		print("[play][屋內環顧] 已拍四個方向 play_in_look0~3.png")
+
+	# G) 固體不可互穿（使用者回報「人誤會穿過牆壁、戰車」）。
+	#    ⚠ 這裡**不隔離**任何障礙——使用者是在完整戰場上撞到的，隔離出來的測試證明不了。
+	var solid_fail := 0
+	if bd != null:
+		# G-1 對著外牆走 5 秒：不可以進到室內
+		var bc: Vector2 = bd.rect.get_center()
+		var wall_y: float = bc.y + bd.rect.size.y * 0.5
+		var start := Vector2(bc.x + bd.rect.size.x * 0.33, wall_y + 4.5 / WORLD_SCALE)
+		_end_action()
+		await get_tree().create_timer(0.3).timeout
+		cp = 6
+		pu["node"].global_position = _to3d(start.x, start.y)
+		pu["wx"] = start.x
+		pu["wy"] = start.y
+		_begin_action(pu)
+		pu["ap"] = 9999.0
+		pu["ap_max"] = 9999.0
+		cam.tps_yaw = 180.0                      # 朝 -z＝往北，正對南牆（避開門，偏 1/3 屋寬）
+		await get_tree().create_timer(0.4).timeout
+		await _hold_key(KEY_W, 5.0)
+		var inb: bool = bd.inside(_live_px(pu).x, _live_px(pu).y)
+		print("[play][撞牆] 對外牆走 5 秒：進到室內=%s %s"
+				% [inb, "OK(牆擋住了)" if not inb else "FAIL(人穿牆進去了)"])
+		if inb:
+			solid_fail += 1
+		await _snap("res://play_wall.png")
+	# G-2 對著戰車走 5 秒：不可以穿過車體
+	var veh = null
+	for u2 in units:
+		if u2["alive"] and Unit.is_vehicle_cls(u2["cls"]):
+			veh = u2
+			break
+	if veh == null:
+		# 這張圖第一回合沒有載具就自己生一台來撞（SKIP 等於沒驗，而使用者是真的撞到了）
+		var tank_cls := ""
+		for ck in GameData.class_base.keys():
+			if Unit.is_vehicle_cls(String(ck)):
+				tank_cls = String(ck)
+				break
+		if tank_cls != "":
+			var tp := Vector2(_live_px(pu).x + 90.0, _live_px(pu).y)
+			veh = _spawn_unit(tank_cls, 1 - player_side, tp.x, tp.y, false)
+			await get_tree().create_timer(0.5).timeout
+			print("[play][撞戰車] 場上沒有載具，生成一台 ", tank_cls, " 來撞")
+	if veh == null:
+		print("[play][撞戰車] SKIP 這份資料沒有載具兵種")
+	else:
+		var vp := _live_px(veh)
+		var away := Vector2(1.0, 0.0)
+		_end_action()
+		await get_tree().create_timer(0.3).timeout
+		cp = 6
+		var sp2: Vector2 = vp + away * (5.0 / WORLD_SCALE)
+		pu["node"].global_position = _to3d(sp2.x, sp2.y)
+		pu["wx"] = sp2.x
+		pu["wy"] = sp2.y
+		_begin_action(pu)
+		pu["ap"] = 9999.0
+		pu["ap_max"] = 9999.0
+		var tov: Vector3 = veh["node"].global_position - pu["node"].global_position
+		cam.tps_yaw = rad_to_deg(atan2(tov.x, tov.z))
+		await get_tree().create_timer(0.4).timeout
+		await _hold_key(KEY_W, 5.0)
+		var gap_m: float = Vector2(_live_px(pu).x - vp.x, _live_px(pu).y - vp.y).length() * WORLD_SCALE
+		# ⚠ VEHICLE_R 的單位是**公尺**（`_shot_clear` 裡要 `/ WORLD_SCALE` 才變 px）。
+		#   第一版又乘了一次 WORLD_SCALE，門檻變成 0.07m ＝這條斷言等於永遠通過。
+		#   「這個數字在錯誤情況下會不會也通過？」——會，那就是量錯了。
+		print("[play][撞戰車] 對車體走 5 秒：離車心 %.2fm（車半徑 %.2fm）%s"
+				% [gap_m, VEHICLE_R,
+				"OK(被車擋住)" if gap_m > VEHICLE_R * 0.9 else "FAIL(穿過車體)"])
+		if gap_m <= VEHICLE_R * 0.9:
+			solid_fail += 1
+		await _snap("res://play_tank.png")
+	fails += solid_fail
 
 	print("[play] FAILS=%d" % fails)
 	print("[play] DONE")
@@ -1291,10 +1390,16 @@ func _selftest() -> void:
 			print("[solidchk] 對著門走 4 秒：進到室內=%s %s" % [in_after_door,
 					"OK(門是唯一入口)" if in_after_door else "FAIL(門進不去)"])
 			await get_tree().create_timer(1.2).timeout
-			print("[buildingchk] 進屋後屋頂淡出 alpha=%.2f %s" % [float(_roof_a.get(0, 1.0)),
-					"OK" if float(_roof_a.get(0, 1.0)) < 0.15 else "FAIL"])
+			# ★2026-07-27 規則修正：鏡頭**在屋裡**時屋頂要留著（不然室內變成沒有蓋子的箱子，
+			#   使用者：「在裡面會變成感覺沒有牆壁一樣可以看到外面」）。
+			#   屋頂淡出是給**俯瞰**用的——玩家在天上要看到屋裡有誰。所以分兩段驗。
+			print("[buildingchk] 鏡頭在屋內時屋頂留著 alpha=%.2f %s" % [float(_roof_a.get(0, 1.0)),
+					"OK" if float(_roof_a.get(0, 1.0)) > 0.65 else "FAIL(室內看得到天空)"])
 			await _snap("res://bld_ingame.png")
 			cam.clear_tps()
+			await get_tree().create_timer(1.2).timeout
+			print("[buildingchk] 回俯瞰後屋頂淡出 alpha=%.2f %s" % [float(_roof_a.get(0, 1.0)),
+					"OK" if float(_roof_a.get(0, 1.0)) < 0.15 else "FAIL(屋頂還蓋著，屋內的人點不到)"])
 			cam.set_follow(null)
 			cam.focus = _to3d(bc.x, bc.y) + Vector3(0, 1.0, 0)
 			cam.dist = 22.0
@@ -3637,6 +3742,13 @@ func _roof_fade(delta: float) -> void:
 	var watch = acting if acting != null else selected
 	if watch != null and is_instance_valid(watch["node"]):
 		pts.append(_live_px(watch))     # 行動中的敵人也要看得到（鏡頭會跟拍）
+	# ★鏡頭在屋裡時不可以淡出屋頂（2026-07-27 使用者：「建築物裡人物在裡面會變成
+	#   感覺沒有牆壁一樣可以看到外面」）。屋頂淡出是給**俯瞰**用的——玩家在天上，
+	#   要看到屋裡有誰。第三人稱鏡頭已經在室內時，淡掉屋頂只會讓房間變成一個沒有蓋子的箱子。
+	var cam_px := Vector2(-99999.0, -99999.0)
+	if cam != null and cam.is_tps():
+		cam_px = Vector2(cam.global_position.x / WORLD_SCALE + float(map_data.get("w", 960)) * 0.5,
+				cam.global_position.z / WORLD_SCALE + float(map_data.get("h", 600)) * 0.5)
 	for i in _buildings.size():
 		var bd = _buildings[i]
 		var occupied := false
@@ -3645,6 +3757,8 @@ func _roof_fade(delta: float) -> void:
 				occupied = true
 				break
 		var want: float = 0.0 if occupied else 1.0
+		if bd.rect.grow(1.0).has_point(cam_px):
+			want = 1.0            # 鏡頭就在這棟裡面：屋頂與天花板留著，室內才是室內
 		var cur: float = float(_roof_a.get(i, 1.0))
 		cur = move_toward(cur, want, delta * 3.5)
 		_roof_a[i] = cur
@@ -4064,6 +4178,15 @@ func _los_clear(a: Vector2, b: Vector2) -> bool:
 
 # 從 a 打一條線到 b，回傳最近的牆命中比例（0~1，1＝沒撞到）。鏡頭碰撞用。
 # 只看牆的水平投影：牆是落地到頂的，垂直方向不必算。
+# 這個世界座標在不在某棟建築室內（鏡頭用：角色在屋裡時鏡頭不可以跑到牆外）
+func _pos_indoors(p: Vector3) -> bool:
+	var px: float = p.x / WORLD_SCALE + float(map_data.get("w", 960)) * 0.5
+	var py: float = p.z / WORLD_SCALE + float(map_data.get("h", 600)) * 0.5
+	for bd in _buildings:
+		if bd.inside(px, py):
+			return true
+	return false
+
 func _wall_ray(a: Vector3, b: Vector3) -> float:
 	if _buildings.is_empty() and _blockers.is_empty():
 		return 1.0
@@ -4096,6 +4219,19 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 		var seg_len: float = sqrt(l2)
 		for bk in _blockers:
 			var rr: float = float(bk["r"])
+			# ★★2026-07-27：這裡原本第一行就是 `if bk["t"] != "cir": continue`——
+			#   **所有線段型障礙整批被跳過**，而磚牆殘段、紐澤西護欄、木柵欄全是線段。
+			#   後果：第三人稱鏡頭照樣鑽進磚牆，室內環顧有一個方向整格畫面是紅磚
+			#   （使用者實際玩到）。線段要擋，但只擋「夠厚又夠高」的——
+			#   0.14m 的木柵欄一直把鏡頭往回拉很煩，而且它本來也遮不住什麼。
+			if bk["t"] == "seg":
+				if rr * WORLD_SCALE < 0.18 or float(bk.get("h", 0.0)) < 1.0:
+					continue
+				# ⚠ 這個迴圈裡的 a/b 是 Vector3（世界座標）；線段求交要用換算好的 px 座標 p1/p2
+				var ts: float = _seg_param(p1, p2, bk["a"], bk["b"])
+				if ts > 0.0 and ts < best:
+					best = ts
+				continue
 			if bk["t"] != "cir" or rr * WORLD_SCALE < 0.35:
 				continue
 			var c: Vector2 = bk["c"]
@@ -4706,6 +4842,7 @@ func _build_ground() -> void:
 	# 鏡頭碰撞：把「牆」與「地面」的查詢注入相機（真相在這邊，相機只負責用）
 	cam.wall_probe = func(a: Vector3, b: Vector3) -> float: return _wall_ray(a, b)
 	cam.ground_probe = func(p: Vector3) -> float: return terrain.height_at_world(p)
+	cam.inside_probe = func(p: Vector3) -> bool: return _pos_indoors(p)
 	# 地表顏色改走頂點色（見 Terrain._ground_color），材質只要最單純的一顆
 	# 地表：顏色仍由頂點色決定（見 Terrain._ground_color），只疊土質的「法線＋粗糙度」，
 	# 不疊 albedo——把土色乘上去會把草地染成一片灰泥（實拍踩過）。

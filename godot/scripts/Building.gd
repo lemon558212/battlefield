@@ -113,6 +113,12 @@ func build(sdef: Dictionary, world_scale: float, map_w: float, map_h: float, wor
 	roof.name = "Roof"
 	add_child(roof)
 	var top: float = float(floors) * FLOOR_H
+	# ★天花板（2026-07-27）：以前沒有。屋頂淡出後，站在室內往上看是天空、牆頂憑空切斷，
+	#   讀起來就是「這棟房子沒有牆」（使用者原話）。天花板掛在 roof 節點底下，
+	#   所以俯瞰淡出時它會一起淡掉，不影響「進屋看得到室內」那個效果。
+	var ceil := _box(sizex, 0.16, sizez, im)
+	ceil.position = Vector3(0, top + 0.08, 0)
+	roof.add_child(ceil)
 	if kind == "tower" or kind == "radar" or kind == "depot" or kind == "gate":
 		# 軍用設施是平頂＋女兒牆（屋頂要能站人、架天線），不是紅瓦斜頂
 		var deck := _box(sizex + 0.4, 0.22, sizez + 0.4, _wall_mat)

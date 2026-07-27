@@ -1354,7 +1354,12 @@ func _process(delta: float) -> void:
 				_play("sprint")                   # 加速行軍用衝刺動作，腳步才跟得上速度
 			else:
 				_play("run" if anim_names.has("run") else "walk")
-	elif want_cover and _prone < 0.5 and anim_names.has("crouch"):
+	# ⚠⚠ 條件不可以只看 `want_cover`（＝自動掩體判定）：玩家按 C 是寫 `stance_cmd`，
+	#   於是「_crouch 混合值到 1、但動畫還是站姿」——畫面上人根本沒有蹲下去。
+	#   ★而且 `-- play` 斷言 `_crouch == 1.00` 照樣通過（2026-07-27 連拍才抓到）：
+	#     這正是「這個數字在錯誤情況下會不會也通過？」那條教訓的又一次現形。
+	#   判準要用**實際的蹲姿混合值**，它同時涵蓋自動判定與玩家按鍵兩條路。
+	elif _crouch > 0.5 and _prone < 0.5 and anim_names.has("crouch"):
 		_play("crouch")   # 有真人蹲姿動作（UAL Crouch_Idle 重定向）就直接播，不再用幾何硬湊
 		# ⚠ 趴著時不可以播蹲姿動畫：那支動作會寫滿全身骨骼，再被趴姿覆寫等於兩層打架
 	elif _state == "shoot" or _state == "" or _state == "hit" or _state == "crouch":
@@ -1550,6 +1555,9 @@ func _aim_pose() -> void:
 	# 真實做法＝上半身覆蓋：雙手仍持槍、槍口略朝下前方，腿部照跑步動畫走。
 	_aiming = (not _dead) and not (_state in FREEHAND_STATES)
 	if not _aiming:
+		if _dead:
+			_drop_gun()      # ★陣亡＝槍掉在地上，不是「斜背在背上」（見 _drop_gun）
+			return
 		_stow_gun(sk)        # 雙手要做別的事：把槍斜背到背上（不然長槍會插進地面）
 		return
 	var si := sk.find_bone("Shoulder.R")
@@ -1684,6 +1692,41 @@ func _aim_pose() -> void:
 	_gun_src_world = pocket
 	_muzzle_world = pocket + aim * _gun_len
 	_crouch_offset()
+
+# 陣亡：槍脫手掉在地上（2026-07-27 使用者：「倒下手臂跟武器也在背後」）。
+# ⚠ 真因：陣亡走的是 `_stow_gun`（斜背），而斜背的槍身軸取**世界座標的上方**——
+#   人已經躺平了，槍還是直挺挺豎著，畫面上就是一把槍浮在屍體旁邊。
+#   人死了手會鬆開，槍會掉在地上——這是鐵律 0，不是演出選擇。
+var _gun_dropped := false
+
+func _drop_gun() -> void:
+	if _gun_node == null or not is_instance_valid(_gun_node):
+		return
+	if _gun_dropped:
+		return
+	_gun_dropped = true
+	# 從手腕掛點移到 Unit 底下（跟著屍體一起淡出／清除，不會留下孤兒節點）
+	var xf_keep: Transform3D = _gun_node.global_transform
+	var par := _gun_node.get_parent()
+	if par != null:
+		par.remove_child(_gun_node)
+	add_child(_gun_node)
+	_gun_node.global_transform = xf_keep
+	# 平躺在身體旁邊的地面上，槍口朝角色面向的方向、略微歪斜（沒有人的槍會擺得筆直）
+	var fwd := facing_dir().rotated(Vector3.UP, randf_range(-0.6, 0.6))
+	var side := right_dir()
+	var gp: Vector3 = global_position + side * randf_range(0.18, 0.42) + fwd * 0.15
+	var gy: float = gp.y
+	if ground_sampler.is_valid():
+		gy = float(ground_sampler.call(gp))
+	var z_axis := fwd.cross(Vector3.UP).normalized()
+	if z_axis.length() < 0.01:
+		return
+	var y_axis := z_axis.cross(fwd).normalized()
+	var b := Basis(fwd * _gun_len_scale, y_axis * _gun_len_scale,
+			z_axis * _gun_len_scale) * _gun_axis_fix
+	_gun_node.global_transform = Transform3D(b,
+			Vector3(gp.x, gy + 0.055, gp.z) - b * _gun_grip)
 
 # 收槍：斜背在背上。修理/佔領/赤手待機時雙手放開，槍若還掛在手腕上會垂直插進地面。
 func _stow_gun(sk: Skeleton3D) -> void:

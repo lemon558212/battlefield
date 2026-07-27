@@ -2,8 +2,16 @@
 # 目的：肉眼判定「手臂到底在不在畫面上」，不靠任何間接指標（量錯維度＝白修的教訓）。
 extends Node3D
 
-const MODEL := "res://assets/models/chars/hr_m_Soldier.fbx"
-const CLS := "rifleman"
+# 兵種可由指令列指定（使用者實際玩的是狙擊手＝hr_w_Swat＋狙擊槍，
+# 用步槍兵驗完就宣稱好過去踩過同樣的坑：「驗證台過 ≠ 遊戲裡對」）。
+static func _arg(key: String, dflt: String) -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with(key + "="):
+			return a.substr(key.length() + 1)
+	return dflt
+
+var MODEL := "res://assets/models/chars/%s.fbx" % _arg("model", "hr_m_Soldier")
+var CLS := _arg("cls", "rifleman")
 
 var _cam: Camera3D
 var _u: Unit
@@ -111,5 +119,47 @@ func _run() -> void:
 	await _shot("back", 0.0, 1.35, 2.6)
 	await _shot("left", -PI * 0.5, 1.35, 2.6)
 	await _shot("top", PI * 0.75, 3.2, 2.4)
+	# ★連拍：使用者 2026-07-27 回報「跑步手臂與武器在背後、倒下也是、蹲下有一度沒有手臂」。
+	#   這三個都是**過程中的某幾格**才出現，靜態擺姿勢一定拍不到。
+	#   逐格拍成一排，再由人眼一次看完整段。
+	await _seq("run", 10, 0.12, func(dt): _u.move_dir(Vector3(0, 0, 1), dt))
+	_u.stop()
+	await _wait(0.6)
+	_u.want_cover = true                       # 觸發自動蹲：拍「蹲下的過程」
+	await _seq("crouch", 12, 0.10, func(_dt): pass)
+	_u.want_cover = false
+	await _wait(1.2)
+	# 使用者回報「蹲下有一度沒有手臂跟武器」。站→蹲拍過沒事，再驗**趴→蹲→站**這條：
+	# 遊戲裡狙擊手會先自動臥射，玩家再按 C，走的是這條路徑。
+	_u.stance_cmd = "prone"
+	await _wait(1.8)
+	_u.stance_cmd = "crouch"
+	await _seq("p2c", 12, 0.10, func(_dt): pass)
+	_u.stance_cmd = "stand"
+	await _seq("c2s", 10, 0.10, func(_dt): pass)
+	_u.stance_cmd = ""
+	await _wait(0.8)
+	_u.take_hit()
+	await _wait(0.5)
+	_u.die()
+	await _seq("death", 12, 0.14, func(_dt): pass)
 	print("[armshot] DONE")
 	get_tree().quit(0)
+
+# 連拍一段：每格之間可以持續驅動（跑步要每幀餵 move_dir，否則第二格就停了）
+func _seq(tag: String, n: int, gap: float, tick: Callable) -> void:
+	for f in n:
+		var t := 0.0
+		while t < gap:
+			await get_tree().process_frame
+			var dt: float = get_process_delta_time()
+			t += dt
+			tick.call(dt)
+		var c := _u.global_position + Vector3(2.9, 1.15, 0.6)
+		_cam.position = c
+		_cam.look_at(_u.global_position + Vector3(0, 0.95, 0), Vector3.UP)
+		_cam.fov = 40.0
+		await RenderingServer.frame_post_draw
+		DirAccess.make_dir_recursive_absolute("res://qa/")
+		get_viewport().get_texture().get_image().save_png("res://qa/seq_%s_%d.png" % [tag, f])
+	print("[armshot] seq ", tag, " x", n)
