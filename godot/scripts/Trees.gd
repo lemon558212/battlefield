@@ -17,10 +17,10 @@ const KINDS := ["broadleaf", "pine", "palm", "shrub", "dead"]
 
 # 生態 → 樹種權重。海岸多椰子與木麻黃（台灣濱海基地的防風林），沙漠沒有樹。
 const MIX := {
-	"coast":  {"palm": 0.30, "pine": 0.26, "broadleaf": 0.20, "shrub": 0.20, "dead": 0.04},
-	"forest": {"pine": 0.40, "broadleaf": 0.42, "shrub": 0.15, "dead": 0.03},
-	"grass":  {"broadleaf": 0.46, "pine": 0.20, "shrub": 0.28, "dead": 0.06},
-	"urban":  {"broadleaf": 0.55, "shrub": 0.35, "dead": 0.10},
+	"coast":  {"palm": 0.28, "pine": 0.22, "broadleaf": 0.20, "shrub": 0.18, "dead": 0.12},
+	"forest": {"pine": 0.38, "broadleaf": 0.38, "shrub": 0.14, "dead": 0.10},
+	"grass":  {"broadleaf": 0.42, "pine": 0.18, "shrub": 0.26, "dead": 0.14},
+	"urban":  {"broadleaf": 0.48, "shrub": 0.32, "dead": 0.20},
 	"mud":    {"dead": 0.45, "pine": 0.20, "shrub": 0.30, "broadleaf": 0.05},
 	"desert": {"shrub": 0.80, "dead": 0.20},
 }
@@ -68,24 +68,44 @@ static func _make(kind: String, rng: RandomNumberGenerator) -> ArrayMesh:
 # ---------- 各樹種 ----------
 
 static func _broadleaf(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+	# ★2026-07-27 重做（使用者：「樹冠仍偏一顆大白菜」）。
+	# 一顆大團塊不管怎麼加雜訊都是一顆球。真實樹冠的輪廓是**好幾叢枝葉各自成團**，
+	# 團與團之間有缺口、有陰影，逆光看得到天空從縫隙透過來。
+	# 所以改成：主幹分岔 → 每根枝的末端各長一叢小團塊 → 團塊排在一個壓扁的半球殼上。
 	var h: float = rng.randf_range(4.6, 8.2)
-	var r0: float = h * rng.randf_range(0.030, 0.042)
-	_taper(st, Vector3.ZERO, Vector3(rng.randf_range(-0.25, 0.25), h * 0.52,
-			rng.randf_range(-0.25, 0.25)), r0, r0 * 0.55, 6, _bark(rng))
-	# 主枝：兩三根伸出去，樹冠才不是「插在棍子上的一顆球」
-	var top := Vector3(0, h * 0.52, 0)
-	var n: int = rng.randi_range(2, 3)
+	var r0: float = h * rng.randf_range(0.032, 0.046)
+	# 主幹微彎（兩段）：筆直的圓柱一看就是程式生成的
+	var mid := Vector3(rng.randf_range(-0.18, 0.18), h * 0.30, rng.randf_range(-0.18, 0.18))
+	var fork: Vector3 = mid + Vector3(rng.randf_range(-0.30, 0.30), h * 0.22,
+			rng.randf_range(-0.30, 0.30))
+	var bark: Color = _bark(rng)
+	_taper(st, Vector3.ZERO, mid, r0, r0 * 0.78, 7, bark)
+	_taper(st, mid, fork, r0 * 0.78, r0 * 0.60, 6, bark * 1.04)
 	var leaf: Color = _leaf(rng)
-	for i in n:
-		var a: float = TAU * (float(i) + rng.randf_range(-0.2, 0.2)) / float(n)
-		var reach: float = h * rng.randf_range(0.16, 0.26)
-		var tip: Vector3 = top + Vector3(cos(a) * reach, h * rng.randf_range(0.10, 0.18),
-				sin(a) * reach)
-		_taper(st, top, tip, r0 * 0.5, r0 * 0.22, 5, _bark(rng))
-		_blob(st, tip + Vector3(0, h * 0.06, 0), h * rng.randf_range(0.15, 0.21),
-				rng.randf_range(0.62, 0.80), leaf * rng.randf_range(0.86, 1.14), rng)
-	_blob(st, top + Vector3(0, h * 0.16, 0), h * rng.randf_range(0.19, 0.24),
-			rng.randf_range(0.66, 0.82), leaf, rng)
+	var crown_r: float = h * rng.randf_range(0.30, 0.40)      # 樹冠半徑
+	var crown_y: float = h * rng.randf_range(0.30, 0.40)      # 樹冠中心離分岔多高
+	var nb: int = rng.randi_range(3, 5)
+	var tips: Array = []
+	for i in nb:
+		var a: float = TAU * (float(i) + rng.randf_range(-0.25, 0.25)) / float(nb)
+		var reach: float = crown_r * rng.randf_range(0.45, 0.85)
+		var tip: Vector3 = fork + Vector3(cos(a) * reach,
+				crown_y * rng.randf_range(0.55, 1.0), sin(a) * reach)
+		_taper(st, fork, tip, r0 * 0.52, r0 * 0.18, 5, bark * rng.randf_range(0.9, 1.1))
+		tips.append(tip)
+	# 葉團：每根枝末端一叢，再補幾叢填在枝與枝之間，缺口留著不要補滿
+	var lumps: Array = []
+	for tip2 in tips:
+		lumps.append([tip2, rng.randf_range(0.28, 0.42)])
+	for i in rng.randi_range(3, 5):
+		var a2: float = rng.randf() * TAU
+		var rr: float = crown_r * rng.randf_range(0.25, 0.95)
+		lumps.append([fork + Vector3(cos(a2) * rr,
+				crown_y * rng.randf_range(0.6, 1.25), sin(a2) * rr),
+				rng.randf_range(0.22, 0.36)])
+	for lm in lumps:
+		_blob(st, lm[0] as Vector3, crown_r * float(lm[1]),
+				rng.randf_range(0.66, 0.92), leaf * rng.randf_range(0.82, 1.18), rng)
 
 static func _pine(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 	var h: float = rng.randf_range(6.0, 12.0)
@@ -134,14 +154,19 @@ static func _palm(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 					r0 * 0.9, 0.9, Color(0.36, 0.28, 0.16), rng)
 
 static func _shrub(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
-	var h: float = rng.randf_range(1.2, 2.2)
+	var h: float = rng.randf_range(1.1, 2.3)
 	var leaf: Color = _leaf(rng) * Color(1.0, 0.96, 0.86)
-	for i in rng.randi_range(3, 5):
-		var a: float = TAU * rng.randf()
-		var d: float = h * rng.randf_range(0.0, 0.42)
-		_blob(st, Vector3(cos(a) * d, h * rng.randf_range(0.32, 0.62), sin(a) * d),
-				h * rng.randf_range(0.30, 0.46), rng.randf_range(0.70, 0.95),
-				leaf * rng.randf_range(0.84, 1.16), rng)
+	# 幾根細枝從根部散出去，葉團掛在枝上——沒有枝的灌木就是地上放了幾顆球
+	var stems: int = rng.randi_range(3, 5)
+	for i in stems:
+		var a: float = TAU * float(i) / float(stems) + rng.randf_range(-0.4, 0.4)
+		var lean: float = rng.randf_range(0.18, 0.42)
+		var tip := Vector3(cos(a) * h * lean, h * rng.randf_range(0.45, 0.75), sin(a) * h * lean)
+		_taper(st, Vector3.ZERO, tip, h * 0.045, h * 0.018, 4, _bark(rng) * 0.9)
+		_blob(st, tip, h * rng.randf_range(0.26, 0.40), rng.randf_range(0.66, 0.92),
+				leaf * rng.randf_range(0.82, 1.18), rng)
+	_blob(st, Vector3(0, h * 0.34, 0), h * rng.randf_range(0.26, 0.36),
+			rng.randf_range(0.70, 0.95), leaf * rng.randf_range(0.86, 1.12), rng)
 
 static func _dead(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 	var h: float = rng.randf_range(4.0, 7.0)

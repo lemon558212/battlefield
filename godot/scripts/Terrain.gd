@@ -285,31 +285,49 @@ func _ground_color(v: Vector3) -> Color:
 	# 所以基準色要壓得比直覺更暗更飽和，遠看才不會一片死白（2026-07-26 實拍調出來的值）。
 	# 基色＝maps.json 的 ground 色（美術在資料層定過的）：壓暗到頂點色量級再做雜訊變化。
 	# 沙漠圖的 ground 是沙色、城鎮是灰土——同一條公式，每張圖自然長自己的樣子。
-	var base: Color = biome.get("ground", Color(0.48, 0.56, 0.35)) * 0.42
+	# ⚠ 2026-07-27（使用者：「地面仍偏禿」）：0.42 太暗。
+	#   草的可視距離只有 42m，遠鏡頭下草全被裁掉、畫面上只剩這個頂點色——
+	#   底色壓到 0.42 倍就等於「遠看是一片深褐色的土」。
+	#   遠景的綠意必須由**地表頂點色**負責，不能指望草（草是給近景的細節）。
+	var base: Color = biome.get("ground", Color(0.48, 0.56, 0.35)) * 0.56
 	var grass: Color = (base * 0.82).lerp(base * 1.25, n)
 	grass = grass.lerp(base, n2 * 0.35)
 	var dirt: Color = biome.get("dirt", Color(0.25, 0.20, 0.13))
 	var rock: Color = biome.get("rock", Color(0.27, 0.26, 0.24))
 	var sl: float = slope_at(px, py)
 	var c := grass
-	c = c.lerp(dirt, clampf((sl - 0.25) * 2.2, 0.0, 0.85))      # 斜面＝裸土
-	c = c.lerp(rock, clampf((sl - 0.85) * 1.6, 0.0, 0.6))       # 陡坡＝碎石
+	# ⚠ 2026-07-27（使用者：「地面仍偏禿」）：門檻 0.25 太低。
+	#   基礎起伏 ±0.9m 加上丘陵，全圖大半的坡度都超過 0.25，於是整片變裸土。
+	#   現實裡草長不住的是**陡坡**（沖刷帶走表土），緩坡照樣是草。門檻拉到 0.45。
+	c = c.lerp(dirt, clampf((sl - 0.45) * 1.8, 0.0, 0.62))      # 陡一點才是裸土
+	c = c.lerp(rock, clampf((sl - 0.95) * 1.6, 0.0, 0.55))      # 更陡＝碎石
 	# 岸線（使用者 2026-07-26：「河流只有一片藍色叫做河流? 不對吧」）：
 	# 真實水岸是「濕泥/沙灘帶 → 乾土 → 草」的漸層，而不是草地直接切進藍色貼片。
 	# 這裡把靠近水域的地表染成濕沙色並壓暗（濕的土比乾的暗）。
+	# ⚠⚠ 2026-07-27：這段原本只讀 `_waters` **矩形**。第一章改成曲線海岸後那個陣列是空的，
+	#   於是整條「濕泥→乾沙→草」的岸帶靜默消失，海灘直接是乾土（實拍）。
+	#   這是本專案第三次「換了資料來源、舊的消費端沒跟上」——改成問地形本身的水位高差。
+	var sh_wet := 0.0
+	if not (_coasts.is_empty() and _rivers.is_empty()):
+		# 高出水面幾公尺：0 = 水線，越高越乾。1.1m 之內都算潮間帶／河灘
+		var above: float = -water_signed(px, py)
+		if above > -99.0:
+			sh_wet = clampf(1.0 - above / 1.10, 0.0, 1.0)
 	for w2 in _waters:
 		var wr2: Rect2 = w2["r"]
 		var band: float = 46.0
-		var g2: Rect2 = wr2.grow(band)
-		if g2.has_point(Vector2(px, py)):
-			# 距離水緣多遠（水裡＝0）
+		if wr2.grow(band).has_point(Vector2(px, py)):
 			var dx2: float = maxf(maxf(wr2.position.x - px, px - wr2.end.x), 0.0)
 			var dy2: float = maxf(maxf(wr2.position.y - py, py - wr2.end.y), 0.0)
-			var od: float = sqrt(dx2 * dx2 + dy2 * dy2)
-			var wetk: float = 1.0 - clampf(od / band, 0.0, 1.0)
-			wetk *= clampf(0.6 + _vnoise(px * 0.035, py * 0.035) * 0.8, 0.0, 1.0)
-			var wet_c := Color(0.34, 0.29, 0.20)     # 濕泥沙
-			c = c.lerp(wet_c, clampf(wetk * 1.35, 0.0, 0.92))
+			sh_wet = maxf(sh_wet, 1.0 - clampf(sqrt(dx2 * dx2 + dy2 * dy2) / band, 0.0, 1.0))
+	if sh_wet > 0.0:
+		# 邊界要參差：一條平滑的等寬濕帶看起來是「畫上去的鑲邊」
+		sh_wet *= clampf(0.6 + _vnoise(px * 0.035, py * 0.035) * 0.8, 0.0, 1.0)
+		# 乾沙（近水但在潮線之上）→ 濕泥沙（潮線附近）
+		var dry_sand := Color(0.56, 0.48, 0.34)
+		var wet_c := Color(0.31, 0.26, 0.18)
+		c = c.lerp(dry_sand, clampf(sh_wet * 1.5, 0.0, 0.85))
+		c = c.lerp(wet_c, clampf((sh_wet - 0.55) * 2.2, 0.0, 0.88))
 	# 彈坑焦痕：直接烤進地表頂點色。先前是 Props 擺一堆懸空的黑色薄板（burn box），
 	# 在彈坑斜壁上會翹起、懸空——燒焦是「地表本身變黑」，不是一種物體（鐵律 0）。
 	for cr2 in _craters:
@@ -326,8 +344,10 @@ func _ground_color(v: Vector3) -> Color:
 	# 真實草地會有踩禿的土、乾掉的枯草塊，用兩層雜訊做出不規則邊界。
 	var pn: float = _vnoise(px * 0.006 + 41.0, py * 0.006 + 17.0)
 	var pn2: float = _vnoise(px * 0.028 + 9.0, py * 0.028 + 3.0)
-	var patch: float = clampf((pn * 0.8 + pn2 * 0.35 - 0.62) * 3.2, 0.0, 1.0)
-	c = c.lerp(dirt.lerp(Color(0.33, 0.27, 0.17), pn2), patch * 0.55)
+	# ⚠ 門檻 0.62、強度 0.55 疊在上面那層之後，平地也有一半是土色。
+	#   踩禿的土斑本來就是「少數幾塊」，不是地表的底色。
+	var patch: float = clampf((pn * 0.8 + pn2 * 0.35 - 0.74) * 3.6, 0.0, 1.0)
+	c = c.lerp(dirt.lerp(Color(0.33, 0.27, 0.17), pn2), patch * 0.34)
 	# 枯草：另一組雜訊，偏黃綠，面積小一點
 	var dn: float = clampf((_vnoise(px * 0.013 + 77.0, py * 0.013 + 5.0) - 0.58) * 3.6, 0.0, 1.0)
 	c = c.lerp(Color(0.31, 0.30, 0.12), dn * 0.32)
@@ -359,7 +379,9 @@ func _build_grass() -> void:
 	#   真實草地是「矮而密」——高度砍到腳踝，葉片數加倍補密度，繪製次數不變。
 	var gd: float = float(biome.get("grass_density", 1.0))
 	if gd > 0.01:
-		_grass_layer(_tuft_mesh(0.55, 9), _scatter_field(), 42.0, "GrassField")
+		# 可視距離 42→58m：42m 在斜俯瞰下大約只到畫面下緣三分之一，
+		# 中景就已經沒有草了。實例數不變，只是多畫一點（[perf] 要盯著）。
+		_grass_layer(_tuft_mesh(0.55, 9), _scatter_field(), 58.0, "GrassField")
 		# ★戰場外那一圈（2026-07-27 使用者：「遠景空曠、中景沒銜接」）：
 		#   地形在戰場外還鋪了 90m，但草只鋪到戰場邊界，於是戰場邊緣就是一條
 		#   「草地 → 光禿土地」的硬邊，遠景整片是裸土。

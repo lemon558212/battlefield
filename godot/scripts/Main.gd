@@ -5904,7 +5904,17 @@ func _scatter_trees(mw: float, mh: float) -> void:
 				if terrain.in_water(px + probe.x, py + probe.y):
 					near_water = true
 					break
+		# 枯樹要長在該長的地方：彈坑與焦土附近的樹本來就被燒死了。
+		# 「隨機灑幾棵枯樹」跟「被炸過的那一圈都是枯樹」在畫面上是完全不同的訊息量。
+		var burnt := false
+		for cr3 in map_data.get("foxholes", []):
+			var rr3: float = float(cr3.get("r", 36)) * 2.6
+			if tp.distance_to(Vector2(float(cr3.get("x", 0)), float(cr3.get("y", 0)))) < rr3:
+				burnt = true
+				break
 		var kind: String = TREES.pick(bkey, near_water, rng)
+		if burnt and rng.randf() < 0.65:
+			kind = "dead"
 		var vlist: Array = protos[kind]
 		var mesh_key: ArrayMesh = vlist[rng.randi() % vlist.size()]
 		# 縮放的變異要大（0.62~1.20）：樹種本身已經有兩倍高度差，再乘上這個，

@@ -1835,7 +1835,7 @@
   "id": "tutorial",
   "name": "第一章：濱海基地",
   "sky": "dawn",
-  "ground": "#8f9a6d",
+  "ground": "#9dab72",
   "budget": 2000,
   "tutorial": true,
   "allow": [
