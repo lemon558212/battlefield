@@ -167,6 +167,10 @@ var _crawl_amt := 0.0          # 匍匐擺動強度（起停漸進，靜止臥�
 var _prone_hold := 0.0         # 趴著持續移動了多久（超過門檻就起身）
 const PRONE_BREAK_T := 2.5     # 短按＝爬著微調位置（約 2m）；一直走就起身，不然龜速很痛苦
 var want_cover := false        # 由 Main 依所在位置設定；靜止時自動擺蹲姿
+# 自動姿勢總開關。玩家親自操控（第三人稱行動模式）時關掉——
+# 使用者 2026-07-27：「停下來又自動蹲回去」，自動掩體判定壓過玩家意圖。
+# 關掉之後姿勢完全由 C／Z／Space 決定，AI 與非操控中的單位不受影響。
+var auto_stance := true
 var _model_base_y := 0.0
 var _crouch := 0.0             # 0=站 1=蹲（平滑過渡）
 # 正面軸校正改「轉模型子節點」，Unit.rotation.y 一律代表「+Z 為正面」的純朝向。
@@ -1146,7 +1150,7 @@ func _update_crouch(delta: float) -> void:
 	var ptarget := 0.0
 	if stance_cmd == "prone":
 		ptarget = 1.0 if not _dead else 0.0
-	elif stance_cmd == "":
+	elif stance_cmd == "" and auto_stance:
 		ptarget = 1.0 if (want_prone and not _dead and _move_target == null
 				and _prone_hold < PRONE_BREAK_T) else 0.0
 	# 水深過腳踝就趴不下去：臉會泡在水裡（鐵律 0：現實怎樣就怎樣）。
@@ -1156,7 +1160,7 @@ func _update_crouch(delta: float) -> void:
 	_prone = move_toward(_prone, ptarget, delta * 2.4)
 	# 掩體區內小幅移動＝蹲行（真人在掩體後不會站起來走）；長距離移動才站起來跑。
 	var short_hop: bool = _move_target != null and global_position.distance_to(_move_target) < CROUCH_WALK_MAX
-	var stay_low: bool = want_cover and not _dead and (_move_target == null or short_hop)
+	var stay_low: bool = auto_stance and want_cover and not _dead and (_move_target == null or short_hop)
 	if stance_cmd == "crouch":
 		stay_low = not _dead
 	elif stance_cmd == "stand" or stance_cmd == "prone":

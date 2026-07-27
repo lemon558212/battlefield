@@ -100,7 +100,9 @@ func _apply_tps(delta: float) -> void:
 	var yr := deg_to_rad(tps_yaw)
 	var pr := deg_to_rad(tps_pitch)
 	var fwd := Vector3(sin(yr), 0, cos(yr))
-	var right := Vector3(fwd.z, 0, -fwd.x)
+	# ⚠ 正面是 +Z 的慣例下，右邊＝fwd × UP＝(-fwd.z, 0, fwd.x)。
+	#   寫成 (fwd.z, 0, -fwd.x) 是左邊——過肩鏡頭一直掛在左肩上（同 50928ac 修過的左右相反）。
+	var right := Vector3(-fwd.z, 0, fwd.x)
 	# 眼高跟著姿勢走（站/蹲/趴），否則趴著時鏡頭仍吊在站姿高度、人被草淹沒
 	var eye: float = TPS_EYE
 	if tps_node.has_method("eye_height"):
@@ -119,15 +121,28 @@ func _apply_tps(delta: float) -> void:
 	var want: Vector3 = _tps_want(head, fwd, right, pr, _shoulder)
 	# 鏡頭碰撞：牆擋住就把鏡頭拉近。不做這個，第三人稱一貼牆就會看穿牆壁，臨場感全毀。
 	# 下限 0.06 太近＝鏡頭黏在後腦杓上，畫面被牆佔滿；換肩之後這裡只需要輕微修正。
+	# ★★2026-07-27 使用者回報「室內鏡頭穿牆，畫面被巨大牆面塞滿」的真因：
+	#   下限被夾在 0.30——牆就貼在角色背後時 k 只有 0.05，卻硬留 30% 的距離
+	#   （tps_dist 3.1m 的 30% ＝ 0.93m），鏡頭正好停在牆的另一側。
+	#   室內牆到牆常常不到 2m，這個下限在物理上不可能滿足。
+	#   改成可以一路收到 0.04（近乎第一人稱）——牆在後面時本來就該貼著看，
+	#   這是所有 TPS 的標準行為，總比讓玩家看一片牆好。
 	if wall_probe.is_valid():
 		var k: float = float(wall_probe.call(head, want))
 		if k < 1.0:
-			want = head.lerp(want, clampf(k - 0.10, 0.30, 1.0))
+			want = head.lerp(want, clampf(k - 0.12, 0.04, 1.0))
 	if ground_probe.is_valid():
 		var gy: float = float(ground_probe.call(want)) + 0.45
 		if want.y < gy:
 			want.y = gy                     # 鏡頭不鑽進地面/壕溝壁
 	global_position = global_position.lerp(want, 1.0 - exp(-14.0 * delta))
+	# ★平滑之後要再驗一次：上面算的是「目標位置」，實際位置是逐幀逼近的，
+	#   角色轉身或衝進屋裡時，中間那幾幀的鏡頭會從牆裡穿過去（畫面瞬間變一片牆）。
+	#   收斂完再對「頭→目前位置」做一次探測，超過就當場拉回牆內側。
+	if wall_probe.is_valid():
+		var k2: float = float(wall_probe.call(head, global_position))
+		if k2 < 1.0:
+			global_position = head.lerp(global_position, clampf(k2 - 0.12, 0.04, 1.0))
 	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * _shoulder * 0.5
 	look_at(look_at_p, Vector3.UP)
 

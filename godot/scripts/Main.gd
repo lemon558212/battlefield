@@ -154,6 +154,8 @@ func _ready() -> void:
 		_shotseq()
 	elif "mapshots" in OS.get_cmdline_user_args():
 		_mapshots()
+	elif "play" in OS.get_cmdline_user_args():
+		_playtest()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -204,6 +206,180 @@ func _mapshots() -> void:
 				map_data.get("sky", "day")])
 	get_tree().quit(0)
 
+# ---------- 實際遊玩驗證（-- play）----------
+# 使用者 2026-07-27：「反驗證是要實際你自己玩過全部的功能都沒有問題才叫修好」。
+# 這裡不驗任何內部指標，只做玩家會做的事：切換單位、走進屋子、停下來、按姿勢鍵，
+# 每一步都留一張玩家視角的圖，並印出「玩家看得到的那個結果」。
+func _playtest() -> void:
+	if not await _boot_to_battle("play"): get_tree().quit(1); return
+	var fails := 0
+
+	# A) 切換單位鍵（畫面外的隊友要能叫得出來）
+	var before_sel = selected
+	_tap_key(KEY_TAB)
+	await get_tree().create_timer(0.5).timeout
+	var ok_cycle: bool = selected != null and selected != before_sel
+	print("[play][切換單位] 按 Tab 後 selected=%s %s"
+			% [(selected["cls"] if selected != null else "null"), "OK" if ok_cycle else "FAIL"])
+	if not ok_cycle: fails += 1
+	await _snap("res://play_cycle.png")
+
+	# B) 點兵下令 → 第三人稱
+	var pu = _deployed[0]
+	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
+	await get_tree().create_timer(0.4).timeout
+	if not cam.is_tps():
+		print("[play][下令] FAIL 沒進第三人稱"); get_tree().quit(1); return
+	print("[play][下令] 第三人稱 OK")
+
+	# C) 停下來不可以自動蹲回去（使用者回報）
+	pu["node"].want_cover = true            # 就算判定成「在掩體裡」也不該自動蹲
+	await get_tree().create_timer(1.6).timeout
+	var c_idle: float = pu["node"]._crouch
+	print("[play][停下不自動蹲] want_cover=true 靜置 1.6s 後 _crouch=%.2f %s"
+			% [c_idle, "OK" if c_idle < 0.05 else "FAIL(又自己蹲回去了)"])
+	if c_idle >= 0.05: fails += 1
+	await _snap("res://play_stand.png")
+
+	# D) 姿勢鍵三顆都要真的有效
+	# ⚠ 姿勢鍵是「每幀輪詢 Input.is_key_pressed 抓上升緣」，同一幀按下又放開輪詢看不到，
+	#   必須按住至少一幀以上（這是測試寫法的坑，不是遊戲的 bug）。
+	await _hold_key(KEY_C, 0.12); await get_tree().create_timer(1.2).timeout
+	var c_c: float = pu["node"]._crouch
+	await _snap("res://play_key_c.png")
+	await _hold_key(KEY_Z, 0.12); await get_tree().create_timer(1.4).timeout
+	var c_z: float = pu["node"]._prone
+	await _snap("res://play_key_z.png")
+	await _hold_key(KEY_SPACE, 0.12); await get_tree().create_timer(1.4).timeout
+	var c_s: float = maxf(pu["node"]._crouch, pu["node"]._prone)
+	await _snap("res://play_key_space.png")
+	print("[play][姿勢鍵] C→_crouch=%.2f %s ／ Z→_prone=%.2f %s ／ Space→最大姿勢值=%.2f %s"
+			% [c_c, "OK" if c_c > 0.8 else "FAIL", c_z, "OK" if c_z > 0.8 else "FAIL",
+			c_s, "OK" if c_s < 0.05 else "FAIL"])
+	if c_c <= 0.8 or c_z <= 0.8 or c_s >= 0.05: fails += 1
+
+	# E) 走進最近的建築：驗屋頂淡出、鏡頭不穿牆
+	# 走進屋子要走一段路，AP 會先用完（AP 用盡＝停下，看起來像被擋住）。
+	# ⚠ 補 AP 一定要在 _begin_action 之後，它會 ×0.7^N 重算（2026-07-26 的假通過就是這樣來的）。
+	acting["ap"] = 9999.0
+	acting["ap_max"] = 9999.0
+	var bd = _nearest_building(_live_px(pu))
+	if bd == null:
+		print("[play][進屋] 這張圖沒有建築，跳過")
+	else:
+		var door: Vector2 = bd.doors[0] if not bd.doors.is_empty() else bd.rect.get_center()
+		# 走到門口再進去：用真的操作（轉向 + 按 W），不瞬移
+		var ok_in := await _walk_to_px(pu, door, 22.0)
+		if ok_in:
+			ok_in = await _walk_to_px(pu, bd.rect.get_center(), 12.0)
+		var inside: bool = bd.inside(_live_px(pu).x, _live_px(pu).y)
+		var here_px := _live_px(pu)
+		print("[play][進屋] 走進去=%s（人在 px(%.0f,%.0f)、門在 px(%.0f,%.0f)、屋框 %s）"
+				% ["OK" if inside else "FAIL(走不進去)", here_px.x, here_px.y,
+				door.x, door.y, bd.rect])
+		if not inside: fails += 1
+		await get_tree().create_timer(1.2).timeout
+		await _snap("res://play_indoor.png")
+		# 鏡頭不可以停在牆的另一側：從角色頭部到鏡頭之間不能有牆
+		var head: Vector3 = pu["node"].global_position + Vector3(0, 1.5, 0)
+		var k: float = _wall_ray(head, cam.global_position)
+		print("[play][鏡頭穿牆] 頭→鏡頭的牆體命中比例=%.2f（1.00＝沒穿牆）%s"
+				% [k, "OK" if k > 0.985 else "FAIL(鏡頭在牆外/牆裡)"])
+		if k <= 0.985: fails += 1
+		# 屋頂要因為「有我方單位在裡面」淡出，而不是因為他剛好被選取
+		var bi := _buildings.find(bd)
+		var alpha: float = float(_roof_a.get(bi, 1.0))
+		print("[play][屋頂淡出] 屋頂 alpha=%.2f %s" % [alpha, "OK" if alpha < 0.35 else "FAIL(屋頂還蓋著)"])
+		if alpha >= 0.35: fails += 1
+		# 屋裡的人要點得到（走真實點擊路徑）
+		_end_action()
+		await get_tree().create_timer(0.4).timeout
+		selected = null
+		_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
+		await get_tree().create_timer(0.4).timeout
+		print("[play][屋內點兵] selected=%s %s"
+				% [(selected["cls"] if selected != null else "null"), "OK" if selected != null else "FAIL(點不到)"])
+		if selected == null: fails += 1
+		await _snap("res://play_indoor_pick.png")
+
+	print("[play] FAILS=%d" % fails)
+	print("[play] DONE")
+	get_tree().quit(0)
+
+func _tap_key(code: Key) -> void:
+	var e := InputEventKey.new()
+	e.keycode = code
+	e.physical_keycode = code
+	e.pressed = true
+	Input.parse_input_event(e)
+	var u := InputEventKey.new()
+	u.keycode = code
+	u.physical_keycode = code
+	u.pressed = false
+	Input.parse_input_event(u)
+
+func _nearest_building(p: Vector2):
+	var best = null
+	var bd_d := 1e9
+	for b in _buildings:
+		var d: float = b.rect.get_center().distance_to(p)
+		if d < bd_d:
+			bd_d = d
+			best = b
+	return best
+
+# 用「真的按鍵」走到地圖上某個 px 座標（先把鏡頭轉到目標方向再按 W）。
+# ⚠ 不可以直接設座標——使用者要求驗收一律「用走的」，瞬移證明不了碰撞與鏡頭。
+func _walk_to_px(u, target_px: Vector2, secs: float) -> bool:
+	var t3 := _to3d(target_px.x, target_px.y)
+	var deadline: float = Time.get_ticks_msec() / 1000.0 + secs
+	var down := InputEventKey.new()
+	down.keycode = KEY_W
+	down.physical_keycode = KEY_W
+	down.pressed = true
+	Input.parse_input_event(down)
+	var arrived := false
+	var log_t: float = 0.0
+	var check_t: float = Time.get_ticks_msec() / 1000.0 + 0.7
+	var last_d: float = 1e9
+	var strafe: Key = KEY_D
+	while Time.get_ticks_msec() / 1000.0 < deadline:
+		var here: Vector3 = u["node"].global_position
+		var to := t3 - here
+		to.y = 0.0
+		if to.length() < 1.1:
+			arrived = true
+			break
+		cam.tps_yaw = rad_to_deg(atan2(to.x, to.z))     # 鏡頭朝目標，W＝往鏡頭前方走
+		var now: float = Time.get_ticks_msec() / 1000.0
+		if now > log_t:
+			log_t = now + 1.0
+			print("[play][走路] 還差 %.1fm　AP=%.0f　px=(%.0f,%.0f)"
+					% [to.length(), float(u.get("ap", 0.0)), _live_px(u).x, _live_px(u).y])
+		# 撞到障礙就側移繞過去——真人玩家就是這樣走的。
+		# 少了這段，測試會把「路上有一段磚牆」誤判成「進不了建築」。
+		if now > check_t:
+			check_t = now + 0.7
+			if last_d - to.length() < 0.08:
+				var sd := InputEventKey.new()
+				sd.keycode = strafe; sd.physical_keycode = strafe; sd.pressed = true
+				Input.parse_input_event(sd)
+				await get_tree().create_timer(0.75).timeout
+				var su := InputEventKey.new()
+				su.keycode = strafe; su.physical_keycode = strafe; su.pressed = false
+				Input.parse_input_event(su)
+				strafe = KEY_A if strafe == KEY_D else KEY_D    # 這邊繞不過就換另一邊
+				check_t = Time.get_ticks_msec() / 1000.0 + 0.7
+			last_d = to.length()
+		await get_tree().process_frame
+	var up := InputEventKey.new()
+	up.keycode = KEY_W
+	up.physical_keycode = KEY_W
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+	return arrived
+
 func _shotseq() -> void:
 	for i in 5:
 		await get_tree().create_timer(1.2).timeout
@@ -211,45 +387,51 @@ func _shotseq() -> void:
 		print("[shotseq] seq_%d st=%d" % [i, st])
 	get_tree().quit(0)
 
-func _e2e() -> void:
+# 主選單 → 章節 → 簡報 → 對話 → 部署 → 開戰。
+# e2e 與 playtest 共用，兩邊都必須走「真的按 UI」這條路（測試從中間插進去是驗證盲區）。
+func _boot_to_battle(tag: String) -> bool:
 	await get_tree().create_timer(0.6).timeout
-	print("[e2e] 1 主選單 → 劇情戰役")
-	if not await _click_btn("劇情戰役"): get_tree().quit(1); return
-	print("[e2e] 2 章節 01")
+	print("[%s] 1 主選單 → 劇情戰役" % tag)
+	if not await _click_btn("劇情戰役"): return false
+	print("[%s] 2 章節 01" % tag)
 	var chb := _find_btn("01")
-	if chb == null: print("[e2e] FAIL 無章節按鈕"); get_tree().quit(1); return
+	if chb == null: print("[%s] FAIL 無章節按鈕" % tag); return false
 	_send_click(chb.get_global_rect().get_center())
 	await get_tree().create_timer(0.5).timeout
-	print("[e2e] 3 簡報 → 出擊")
-	if not await _click_btn("出擊"): get_tree().quit(1); return
-	print("[e2e] 4 對話：連點推進 (st=", st, ")")
+	print("[%s] 3 簡報 → 出擊" % tag)
+	if not await _click_btn("出擊"): return false
+	print("[%s] 4 對話：連點推進 (st=%d)" % [tag, st])
 	var guard := 0
 	while st == St.DIALOGUE and guard < 40:
 		_send_click(Vector2(640, 300))
 		await get_tree().create_timer(0.12).timeout
 		guard += 1
-	print("[e2e]   對話結束 st=", st, " (應為 DEPLOY=", St.DEPLOY, ")")
-	if st != St.DEPLOY: print("[e2e] FAIL 沒進到部署"); get_tree().quit(1); return
-	print("[e2e] 5 部署：點卡片 → 點藍框放置")
+	print("[%s]   對話結束 st=%d (應為 DEPLOY=%d)" % [tag, st, St.DEPLOY])
+	if st != St.DEPLOY: print("[%s] FAIL 沒進到部署" % tag); return false
+	print("[%s] 5 部署：點卡片 → 點藍框放置" % tag)
 	var cards := ui.root.find_children("*", "Button", true, false)
 	var card_btn: Button = null
 	for n in cards:
 		var b := n as Button
 		if b.flat and b.size.x > 250:
 			card_btn = b; break
-	if card_btn == null: print("[e2e] FAIL 找不到部署卡"); get_tree().quit(1); return
+	if card_btn == null: print("[%s] FAIL 找不到部署卡" % tag); return false
 	_send_click(card_btn.get_global_rect().get_center())
 	await get_tree().create_timer(0.3).timeout
 	var z := _my_zone()
 	var wp := _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5)
 	_send_click(cam.unproject_position(wp + Vector3(0, 0.05, 0)))
 	await get_tree().create_timer(0.4).timeout
-	print("[e2e]   已部署數=", _deployed.size(), (" OK" if _deployed.size() > 0 else " FAIL(放不下去)"))
-	if _deployed.is_empty(): get_tree().quit(1); return
-	print("[e2e] 6 開始戰鬥")
-	if not await _click_btn("開始戰鬥"): get_tree().quit(1); return
+	print("[%s]   已部署數=%d%s" % [tag, _deployed.size(), (" OK" if _deployed.size() > 0 else " FAIL(放不下去)")])
+	if _deployed.is_empty(): return false
+	print("[%s] 6 開始戰鬥" % tag)
+	if not await _click_btn("開始戰鬥"): return false
 	await get_tree().create_timer(0.8).timeout
-	print("[e2e]   st=", st, " (應為 CMD=", St.CMD, ")")
+	print("[%s]   st=%d (應為 CMD=%d)" % [tag, st, St.CMD])
+	return true
+
+func _e2e() -> void:
+	if not await _boot_to_battle("e2e"): get_tree().quit(1); return
 	print("[e2e] 7 選兵 → 點地面移動")
 	var pu = _deployed[0]
 	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
@@ -2232,6 +2414,11 @@ func _begin_action(u) -> bool:
 		cam.set_tps(u["node"])
 		ui.show_crosshair(true)
 		_capture_mouse(true)
+		# ★玩家親自操控期間關掉自動姿勢（使用者 2026-07-27：「停下來又自動蹲回去」）。
+		#   自動掩體判定原本每次停下就把人壓成蹲姿，玩家想站著看前方也站不起來——
+		#   自動判定壓過玩家意圖。姿勢改由 C／Z／Space 全權決定。
+		u["node"].auto_stance = false
+		u["node"].stance_cmd = ""
 	return true
 
 # 結束行動：單位進入警戒狀態（GDD/01 §2 最後一條）
@@ -2245,6 +2432,8 @@ func _end_action() -> void:
 	if acting == null:
 		return
 	acting["node"].stop()
+	acting["node"].auto_stance = true      # 交回 AI/自動判定（結束行動後自己找掩體）
+	acting["node"].stance_cmd = ""
 	_update_cover_state(acting)
 	acting = null
 	ui.hide_ap()
@@ -2486,11 +2675,38 @@ func _unhandled_input(event: InputEvent) -> void:
 					_capture_mouse(true))
 			return
 		return
+	# 指令模式：Tab／N＝切換到下一個我方單位並把鏡頭帶過去。
+	# 使用者 2026-07-27 回報「畫面外的角色點不到」——戰術鏡頭只能拖曳，
+	# 走出畫面的隊友等於失聯。切換只做「選取＋鏡頭跟隨」，不花 CP；
+	# 要下令仍然是點他（維持「點兵＝花 1 CP」的規則不被誤觸消耗）。
+	if st == St.CMD and event is InputEventKey and event.pressed and not event.echo 			and (event.keycode == KEY_TAB or event.keycode == KEY_N):
+		_cycle_unit()
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if st == St.CMD:
 			_click(event.position)
 		elif st == St.DEPLOY:
 			_deploy_click(event.position)
+
+# 切換到下一個我方存活單位（依部署順序輪替），鏡頭跟過去並顯示角色卡。
+func _cycle_unit() -> void:
+	var mine: Array = []
+	for u in units:
+		if u["side"] == player_side and u["alive"] and is_instance_valid(u["node"]):
+			mine.append(u)
+	if mine.is_empty():
+		ui.flash_msg("沒有可切換的單位", Color(1.0, 0.8, 0.4))
+		return
+	var idx := mine.find(selected)
+	var nxt = mine[(idx + 1) % mine.size()] if idx >= 0 else mine[0]
+	selected = nxt
+	cam.set_follow(nxt["node"])
+	var chr: Dictionary = GameData.characters.get(nxt["cls"], {})
+	ui.show_charcard(nxt["cls"],
+			("★" + nxt["char_name"]) if nxt["named"] else GameData.class_base.get(nxt["cls"], {}).get("zh", nxt["cls"]),
+			chr.get("trait", {}).get("desc", ""), int(nxt["hp"]), int(nxt["maxhp"]))
+	ui.flash_msg("切換單位（Tab/N）：%d / %d　點他即可下令"
+			% [mine.find(nxt) + 1, mine.size()], Color(0.7, 0.9, 1.0))
 
 func _deploy_click(sp: Vector2) -> void:
 	if _pending_cls == "":
@@ -3102,16 +3318,25 @@ var _roof_a := {}
 func _roof_fade(delta: float) -> void:
 	if _buildings.is_empty():
 		return
+	# ★2026-07-27 使用者回報「屋內的角色點不到」的真因就在這裡：
+	#   舊版只淡出「目前選取／行動中那一個」單位所在的建築，於是形成死結——
+	#   要看到屋裡的人才點得到他，要點到他才會淡出屋頂。
+	#   改成：**任何一個活著的我方單位在屋裡，那棟就淡出屋頂**。
+	var pts: Array = []
+	for u in units:
+		if u["side"] == player_side and u["alive"] and is_instance_valid(u["node"]):
+			pts.append(_live_px(u))
 	var watch = acting if acting != null else selected
-	var px := -99999.0
-	var py := -99999.0
 	if watch != null and is_instance_valid(watch["node"]):
-		var lp := _live_px(watch)
-		px = lp.x
-		py = lp.y
+		pts.append(_live_px(watch))     # 行動中的敵人也要看得到（鏡頭會跟拍）
 	for i in _buildings.size():
 		var bd = _buildings[i]
-		var want: float = 0.0 if bd.inside(px, py) else 1.0
+		var occupied := false
+		for p in pts:
+			if bd.inside(p.x, p.y):
+				occupied = true
+				break
+		var want: float = 0.0 if occupied else 1.0
 		var cur: float = float(_roof_a.get(i, 1.0))
 		cur = move_toward(cur, want, delta * 3.5)
 		_roof_a[i] = cur
