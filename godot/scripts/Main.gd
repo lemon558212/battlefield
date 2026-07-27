@@ -82,6 +82,7 @@ const TERRAIN := preload("res://scripts/Terrain.gd")
 const BUILDING := preload("res://scripts/Building.gd")
 const PROPS := preload("res://scripts/Props.gd")
 const FORTIFY := preload("res://scripts/Fortify.gd")
+const TREES := preload("res://scripts/Trees.gd")
 var _buildings: Array = []             # 場上所有建築（牆線段＝視線與碰撞的真相）
 var terrain = null                     # 地形高度真相（GDD/14）
 # 中景物件與樹的實體障礙（形狀定義見 Props.blockers），座標為遊戲 px。
@@ -5227,15 +5228,18 @@ func _build_ground() -> void:
 			# 房子不會蓋在海裡——佈局資料是舊陸戰版沿用的，場景層要自己守。
 			var srect := Rect2(float(sdef.get("x", 0)), float(sdef.get("y", 0)),
 					float(sdef.get("w", 60)), float(sdef.get("h", 60)))
+			# ⚠ 2026-07-27：舊版只比對水域**矩形**。改成曲線海岸之後那些矩形是空的，
+			#   這道防線會整個失效＝房子可以蓋在海裡。改成問地形實際水深（唯一真相）。
 			var wet := false
-			for wkey2 in ["waters", "deepwaters", "shallows"]:
-				for wr2 in map_data.get(wkey2, []):
-					if srect.intersects(Rect2(float(wr2.get("x", 0)), float(wr2.get("y", 0)),
-							float(wr2.get("w", 60)), float(wr2.get("h", 60)))):
-						wet = true
+			if terrain != null:
+				for fx in 5:
+					for fy in 5:
+						var qp := srect.position + srect.size * Vector2(fx / 4.0, fy / 4.0)
+						if terrain.water_depth(qp.x, qp.y) > 0.05:
+							wet = true
+							break
+					if wet:
 						break
-				if wet:
-					break
 			if wet:
 				push_error("[bldskip] 泡在水裡被丟掉：%s" % String(sdef.get("note", "?")))
 				print("[bldskip] FAIL 泡在水裡 → ", String(sdef.get("note", "?")))
@@ -5579,7 +5583,10 @@ func _build_water() -> void:
 			rects.append(rr)
 			if wkey == "deepwaters":
 				deep_rects.append(rr)
-	if rects.is_empty():
+	# 曲線海岸／河道（Terrain._build_shores）：水面要鋪滿它們涵蓋的範圍。
+	# 「哪裡是水」仍然逐格問 terrain.water_depth，所以鋪大一點只是多幾個空格子，不會多畫。
+	var has_shore: bool = terrain != null and terrain.has_shores()
+	if rects.is_empty() and not has_shore:
 		return
 	# ★★水域一律合成**一片**網格（2026-07-27）。
 	#   舊做法是「一個矩形一個 PlaneMesh」，而 maps.json 的 waters/deepwaters/shallows
@@ -5587,9 +5594,21 @@ func _build_water() -> void:
 	#   畫面上是三層半透明的塑膠片疊在一起、有硬接縫、還互相透出對方的邊。
 	#   合成一片之後接縫就不存在了；「哪裡是水」交給 terrain.water_depth 逐點判定
 	#   （水深 0 的格子直接不畫），所以不需要知道原始矩形怎麼切。
-	var uni: Rect2 = rects[0]
-	for rr2 in rects:
-		uni = uni.merge(rr2)
+	# ⚠ 近岸網格只鋪「戰場 ± SHORE_PAD_PX」，不是整片海（遠洋交給 _build_far_ocean 的大平面）。
+	#   先前直接用 shore_bounds（含遠洋，114×210m）除以上限 48 格 → 每格 2.4×4.4m，
+	#   頂點波把每一格頂出不同高度，畫面上是滿版的網格摩爾紋（實拍）。
+	var mwp0: float = map_data.get("w", 960)
+	var mhp0: float = map_data.get("h", 600)
+	var uni: Rect2
+	if has_shore:
+		uni = Rect2(-SHORE_PAD_PX, -SHORE_PAD_PX,
+				mwp0 + 2.0 * SHORE_PAD_PX, mhp0 + 2.0 * SHORE_PAD_PX)
+		for rr2 in rects:
+			uni = uni.merge(rr2)
+	else:
+		uni = rects[0]
+		for rr2 in rects:
+			uni = uni.merge(rr2)
 	var mi := MeshInstance3D.new()
 	mi.name = "Water"
 	mi.mesh = _water_mesh(uni)
@@ -5605,6 +5624,11 @@ func _build_water() -> void:
 		wmat.set_shader_parameter("flow", flow_v)
 		mi.material_override = wmat
 		world.add_child(mi)
+	# 深水圍欄（曲線海岸版）：沿著岸線往海裡走，走到水深 1.5m（及胸）就下一個樁，
+	# 把樁連成折線。這樣圍欄貼著**實際海底地形**，不是一個跟海岸無關的矩形。
+	if has_shore:
+		_deepwater_fence_along_shore()
+		_build_far_ocean()
 	# 深水圍欄：四邊線段障礙（步兵過不去；日後做船再改成「載具可通行」）
 	for r in deep_rects:
 		var corners := [r.position, Vector2(r.end.x, r.position.y), r.end,
@@ -5616,6 +5640,88 @@ func _build_water() -> void:
 					"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
 					"hl": a2.distance_to(b2) * 0.5})
 
+# 沿岸線佈深水圍欄：對岸線上每一點往海側步進，找到水深 >= WADE_MAX 的位置當樁。
+# ⚠ 找不到（整片都是淺灘）的那一點要跳過，但**不可以整批安靜跳過**——
+#   深水圍欄先前就是「登記了卻從來沒生效」，症狀是玩家可以走進外海。
+# 遠洋：岸邊那片網格只鋪到戰場外 90m，之後海就結束了——實拍看到海在半路被一條
+# 直線切斷，外面接著米色的外圍地面。遠洋不需要水深變化（一律最深），
+# 所以用一片大平面補到地平線，成本只有兩個三角形。
+func _build_far_ocean() -> void:
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	var far: float = 700.0                       # 公尺
+	# 只往「海的那一側」鋪，而且**正好接在近岸網格外緣**
+	var edge_px: float = (-SHORE_PAD_PX) if terrain.sea_dir() == "west" 			else (mwp + SHORE_PAD_PX)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var x0: float
+	var x1: float
+	var z0 := -far
+	var z1 := far
+	if terrain.sea_dir() == "west":
+		x1 = (edge_px - mwp * 0.5) * WORLD_SCALE
+		x0 = x1 - far * 2.0
+	elif terrain.sea_dir() == "east":
+		x0 = (edge_px - mwp * 0.5) * WORLD_SCALE
+		x1 = x0 + far * 2.0
+	else:
+		return                                   # 南北向的海還沒有圖用到，不亂猜
+	var y: float = BattleTerrain.WATER_SURFACE_Y - 0.03
+	for q in [Vector3(x0, y, z0), Vector3(x1, y, z0), Vector3(x1, y, z1),
+			Vector3(x0, y, z0), Vector3(x1, y, z1), Vector3(x0, y, z1)]:
+		st.set_color(Color(1, 1, 1, 1.0))        # a=1 ＝最深，跟岸邊網格同一套語意
+		st.set_normal(Vector3.UP)
+		st.add_vertex(q)
+	var mi := MeshInstance3D.new()
+	mi.name = "OceanFar"
+	mi.mesh = st.commit()
+	var wm := ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = WATER_SHADER
+	wm.shader = sh
+	wm.set_shader_parameter("flow", Vector2(1.0, 0.15))
+	# 遠洋只有兩個三角形，逐頂點波沒有意義；靠法線漣漪維持「不是鏡子」
+	wm.set_shader_parameter("ripple_far", 0.06)
+	mi.material_override = wm
+	mi.extra_cull_margin = far
+	world.add_child(mi)
+
+const WADE_MAX := 1.5                  # 及胸水深：步兵不可通行
+const SHORE_PAD_PX := 700.0            # 近岸細網格鋪到戰場外多遠（px；700px = 35m）
+func _deepwater_fence_along_shore() -> void:
+	var pts: Array = terrain.coast_points()
+	if pts.size() < 2:
+		return
+	var nodes: Array = []
+	for i in pts.size():
+		var p: Vector2 = pts[i]
+		# 海側方向＝從岸線往水深增加的方向，用梯度量（不必知道資料寫的是哪一邊）
+		var g := Vector2(terrain.water_depth(p.x + 8.0, p.y) - terrain.water_depth(p.x - 8.0, p.y),
+				terrain.water_depth(p.x, p.y + 8.0) - terrain.water_depth(p.x, p.y - 8.0))
+		if g.length() < 0.0001:
+			continue
+		var dir: Vector2 = g.normalized()
+		var q: Vector2 = p
+		var found := false
+		for _step in 40:
+			q += dir * 8.0
+			if terrain.water_depth(q.x, q.y) >= WADE_MAX:
+				found = true
+				break
+		if found:
+			nodes.append(q)
+	if nodes.size() < 2:
+		push_error("[water] 岸線上找不到深水樁（整片都是淺灘？）＝深水圍欄沒有生效")
+		return
+	for i in range(nodes.size() - 1):
+		var a2: Vector2 = nodes[i]
+		var b2: Vector2 = nodes[i + 1]
+		if a2.distance_to(b2) > 200.0:
+			continue          # 兩樁差太遠＝中間是陸地（海灣），不要連一條穿過陸地的圍欄
+		_water_blk.append({"t": "seg", "a": a2, "b": b2, "r": 0.3 / WORLD_SCALE,
+				"h": 0.0, "k": "deepwater", "m": (a2 + b2) * 0.5,
+				"hl": a2.distance_to(b2) * 0.5})
+
 # 水面網格：把「這一點的水深」烤進頂點色的 alpha，shader 直接拿它當透明度與深淺色。
 # ⚠ 為什麼不是一片 PlaneMesh（使用者 2026-07-27：「水面那片不透明藍色塊，像藍地毯」）：
 #   ① ALPHA 寫死 0.90＝幾乎不透明，淺灘看不到水底，一律是同一片藍；
@@ -5626,8 +5732,11 @@ func _build_water() -> void:
 func _water_mesh(r: Rect2) -> ArrayMesh:
 	if terrain == null:
 		return null
-	var nx: int = clampi(int(r.size.x / 12.0), 4, 48)
-	var ny: int = clampi(int(r.size.y / 12.0), 4, 48)
+	# ⚠ 解析度要夠細：河道只有 2.8m 寬，12px(0.6m) 一格才切得出河形。
+	#   三角形數是跟**水域面積**成正比不是跟這個框成正比（陸地格子根本不產出），
+	#   所以把框放大、格子切細，成本仍然可控。
+	var nx: int = clampi(int(r.size.x / 7.0), 4, 200)
+	var ny: int = clampi(int(r.size.y / 7.0), 4, 200)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var any := false
@@ -5641,8 +5750,16 @@ func _water_mesh(r: Rect2) -> ArrayMesh:
 				pts.append(Vector3((px - map_data.get("w", 960) * 0.5) * WORLD_SCALE,
 						BattleTerrain.WATER_SURFACE_Y,
 						(py - map_data.get("h", 600) * 0.5) * WORLD_SCALE))
-				deep.append(terrain.water_depth(px, py))
-			if float(deep[0]) <= 0.0 and float(deep[1]) <= 0.0 						and float(deep[2]) <= 0.0 and float(deep[3]) <= 0.0:
+				deep.append(terrain.water_signed(px, py))
+			# ⚠ 判準是「有沒有任何一角接近水面」，不是「有沒有任何一角是水」。
+			#   後者會讓格子整格畫或整格不畫，岸線變成一階一階的鋸齒（實拍）。
+			#   多留一圈 0.5m 的裙邊：那些頂點 alpha 本來就是 0，而且低於地面會被擋住。
+			var keep := false
+			for dv in deep:
+				if float(dv) > -0.5:
+					keep = true
+					break
+			if not keep:
 				continue                       # 整格都是陸地：不要在陸地上鋪藍色
 			any = true
 			for idx in [0, 1, 2, 0, 2, 3]:
@@ -5660,14 +5777,24 @@ shader_type spatial;
 render_mode blend_mix, depth_draw_always, cull_back;
 
 uniform vec2 flow = vec2(1.0, 0.25);   // 流向（河水會流，湖面 flow 給 0）
+// 遠處漣漪的殘留強度。0 ＝遠處變成鏡子（低太陽下整片粉色，實拍抓到），
+// 所以下限不可以是 0——真實海面到地平線都還有浪。
+uniform float ripple_far = 0.06;
+
+// ★★2026-07-27：漣漪必須用**世界座標**。
+//   舊版在 fragment() 裡寫 `VERTEX.xz`，而 Godot 的 fragment 階段 VERTEX 是**視空間**——
+//   於是整片波紋鎖在鏡頭上，鏡頭一轉花紋跟著轉。人眼對「花紋不隨物體移動」極度敏感，
+//   讀起來就是一張貼在螢幕上的塑膠紋理，不是水（使用者兩輪都說水很假）。
+varying vec3 wpos;
 
 void vertex() {
+	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float t = TIME * 0.9;
 	// 兩組不同波長、沿流向前進的波：單一正弦看起來像布，疊兩組才像水面
-	float a = dot(VERTEX.xz, normalize(flow + vec2(0.001)));
+	float a = dot(wpos.xz, normalize(flow + vec2(0.001)));
 	VERTEX.y += sin(a * 0.8 - t * 1.6) * 0.055
-			+ sin(VERTEX.x * 1.3 + t * 0.9) * 0.03
-			+ sin(VERTEX.z * 1.7 - t * 1.1) * 0.025;
+			+ sin(wpos.x * 1.3 + t * 0.9) * 0.03
+			+ sin(wpos.z * 1.7 - t * 1.1) * 0.025;
 }
 
 void fragment() {
@@ -5675,77 +5802,61 @@ void fragment() {
 	// d ＝這一點的實際水深（0=岸邊、1=深水），建網格時就烤進頂點色 alpha。
 	// 用真實水深而不是「離矩形邊界多遠」，水線才會跟著地形走而不是跟著矩形走。
 	float d = COLOR.a;
-	vec3 shallow_c = vec3(0.22, 0.42, 0.40);
-	vec3 deep_c = vec3(0.03, 0.10, 0.19);
+	vec3 shallow_c = vec3(0.20, 0.45, 0.44);
+	vec3 deep_c = vec3(0.02, 0.09, 0.17);
 	// ⚠ 菲涅耳權重要很小：0.28 在斜俯瞰下已經讓整片水變成淡灰紫（實拍第一章海灘），
 	//   0.7 更是像牛奶。水在掠角下確實會反射天空，但那是**高光**不是整片染色。
 	ALBEDO = mix(mix(shallow_c, deep_c, smoothstep(0.06, 0.85, d)),
-			vec3(0.46, 0.58, 0.66), fres * 0.12);
+			vec3(0.40, 0.54, 0.64), fres * 0.10);
 	// 岸邊白沫：水最淺的那一圈加白，浪花線讓水與地有交界而不是硬切。
 	// 白沫要弱、要窄——太強會變成一圈白色鑲邊（實拍）。
 	float foam = (1.0 - smoothstep(0.0, 0.055, d))
-			* (0.35 + 0.65 * sin(VERTEX.x * 5.5 + VERTEX.z * 4.2 + TIME * 2.2));
+			* (0.35 + 0.65 * sin(wpos.x * 5.5 + wpos.z * 4.2 + TIME * 2.2));
 	ALBEDO = mix(ALBEDO, vec3(0.86, 0.90, 0.91), clamp(foam, 0.0, 0.26));
 	// ★透明度跟著水深走：淺灘**完全**透明（看得到水底的沙），深水才不透明。
-	//   ⚠ 不可以留 0.16 的底：水深 0 的那一圈還有 16% 不透明就是一條硬邊，
-	//     畫面上水域仍然是「一塊貼上去的色片」（2026-07-27 實拍）。
-	ALPHA = clamp(0.92 * smoothstep(0.0, 0.42, d), 0.0, 0.92);
+	//   ⚠ 不可以留 0.16 的底：水深 0 的那一圈還有 16% 不透明就是一條硬邊。
+	ALPHA = clamp(0.94 * smoothstep(0.0, 0.42, d), 0.0, 0.94);
 	// ⚠ ROUGHNESS 0.06 ＝鏡面。水面的頂點波只有 2.5cm，整片幾乎是平的，
-	//   於是變成一整面鏡子把天空照下來——實拍是一片淡灰紫的塑膠片，完全不像水。
-	//   真水面的高光是被小漣漪打碎的，所以要 ① 粗糙一點 ② 在法線上加漣漪。
-	// ⚠ 兩組同振幅的正弦疊起來會出現規則的斜格紋（實拍是一片格子布）。
-	//   三組**不同頻率且不成整數倍**、振幅遞減，才看得出是漣漪。
-	vec2 rp = VERTEX.xz;
+	//   於是變成一整面鏡子把天空照下來。真水面的高光是被小漣漪打碎的。
+	// ⚠ 三組**不同頻率且不成整數倍**、振幅遞減，才看得出是漣漪（兩組同振幅會出現斜格紋）。
+	// ⚠ 漣漪強度隨距離淡出：遠處水面本來就趨近鏡面，滿版波紋會變成一片格子布，
+	//   而且遠處一個像素涵蓋好幾個波長，必定產生摩爾紋（實拍海面就是這樣）。
+	vec2 rp = wpos.xz;
+	float far_fade = mix(ripple_far, 1.0, 1.0 - smoothstep(20.0, 130.0, length(VERTEX)));
 	float n1 = sin(rp.x * 3.1 + TIME * 1.30) * 0.055
 			+ sin(rp.x * 7.3 - rp.y * 1.9 + TIME * 2.05) * 0.028;
 	float n2 = sin(rp.y * 4.7 - TIME * 1.05) * 0.048
 			+ sin(rp.x * 1.3 + rp.y * 5.9 + TIME * 1.55) * 0.022;
-	NORMAL = normalize(NORMAL + vec3(n1, 0.0, n2));
-	ROUGHNESS = 0.22;
-	SPECULAR = 0.45;
+	NORMAL = normalize(NORMAL + vec3(n1, 0.0, n2) * far_fade);
+	// ⚠ 遠處不可以是鏡子也不可以有高頻漣漪：
+	//   鏡子 → 低太陽下整片染成粉色；高頻漣漪 → 一個像素涵蓋好幾個波長 = 摩爾紋。
+	//   兩個都靠「遠處改成霧面」解決：粗糙度拉高、鏡面拉低，讀起來就是深藍的外海。
+	ROUGHNESS = mix(0.58, 0.28, far_fade);
+	SPECULAR = mix(0.10, 0.35, far_fade);
 }
 """
 
 func _scatter_trees(mw: float, mh: float) -> void:
-	var tm := ["res://assets/models/tree-single.glb", "res://assets/models/pinetrees.glb"]
-	var avail: Array[String] = []
-	for t in tm:
-		if ResourceLoader.exists(t):
-			avail.append(t)
-	if avail.is_empty():
-		return
+	# ★★2026-07-27 重寫（使用者：「樹木要做到細緻細膩」）。
+	# 舊版：全場只有 tree-single 與 pinetrees 兩個 glb，整片森林是同一棵樹複製貼上
+	#   （他形容「樹是紙片」）。而且**外圍那片森林的分支完全跳過水域檢查**，
+	#   改成曲線海岸之後，遠景整排樹站在海面上（實拍抓到）。
+	# 新版：Trees.gd 程式化五個樹種 × 三個變體，per-instance 顏色讓每一棵葉色都不同；
+	#   靠水邊改長椰子與灌木；戰場外那片走同一套規則（含水域檢查）。
 	var gwp: float = map_data.get("w", 960)
 	var ghp: float = map_data.get("h", 600)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 20260724
-	# ⚠ 一棵樹一個節點＝一次 draw call：26 棵就已經是 26 次，要鋪成森林只能用 MultiMesh。
-	#   先量一棵的體型（沿用 _fit_prop 的邏輯），再把同一份 mesh 實例化幾百次。
-	var xf_by_mesh := {}          # mesh → [Transform3D...]（一個 glb 可能有好幾個 surface 節點）
-	var proto := {}
-	for path in avail:
-		var inst := (load(path) as PackedScene).instantiate()
-		add_child(inst)
-		var h: float = 4.2
-		var dy: float = _fit_prop(inst, h)
-		var parts: Array = []
-		for mi in inst.find_children("*", "MeshInstance3D", true, false):
-			var m3 := mi as MeshInstance3D
-			if m3.mesh == null:
-				continue
-			parts.append([m3.mesh, inst.global_transform.affine_inverse() * m3.global_transform])
-		proto[path] = {"parts": parts, "dy": dy, "h": h}
-		remove_child(inst)
-		inst.queue_free()
-	# 疏密節奏（GDD/14 §0a）：邊緣成林、中央疏開（戰場中央要留得下打法），
-	# 再疊一層低頻雜訊做出林塊與空地，不要平均散佈那種假森林。
-	# 範圍要含「戰場外的地形」：Terrain 在戰場外還鋪了 90m（否則遠鏡頭看到地圖是塊浮空積木），
-	# 那片先前完全光禿——實拍全景時戰場只佔畫面中央一小塊，四周是空綠地。
-	var out_px: float = 88.0 / WORLD_SCALE
-	# 樹量吃生態倍率（森林 2.2×、沙漠 0×——沙漠沒有樹，空缺由巨石補）
+	rng.seed = 20260727
 	var tmul: float = float(terrain.biome.get("tree_mult", 1.0)) if terrain != null else 1.0
-	if tmul < 0.01:
+	if terrain != null and float(terrain.biome.get("rock_mult", 0.0)) > 0.01:
 		_scatter_rocks(gwp, ghp)
+	if tmul < 0.01:
 		return
+	var bkey: String = String(terrain.biome.get("key", "grass")) if terrain != null else "grass"
+	var protos: Dictionary = TREES.build_protos()
+	var xf_by_mesh := {}
+	var col_by_mesh := {}
+	var out_px: float = 88.0 / WORLD_SCALE
 	var want: int = int(clampf((gwp + out_px * 2.0) * (ghp + out_px * 2.0) / 26000.0 * tmul,
 			40.0, 1400.0))
 	var placed := 0
@@ -5755,14 +5866,13 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		var px: float = rng.randf_range(-out_px, gwp + out_px)
 		var py: float = rng.randf_range(-out_px, ghp + out_px)
 		var outside: bool = px < 0.0 or py < 0.0 or px > gwp or py > ghp
-		# 戰場內：邊緣多、中央少（中央要留得下打法）；戰場外：成片森林把空曠遮掉。
-		# ⚠ 林塊要用 hash 值雜訊，不可用正弦疊加——那會排成規則格狀，遠鏡頭一眼看破像果園
-		#   （地形雜訊那次的同一個教訓）。
+		# 疏密節奏：邊緣成林、中央疏開；再疊低頻雜訊做林塊與空地。
+		# 林塊一定要用 hash 值雜訊，正弦疊加會排成規則格狀，遠看像果園。
 		var clump: float = terrain._vnoise(px * 0.0035, py * 0.0035) if terrain != null else 0.5
-		clump = clampf((clump - 0.34) * 2.7, 0.0, 1.0)      # 拉開對比：有密林也要有空地
+		clump = clampf((clump - 0.34) * 2.7, 0.0, 1.0)
 		var chance: float
 		if outside:
-			chance = 0.12 + 0.88 * clump
+			chance = 0.05 + 0.80 * clump * clump   # 平方＝林塊更集中、空地更明顯
 		else:
 			var nx: float = (px / gwp - 0.5) * 2.0
 			var ny: float = (py / ghp - 0.5) * 2.0
@@ -5771,80 +5881,81 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		if rng.randf() > chance:
 			continue
 		var tp := Vector2(px, py)
-		var blocked := false
-		if outside:
-			var path3: String = avail[rng.randi() % avail.size()]
-			var pr3: Dictionary = proto[path3]
-			var sc3: float = rng.randf_range(0.65, 1.9)
-			var ty3: float = terrain.height_at(px, py) if terrain != null else 0.0
-			var lean3 := Basis(Vector3(1, 0, 0), rng.randf_range(-0.06, 0.06)) 					* Basis(Vector3(0, 0, 1), rng.randf_range(-0.06, 0.06))
-			var base3 := Transform3D(
-					(Basis(Vector3.UP, rng.randf() * TAU) * lean3).scaled(Vector3.ONE * sc3),
-					Vector3((px - gwp * 0.5) * WORLD_SCALE,
-							ty3 + float(pr3["dy"]) * sc3 - 0.12 * sc3,
-							(py - ghp * 0.5) * WORLD_SCALE))
-			for part3 in pr3["parts"]:
-				var k3 = part3[0]
-				if not xf_by_mesh.has(k3):
-					xf_by_mesh[k3] = []
-				xf_by_mesh[k3].append(base3 * (part3[1] as Transform3D))
-			placed += 1
+		# ★水域檢查對「戰場內外」一視同仁——先前外圍那批完全沒驗，樹長在海裡
+		if terrain != null and (terrain.in_trench(px, py) or terrain.in_water(px, py)):
 			continue
-		for bd2 in _buildings:
-			if bd2.rect.grow(5.0 / WORLD_SCALE).has_point(tp):
-				blocked = true
-				break
-		if not blocked and terrain != null and (terrain.in_trench(px, py)
-				or terrain.in_water(px, py)):
-			blocked = true      # 壕溝與水裡不長樹（實拍海灘的樹站在海面上）
-		if not blocked:
-			for bk in _blockers:
-				var cq: Vector2 = _blk_closest(bk, tp)
-				if tp.distance_to(cq) < 2.2 / WORLD_SCALE:
+		if not outside:
+			var blocked := false
+			for bd2 in _buildings:
+				if bd2.rect.grow(5.0 / WORLD_SCALE).has_point(tp):
 					blocked = true
 					break
-		if blocked:
-			continue
-		var path2: String = avail[rng.randi() % avail.size()]
-		var pr: Dictionary = proto[path2]
-		var sc: float = rng.randf_range(0.62, 1.6)
+			if not blocked:
+				for bk in _blockers:
+					if tp.distance_to(_blk_closest(bk, tp)) < 2.2 / WORLD_SCALE:
+						blocked = true
+						break
+			if blocked:
+				continue
+		# 離水多近（3m 內算水邊）：海邊長椰子與灌木，松柏不會長在潮線上
+		var near_water := false
+		if terrain != null:
+			for probe in [Vector2(60, 0), Vector2(-60, 0), Vector2(0, 60), Vector2(0, -60)]:
+				if terrain.in_water(px + probe.x, py + probe.y):
+					near_water = true
+					break
+		var kind: String = TREES.pick(bkey, near_water, rng)
+		var vlist: Array = protos[kind]
+		var mesh_key: ArrayMesh = vlist[rng.randi() % vlist.size()]
+		# 縮放的變異要大（0.62~1.20）：樹種本身已經有兩倍高度差，再乘上這個，
+		# 同一片林子裡才會有大樹、中樹、小樹三個層次，而不是一整排等高的人造林。
+		var sc: float = rng.randf_range(0.62, 1.20)
+		if outside:
+			sc *= rng.randf_range(0.88, 1.18)
 		var ty: float = terrain.height_at(px, py) if terrain != null else 0.0
-		# 樹要「長進地裡」而不是站在地面上：底部略微下沉，再加隨機傾斜。
-		# 全部筆直等高的樹一眼看破是複製貼上（使用者 2026-07-26 指正場景不真實）。
-		var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.05, 0.05)) 				* Basis(Vector3(0, 0, 1), rng.randf_range(-0.05, 0.05))
+		var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.055, 0.055)) * Basis(Vector3(0, 0, 1), rng.randf_range(-0.055, 0.055))
 		var base := Transform3D(
 				(Basis(Vector3.UP, rng.randf() * TAU) * lean).scaled(Vector3.ONE * sc),
-				Vector3((px - gwp * 0.5) * WORLD_SCALE,
-						ty + float(pr["dy"]) * sc - 0.12 * sc, (py - ghp * 0.5) * WORLD_SCALE))
-		for part in pr["parts"]:
-			var key = part[0]
-			if not xf_by_mesh.has(key):
-				xf_by_mesh[key] = []
-			xf_by_mesh[key].append(base * (part[1] as Transform3D))
-		# 樹叢比單株粗；同時登記掩體（樹叢＝隱蔽）
-		var clus: bool = path2.ends_with("pinetrees.glb")
-		# ⚠ 只有戰場內的樹登記掩體與碰撞：背景森林幾百棵，全登記的話
-		#   _resolve_solids 每幀要多跑幾百次，碰撞成本會被背景吃掉。
+				Vector3((px - gwp * 0.5) * WORLD_SCALE, ty - 0.10 * sc,
+						(py - ghp * 0.5) * WORLD_SCALE))
+		if not xf_by_mesh.has(mesh_key):
+			xf_by_mesh[mesh_key] = []
+			col_by_mesh[mesh_key] = []
+		xf_by_mesh[mesh_key].append(base)
+		# 每一棵的色偏都不同（使用者的判準之一：「材質變化，不是一片純色」）
+		col_by_mesh[mesh_key].append(Color(rng.randf_range(0.86, 1.14),
+				rng.randf_range(0.88, 1.12), rng.randf_range(0.82, 1.10)))
 		if not outside:
-			_covers.append({"wx": px, "wy": py, "r": 34.0 * sc, "val": 0.30, "type": "bush"})
+			var trunk_r: float = (0.34 if kind != "shrub" else 0.55) * sc
+			var hmap := {"shrub": 1.6, "palm": 8.0, "pine": 10.0, "dead": 6.0}
+			var trunk_h: float = float(hmap.get(kind, 7.0)) * sc
+			_covers.append({"wx": px, "wy": py, "r": (34.0 if kind != "shrub" else 22.0) * sc,
+					"val": 0.30, "type": "bush"})
 			_tree_feet.append(tp)
-			# h：樹幹一路擋到上面（不管站著蹲著趴著，彈道都被擋）
-			_blockers.append({"t": "cir", "c": tp,
-					"r": (0.85 if clus else 0.40) * sc / WORLD_SCALE, "h": 4.2 * sc})
+			if kind != "shrub":
+				# 樹幹擋人也擋彈道（灌木只隱蔽不擋——鐵律 0②看幾何不看標籤）
+				_blockers.append({"t": "cir", "c": tp, "r": trunk_r / WORLD_SCALE, "h": trunk_h})
 		placed += 1
-	if terrain != null and float(terrain.biome.get("rock_mult", 0.0)) > 0.01:
-		_scatter_rocks(gwp, ghp)
-	for mesh_key in xf_by_mesh.keys():
-		var list: Array = xf_by_mesh[mesh_key]
+	var tmat := StandardMaterial3D.new()
+	tmat.vertex_color_use_as_albedo = true
+	tmat.roughness = 0.94
+	tmat.specular = 0.08
+	# 葉子要雙面：低多邊形葉片只有一層，背面剔除會讓樹從某些角度變成半棵
+	tmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for mesh_key2 in xf_by_mesh.keys():
+		var list: Array = xf_by_mesh[mesh_key2]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = mesh_key
+		mm.use_colors = true
+		mm.mesh = mesh_key2
 		mm.instance_count = list.size()
 		for k in list.size():
 			mm.set_instance_transform(k, list[k])
+			mm.set_instance_color(k, col_by_mesh[mesh_key2][k])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "Trees"
 		mmi.multimesh = mm
+		mmi.material_override = tmat
 		world.add_child(mmi)
 
 

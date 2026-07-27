@@ -56,6 +56,7 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 					float(wr.get("w", 60)), float(wr.get("h", 60))),
 					"deep": (1.9 if wkey == "deepwaters" else (0.5 if wkey == "shallows" else 1.2))})
 	_group_waters()
+	_build_shores()
 	_build_mesh()
 	# ⚠ 草不在這裡生成：建築的實際佔地要等 Building 建完才知道
 	#   （Building.rect 有「最小 120px」的規則，比 maps.json 的原始尺寸大），
@@ -121,6 +122,9 @@ func height_at(px: float, py: float) -> float:
 		var edge_d: float = minf(minf(px - ub.position.x, ub.end.x - px),
 				minf(py - ub.position.y, ub.end.y - py))
 		h -= best_deep * clampf(edge_d / 34.0, 0.0, 1.0)
+	# 曲線海岸與河道（見下方 _shore_drop）：海床挖出來，岸線就是「地面穿過水面」那條線
+	if not (_coasts.is_empty() and _rivers.is_empty()):
+		h -= _shore_drop(px, py)
 	for t in _trenches:
 		var d3: float = _dist_to_path(Vector2(px, py), t["pts"])
 		var hw: float = t["hw"]
@@ -489,28 +493,188 @@ func _group_waters() -> void:
 	for i in _waters.size():
 		_waters[i]["g"] = gid[i]
 
+# ---------- 曲線海岸與河道（2026-07-27 使用者：「河道或海要做到細緻細膩」）----------
+# 為什麼要重做：舊版「矩形內部才是水」，岸線只能是直角，遠看就是一塊藍色長方形。
+# 關鍵觀察——水面網格早就是**逐格看水深**才畫的（水深 0 的格子不畫），
+# 也就是說岸線其實是「地面高度穿過水面 -0.30m 的那條等高線」。
+# 所以只要把**海床**做成曲線，岸線就自動變成曲線，而且涉水減速、樹木避水、
+# AI 尋路、水面網格全部免費跟著對——形狀放進地形，不要放進判定式。
+#
+# maps.json 新欄位（都是選用，舊圖不寫就走原本的矩形邏輯）：
+#   "coast":  {"pts": [[x,y],...], "sea": "west|east|north|south",
+#              "depth": 最深幾公尺, "slope": 幾 px 內從岸邊降到最深}
+#   "rivers": [{"pts": [[x,y],...], "w": 河寬px, "depth": 幾公尺, "bank": 岸堤高}]
+# ⚠ pts 會先做一次 Catmull-Rom 加密（每段補 6 點），折線才不會看起來是折的。
+var _coasts: Array = []
+var _rivers: Array = []
+
+func _smooth_path(pts: Array, per_seg := 6) -> Array:
+	if pts.size() < 2:
+		return pts
+	var out: Array = []
+	for i in range(pts.size() - 1):
+		var p0: Vector2 = pts[maxi(i - 1, 0)]
+		var p1: Vector2 = pts[i]
+		var p2: Vector2 = pts[i + 1]
+		var p3: Vector2 = pts[mini(i + 2, pts.size() - 1)]
+		for k in per_seg:
+			var t: float = float(k) / float(per_seg)
+			# Catmull-Rom：通過每一個控制點，資料寫起來直觀（點就是岸線上的點）
+			var t2: float = t * t
+			var t3: float = t2 * t
+			out.append(0.5 * ((2.0 * p1) + (-p0 + p2) * t
+					+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+					+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3))
+	out.append(pts[pts.size() - 1])
+	return out
+
+func _pts_of(d: Dictionary) -> Array:
+	var raw: Array = []
+	for p in d.get("pts", []):
+		raw.append(Vector2(float(p[0]), float(p[1])))
+	return _smooth_path(raw)
+
+func _build_shores() -> void:
+	_coasts = []
+	_rivers = []
+	var c = map.get("coast", null)
+	if c != null:
+		var pts: Array = _pts_of(c)
+		if pts.size() >= 2:
+			_coasts.append({"pts": pts, "sea": String(c.get("sea", "west")),
+					"depth": float(c.get("depth", 2.2)), "slope": float(c.get("slope", 70.0))})
+	for rv in map.get("rivers", []):
+		var rp: Array = _pts_of(rv)
+		if rp.size() >= 2:
+			_rivers.append({"pts": rp, "hw": float(rv.get("w", 60)) * 0.5,
+					"depth": float(rv.get("depth", 1.2)), "bank": float(rv.get("bank", 0.35))})
+
+# 這個點在岸線的海側多深處（px）。陸側回負值。
+func _sea_side_dist(co: Dictionary, p: Vector2) -> float:
+	var d: float = _dist_to_path(p, co["pts"])
+	# 用「岸線本身的走向」判斷內外太脆弱（折線一凹就翻面）。
+	# 這裡用最單純可靠的方式：海在哪一邊是資料寫死的，比座標即可。
+	var near: Vector2 = _closest_on_path(p, co["pts"])
+	var inside: bool
+	match String(co["sea"]):
+		"east": inside = p.x > near.x
+		"north": inside = p.y < near.y
+		"south": inside = p.y > near.y
+		_: inside = p.x < near.x
+	return d if inside else -d
+
+func _closest_on_path(p: Vector2, pts: Array) -> Vector2:
+	var best: Vector2 = pts[0]
+	var bd := 1.0e20
+	for i in range(pts.size() - 1):
+		var q: Vector2 = Geometry2D.get_closest_point_to_segment(p, pts[i], pts[i + 1])
+		var dd: float = p.distance_squared_to(q)
+		if dd < bd:
+			bd = dd
+			best = q
+	return best
+
+# 海床／河床下陷量（公尺，正值＝往下挖）。也回傳岸堤抬升（負值）。
+func _shore_drop(px: float, py: float) -> float:
+	var p := Vector2(px, py)
+	var drop := 0.0
+	for co in _coasts:
+		var d: float = _sea_side_dist(co, p)
+		if d > 0.0:
+			# smoothstep：岸邊是緩灘、外海才到最深，不是一階梯下去
+			var t: float = clampf(d / float(co["slope"]), 0.0, 1.0)
+			drop = maxf(drop, float(co["depth"]) * t * t * (3.0 - 2.0 * t))
+	for rv in _rivers:
+		var d2: float = _dist_to_path(p, rv["pts"])
+		var hw: float = rv["hw"]
+		if d2 < hw:
+			var k: float = 1.0 - pow(d2 / hw, 2.2)      # 中央最深、往兩側收成 U 形
+			drop = maxf(drop, float(rv["depth"]) * k)
+		elif d2 < hw * 1.6:
+			# 河岸土堤：河不會是「地面上挖一條溝」，兩側會有沖積的高地
+			var k2: float = 1.0 - (d2 - hw) / (hw * 0.6)
+			drop -= float(rv["bank"]) * k2 * k2
+	return drop
+
+# 水域遮罩：純粹用高度判定的話，地形雜訊隨機凹下去的地方會憑空變成一灘水。
+# 只有「水源宣告過的範圍」才可能有水。margin＝往外放寬幾 px（散佈物避水用）。
+func _water_mask(px: float, py: float, margin := 0.0) -> bool:
+	var p := Vector2(px, py)
+	for w in _waters:
+		if (w["r"] as Rect2).grow(margin).has_point(p):
+			return true
+	for co in _coasts:
+		if _sea_side_dist(co, p) > -margin:
+			return true
+	for rv in _rivers:
+		if _dist_to_path(p, rv["pts"]) < float(rv["hw"]) + margin:
+			return true
+	return false
+
+func sea_dir() -> String:
+	return String(_coasts[0]["sea"]) if not _coasts.is_empty() else ""
+
+func has_shores() -> bool:
+	return not (_coasts.is_empty() and _rivers.is_empty())
+
+# 岸線上的取樣點（給 Main 佈深水圍欄用）
+func coast_points() -> Array:
+	var out: Array = []
+	for co in _coasts:
+		var pts: Array = co["pts"]
+		for i in range(0, pts.size(), 2):
+			out.append(pts[i])
+	return out
+
+# 海岸／河道的涵蓋範圍（px）：Main 用它決定水面網格要鋪多大
+func shore_bounds() -> Rect2:
+	var r := Rect2()
+	var first := true
+	for src in (_coasts + _rivers):
+		var pad: float = float(src.get("slope", 0.0)) + float(src.get("hw", 0.0)) + 40.0
+		for q in src["pts"]:
+			var rr := Rect2(q as Vector2, Vector2.ZERO).grow(pad)
+			r = rr if first else r.merge(rr)
+			first = false
+	if not _coasts.is_empty():
+		# 海要一路鋪到地圖外，不然遠景會看到海突然結束
+		match String(_coasts[0]["sea"]):
+			"east": r = r.merge(Rect2(mw * 0.5, -OUTER / ws, mw, mh + 2.0 * OUTER / ws))
+			"north": r = r.merge(Rect2(-OUTER / ws, -OUTER / ws, mw + 2.0 * OUTER / ws, mh * 0.5))
+			"south": r = r.merge(Rect2(-OUTER / ws, 0.0, mw + 2.0 * OUTER / ws, mh))
+			_: r = r.merge(Rect2(-OUTER / ws, -OUTER / ws, mw * 0.5 + OUTER / ws,
+					mh + 2.0 * OUTER / ws))
+	return r
+
 # 這個點的水深（公尺，不在水裡回 0）＝水面高度減地面高度。
 # 鐵律 0⑤：人在及腰的水裡不可能維持 3m/s 行軍。先前 waters/shallows 只是一張
 # 半透明貼圖，不減速也不淹沒——這支就是把「畫出來的水」變成真的水。
 func water_depth(px: float, py: float) -> float:
-	var inside := false
-	for w in _waters:
-		if (w["r"] as Rect2).has_point(Vector2(px, py)):
-			inside = true
-			break
-	if not inside:
+	if not _water_mask(px, py):
 		return 0.0
 	return maxf(0.0, WATER_SURFACE_Y - height_at(px, py))
+
+# 帶正負號的水深：陸地回負值（高出水面幾公尺），不在水域遮罩內回 -99。
+# 給水面網格判斷「這一格要不要畫」用——只看 water_depth>0 的話，格子是整格畫或整格不畫，
+# 岸線就會呈現一階一階的鋸齒（實拍第一章海灘）。留一圈略高於水面的裙邊，
+# 那些頂點 alpha 本來就是 0、而且位置低於地面會被地形擋住，看不見卻能把鋸齒補平。
+func water_signed(px: float, py: float) -> float:
+	if not _water_mask(px, py, 4.0):
+		return -99.0
+	return WATER_SURFACE_Y - height_at(px, py)
 
 func water_depth_world(pos: Vector3) -> float:
 	return water_depth(pos.x / ws + mw * 0.5, pos.z / ws + mh * 0.5)
 
 # 這個點在不在水域（含淺水）：樹、巨石、電線桿的散佈都要避開
 func in_water(px: float, py: float) -> bool:
-	for w in _waters:
-		if (w["r"] as Rect2).grow(6.0).has_point(Vector2(px, py)):
-			return true
-	return false
+	# ⚠ 這支是給「樹/巨石/電線桿不要長在水裡」用的，寧可保守：
+	#   遮罩內、而且地面低於水面 +0.25m（潮間帶也算）就當成水。
+	if not _water_mask(px, py, 6.0):
+		return false
+	if _coasts.is_empty() and _rivers.is_empty():
+		return true          # 舊的矩形水域：在矩形裡就是水（維持原行為）
+	return height_at(px, py) < WATER_SURFACE_Y + 0.25
 
 func _tuft_xf(px: float, py: float, rng: RandomNumberGenerator, s0: float, s1: float) -> Transform3D:
 	var pos := Vector3((px - mw * 0.5) * ws, height_at(px, py) - 0.04, (py - mh * 0.5) * ws)

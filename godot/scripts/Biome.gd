@@ -44,7 +44,7 @@ const PROFILES := {
 		"backdrop": [Color(0.32, 0.33, 0.35), Color(0.45, 0.46, 0.50), Color(0.60, 0.62, 0.68)],
 	},
 	"coast": {    # 海灘/海峽/港口的陸地部分：沙土帶乾草，樹稀
-		"grass_density": 0.55, "grass_tint": Color(1.0, 0.96, 0.68), "tree_mult": 0.5, "rock_mult": 0.5,
+		"grass_density": 1.15, "grass_tint": Color(0.94, 1.0, 0.76), "tree_mult": 0.8, "rock_mult": 0.35,
 		"dirt": Color(0.60, 0.52, 0.38), "rock": Color(0.50, 0.46, 0.40),
 		"backdrop": [Color(0.34, 0.40, 0.42), Color(0.48, 0.55, 0.60), Color(0.62, 0.70, 0.78)],
 	},

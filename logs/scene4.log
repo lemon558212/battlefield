@@ -1,0 +1,32 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=10 story=15
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _scatter_trees (res://scripts/Main.gd:5915)
+       [1] _build_ground (res://scripts/Main.gd:5335)
+       [2] _sceneshots (res://scripts/Main.gd:236)
+[selftest] saved res://qa/scene_ch1_top.png
+[selftest] saved res://qa/scene_ch1_iso.png
+[selftest] saved res://qa/scene_ch1_1.png
+[scene] 1 正門哨所 kind=gate floors=1.0 burning=false
+[selftest] saved res://qa/scene_ch1_2.png
+[scene] 2 營舍A kind=民房 floors=2.0 burning=false
+[selftest] saved res://qa/scene_ch1_3.png
+[scene] 3 雷達站（開場起火） kind=radar floors=2.0 burning=true
+[selftest] saved res://qa/scene_ch1_4.png
+[scene] 4 武器庫（小滿踹開門的那間） kind=depot floors=1.0 burning=false
+[selftest] saved res://qa/scene_ch1_5.png
+[scene] 5 營舍B kind=民房 floors=2.0 burning=false
+[selftest] saved res://qa/scene_ch1_6.png
+[scene] 6 鐘樓（狙擊組上這裡） kind=tower floors=3.0 burning=false
+[selftest] saved res://qa/scene_ch1_sandbag.png
+[selftest] saved res://qa/scene_ch1_trench.png
+[selftest] saved res://qa/scene_ch1_road.png
+[selftest] saved res://qa/scene_ch1_shore.png
+[selftest] saved res://qa/scene_ch1_fire.png
+[selftest] saved res://qa/scene_ch1_fire_near.png
+[scene] 建築數=6 沙包段=13 壕溝=2 道路=2
+[scene] DONE

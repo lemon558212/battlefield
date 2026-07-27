@@ -6,6 +6,17 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [e2e] 2 章節 01
 [e2e] 3 簡報 → 出擊
 [e2e] 4 對話：連點推進 (st=3)
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: specular
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _scatter_trees (res://scripts/Main.gd:5942)
+       [1] _build_ground (res://scripts/Main.gd:5335)
+       [2] _open_deploy (res://scripts/Main.gd:2706)
+       [3] <anonymous lambda> (res://scripts/Main.gd:2696)
+       [4] _dlg_step (res://scripts/UI.gd:390)
+       [5] _input (res://scripts/UI.gd:509)
+       [6] _send_click (res://scripts/Main.gd:925)
+       [7] _boot_to_battle (res://scripts/Main.gd:779)
 [rig] mg 重定向骨對數=20
 [rig] at 重定向骨對數=20
 [rig] sniper 重定向骨對數=20
@@ -19,7 +30,7 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [e2e] 7 選兵 → 點地面移動
 [e2e]   選取=OK
 [e2e]   第三人稱=OK
-[e2e]   位移=0.00m FAIL(人沒動)
+[e2e]   位移=2.28m 終點 px=(824,464) OK
 [sinkchk] 靜止 3 秒的垂直漂移：身體 +0.000m 模型 +0.000m 鏡頭 -0.000m OK(沒有下沉)
 [selftest] saved res://qa/e2e_battle.png
 [selftest] saved res://qa/e2e_hero_idle.png
@@ -33,5 +44,5 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [selftest] saved res://qa/e2e_hero_prone_front.png
 [bonechk] cls=sniper 骨數=62 找不到的骨=["Wrist.R"]
 [bonechk] 前 20 根骨名=["Root", "Hips", "Abdomen", "Torso", "Chest", "Neck", "Head", "Head_end", "Shoulder.L", "UpperArm.L", "LowerArm.L", "Hand.L", "Index2.L", "Index3.L", "Index4.L", "Index4.L_end", "Middle2.L", "Middle3.L", "Middle4.L", "Middle4.L_end"]
-[bonechk] want_prone=true _prone=1.00
+[bonechk] want_prone=true _prone=0.00
 [e2e] DONE
