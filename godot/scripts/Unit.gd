@@ -818,6 +818,22 @@ var hp_ratio := 1.0            # 由 Main 在扣血時更新
 func hurt_mul() -> float:
 	return 0.62 + 0.38 * clampf(hp_ratio, 0.0, 1.0)
 
+# 體力（鐵律 0）：人不可能全速跑一整場。跑越久越慢，停下來會恢復。
+# 只影響站姿移動——蹲行與匍匐本來就慢，再疊體力會變成完全動不了。
+var stamina := 1.0
+const STAM_DRAIN := 0.055      # 每秒消耗（全速時）
+const STAM_REGEN := 0.10       # 每秒恢復（靜止時）
+func stamina_mul() -> float:
+	return 0.72 + 0.28 * clampf(stamina, 0.0, 1.0)
+
+func _tick_stamina(delta: float, running: bool) -> void:
+	if _dead:
+		return
+	if running and _prone < 0.5 and _crouch < 0.5:
+		stamina = maxf(0.0, stamina - STAM_DRAIN * delta * maxf(1.0, speed_mul))
+	else:
+		stamina = minf(1.0, stamina + STAM_REGEN * delta)
+
 # 加速度與慣性（鐵律 0：有質量的東西不會瞬間到全速、也不會瞬間停住）。
 # ⚠ 停止用較大的減速度：人煞停確實比起步快，而且拖太久會影響「停在障礙前幾公尺」
 #   這類量測的可讀性。3m/s 以 14m/s² 煞停＝滑行 0.32m，接近真實。
@@ -830,6 +846,22 @@ func wade_mul() -> float:
 	if dep <= 0.05:
 		return 1.0
 	return clampf(1.0 - dep * 0.63, 0.18, 1.0)
+
+# 被槍聲吸引轉頭（GDD/15 F6）。只轉朝向、不移動，也不打斷正在做的事。
+func face_towards_sound(dir: Vector3) -> void:
+	if _dead or dir.length() < 0.01:
+		return
+	_heard_dir = Vector3(dir.x, 0, dir.z).normalized()
+	_heard_t = 2.2
+var _heard_dir := Vector3.ZERO
+var _heard_t := 0.0
+
+func _tick_hearing(delta: float) -> void:
+	if _heard_t <= 0.0 or _dead or _dir_moving or _move_target != null or _shoot_target != null:
+		return
+	_heard_t -= delta
+	rotation.y = lerp_angle(rotation.y, atan2(_heard_dir.x, _heard_dir.z),
+			minf(1.0, TURN_SPEED * 0.5 * delta))
 
 # 是否正在移動中（警戒射擊要判斷「誰在動」與「誰在原地警戒」）
 func is_moving() -> bool:
@@ -848,10 +880,49 @@ func _tick_steps(moved: float) -> void:
 	if _step_acc < STEP_LEN:
 		return
 	_step_acc = 0.0
-	Audio.step(global_position, _crouch > 0.5)
+	var dep: float = water_depth()
+	if dep > 0.08:
+		_splash_fx(dep)              # 踩在水裡要濺水，不然人像走在玻璃上
+	Audio.step(global_position, _crouch > 0.5 or dep > 0.08)
+
+# 涉水水花：一次性小粒子。用 one-shot 而不是常駐發射器，
+# 不涉水的時候完全沒有成本。
+func _splash_fx(dep: float) -> void:
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3(0, 1, 0)
+	pm.spread = 42.0
+	pm.initial_velocity_min = 1.1
+	pm.initial_velocity_max = 2.4 * clampf(dep, 0.2, 1.0)
+	pm.gravity = Vector3(0, -9.8, 0)
+	pm.scale_min = 0.04
+	pm.scale_max = 0.11
+	pm.color = Color(0.82, 0.90, 0.95)
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.22
+	var qm := QuadMesh.new()
+	qm.size = Vector2.ONE
+	var mt := StandardMaterial3D.new()
+	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mt.albedo_color = Color(0.85, 0.93, 1.0, 0.65)
+	mt.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	qm.material = mt
+	var ps := GPUParticles3D.new()
+	ps.amount = 10
+	ps.lifetime = 0.55
+	ps.one_shot = true
+	ps.explosiveness = 0.9
+	ps.process_material = pm
+	ps.draw_pass_1 = qm
+	ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	get_tree().current_scene.add_child(ps)
+	ps.global_position = global_position + Vector3(0, 0.05, 0)
+	ps.emitting = true
+	get_tree().create_timer(0.9).timeout.connect(ps.queue_free)
 
 # 沒有輸入時把殘速滑完（由 _process 每幀呼叫）。人放開腳步不會瞬間釘在地上。
 func _coast(delta: float) -> void:
+	_tick_stamina(delta, false)
 	if _dead or _dir_moving or _move_target != null:
 		return
 	if _vel.length() < 0.01:
@@ -898,7 +969,8 @@ func move_dir(dir: Vector3, delta: float) -> void:
 		_prone_hold += delta        # 持續走就會超過門檻，_update_crouch 會讓他起身
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
 		return
-	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) 			* wade_mul() * load_mul() * hurt_mul()
+	_tick_stamina(delta, true)
+	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) 			* wade_mul() * load_mul() * hurt_mul() * stamina_mul()
 	_vel = _vel.move_toward(d * spd, ACCEL * delta)
 	global_position += _vel * delta
 	_tick_steps(_vel.length() * delta)
@@ -1122,6 +1194,7 @@ func _process(delta: float) -> void:
 		_dir_moving = false          # 由 Main 每幀重新設定；沒設就代表玩家鬆開了方向鍵
 		return
 	_coast(delta)                    # 鬆開方向鍵後把殘速滑完（慣性）
+	_tick_hearing(delta)             # 聽到槍聲會轉頭
 	if now < _busy_until:
 		return
 	# 換彈：射擊動作播完才接，否則會蓋掉開槍那一下
@@ -1164,6 +1237,10 @@ func _process(delta: float) -> void:
 		_play("idle")
 
 # 載具每幀：沒有動畫狀態機，只有「轉向→前進」與砲塔瞄準。
+const VEH_ACCEL := 1.6         # 履帶車起步加速度（m/s²）
+const VEH_DECEL := 2.4         # 煞停
+var _veh_spd := 0.0
+
 func _vehicle_process(delta: float) -> void:
 	_aim_turret(delta)
 	if _dead:
@@ -1200,10 +1277,17 @@ func _vehicle_process(delta: float) -> void:
 			arrived.emit()
 			return
 		var yaw := atan2(d.x, d.z)
-		rotation.y = lerp_angle(rotation.y, yaw, minf(1.0, VEH_TURN * delta))
+		# ⚠ 載具慣性（鐵律 0）：30 噸的車不可能瞬間到速、瞬間停住，也不可能原地打轉
+		#   之後立刻全速前進。加速度取 1.6m/s²、煞停 2.4m/s²（履帶車實際量級），
+		#   而且**轉向速率隨速度下降**——高速時轉不動，這就是轉向半徑。
+		var turn_rate: float = VEH_TURN / (1.0 + _veh_spd * 0.55)
+		rotation.y = lerp_angle(rotation.y, yaw, minf(1.0, turn_rate * delta))
 		var ang := absf(wrapf(yaw - rotation.y, -PI, PI))
-		if ang < 0.35:                                        # 履帶車先轉正再前進
-			global_position += d.normalized() * (VEH_SPEED * speed_mul) * delta
+		var want: float = (VEH_SPEED * speed_mul) if ang < 0.35 else 0.0
+		var rate: float = VEH_ACCEL if want > _veh_spd else VEH_DECEL
+		_veh_spd = move_toward(_veh_spd, want, rate * delta)
+		if _veh_spd > 0.01:
+			global_position += facing_dir() * _veh_spd * delta   # 只能往車頭方向走
 
 # 砲口世界座標（曳光/火光起點）
 func _muzzle_pos() -> Vector3:
@@ -1414,7 +1498,14 @@ func _aim_pose() -> void:
 	# 真實持槍是肘部收在**肋骨高度的後外側**，所以極向量要含「往後」的成分。
 	var down := (-Vector3.UP * 0.5 - facing_dir() * 0.55).normalized()
 	var rightv := global_basis.x.normalized()
-	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip, (down * 0.7 + rightv * 0.62).normalized())
+	# ⚠⚠ 肘部極向量必須把手肘推到**身體輪廓之外**（使用者 2026-07-27 第二次指正
+	#   「還是沒有手臂」的真因）。舊值只有「下＋外」，握把離肩膀只有 0.35m、
+	#   手臂卻有 0.55m，手肘一定要折出去；缺少「往後」的分量時它就折進胸腔，
+	#   從背後看＝軀幹上直接長出一把槍和兩隻手，上臂前臂整段藏在身體剪影裡。
+	#   真實抵肩射擊的右肘是「外展、略微下垂、明顯在身體後方」。
+	var back: Vector3 = -facing_dir()
+	_rig.ik_two_bone("UpperArm.R", "LowerArm.R", _hand_r, xf * _gun_grip,
+			(down * 0.45 + rightv * 0.72 + back * 0.55).normalized())
 	_rig.curl_fingers(".R", 0, 55.0, 35.0)
 	# 匍匐時左手離開前護木，往前撐地拉行（右手仍握把把槍拖著走）。
 	# ★這是趴姿唯一「看得見」的推進動作——腿在身體後方被身體與草擋住，
@@ -1433,8 +1524,10 @@ func _aim_pose() -> void:
 		# ⚠ 左臂的肘部極向量必須朝「左外側」（-rightv）。原本寫成 +rightv＝往身體內側，
 		#   左肘被夾進胸口、上臂整段藏進軀幹剪影裡，看起來就是「手臂不見了」
 		#   （使用者 2026-07-26 指正）。右臂朝右外側，兩邊是鏡像。
+		# 左肘：托前護木的手肘是「往下、略微內收、在身體前下方」——
+		# 跟右肘鏡像但不對稱，這是抵肩姿勢的實際樣子。
 		_rig.ik_two_bone("UpperArm.L", "LowerArm.L", _hand_l, xf * _gun_fore,
-				(down * 0.75 - rightv * 0.45).normalized())
+				(down * 0.80 - rightv * 0.50 + facing_dir() * 0.25).normalized())
 		_rig.curl_fingers(".L", 0, 55.0, 35.0)
 	# 4) 最後才擺槍：IK 會動到手骨→掛點跟著動，先擺會被帶偏
 	_gun_node.global_transform = xf

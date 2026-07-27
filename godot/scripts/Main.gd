@@ -93,6 +93,8 @@ var _low_blk: Array = []               # _blockers 裡 h ≤ STEP_UP 的那些�
 #   `_blockers = []`（重建場景用）會把它整個清掉——所以深水從來沒有真的擋過人，
 #   畫面上是海、走過去像草地。這是「畫出來的東西沒有碰撞」的又一例。
 var _water_blk: Array = []
+# 可摧毀的工事段（沙包牆）。爆炸會把它整段打掉：網格消失、碰撞消失、掩體消失。
+var _destructibles: Array = []
 # 支撐面查詢的粗剔除框（px）。⚠ _ground_height 每幀被呼叫 5 次×單位數
 #   （_stick_to_ground 1 次＋_ground_normal 取樣 4 次），沒有粗剔除的話
 #   16 單位就是每幀幾千次的建築＋矮障礙迴圈，實測幀時 5.9→10.9ms。
@@ -1507,6 +1509,60 @@ func _selftest() -> void:
 			fu["wy"] = fpx.y
 			await get_tree().create_timer(0.4).timeout
 			_unshield(fu, fsave)
+		# I-4b10) 工事被炸掉時，**三件事必須一起消失**：網格、碰撞、掩體加成。
+		#         少任何一件就是「畫面沒了還擋人」或「畫面還在卻穿得過去」——
+		#         本專案吃過好幾次這種不一致的虧，所以三件都要斷言。
+		if _destructibles.is_empty():
+			print("[destroychk] SKIP 這張圖沒有可摧毀的工事")
+		else:
+			var dd = _destructibles[0]
+			var dcen: Vector2 = dd["c"]
+			var dnode = dd["node"]
+			var blk_before: bool = _blockers.has(dd["blk"])
+			# ⚠ 不能用 cover_at 當判準：教學圖的沙包每 55px 一座，鄰座的掩體半徑 52px
+			#   會蓋住量測點，炸掉一座數值也不會變（第一版就是這樣「假通過」的）。
+			#   改成直接數「這一段自己的掩體登記還在不在」。
+			var cov_before := 0
+			for c in _covers:
+				if String(c.get("type", "")) == "sandbag" 						and Vector2(float(c["wx"]), float(c["wy"])).distance_to(dcen) < float(dd["r"]):
+					cov_before += 1
+			_destroy_fortifications(dcen, 60.0)
+			await get_tree().create_timer(0.4).timeout
+			var blk_after: bool = _blockers.has(dd["blk"])
+			var cov_after := 0
+			for c in _covers:
+				if String(c.get("type", "")) == "sandbag" 						and Vector2(float(c["wx"]), float(c["wy"])).distance_to(dcen) < float(dd["r"]):
+					cov_after += 1
+			var mesh_gone: bool = not is_instance_valid(dnode)
+			print("[destroychk] 炸掉一道沙包：網格消失=%s 碰撞消失=%s(炸前有=%s) 掩體登記 %d→%d %s"
+					% [mesh_gone, not blk_after, blk_before, cov_before, cov_after,
+					"OK(三件一起消失)" if (mesh_gone and blk_before and not blk_after
+							and cov_before > 0 and cov_after == 0)
+					else "FAIL(有東西沒跟著消失)"])
+			# 用走的證明：原本走不過去的位置，炸完走得過去
+			var du = _deployed[0]
+			var dsave := _shield(du)
+			var dhome: Vector3 = du["node"].global_position
+			du["node"].stance_cmd = "stand"
+			du["node"].global_position = _to3d(dcen.x, dcen.y + 70.0)
+			await get_tree().create_timer(0.5).timeout
+			var dp0: Vector3 = du["node"].global_position
+			var dt := 0.0
+			while dt < 3.0:
+				await get_tree().process_frame
+				var ddt: float = get_process_delta_time()
+				dt += ddt
+				du["node"].move_dir(Vector3(0, 0, -1), ddt)
+			var crossed: bool = _live_px(du).y < dcen.y - 5.0
+			print("[destroychk] 炸完往原本被擋的方向走 3 秒：越過=%s %s" % [crossed,
+					"OK(真的通了)" if crossed else "FAIL(畫面沒了但還是走不過去)"])
+			du["node"].stance_cmd = ""
+			du["node"].global_position = dhome
+			var dpx := _live_px(du)
+			du["wx"] = dpx.x
+			du["wy"] = dpx.y
+			await get_tree().create_timer(0.4).timeout
+			_unshield(du, dsave)
 		# I-4b9) 音效必須是 3D 音源（GDD/15 F 整塊先前缺席：開槍是靜音的）。
 		#        沒有喇叭可以「聽」，所以驗的是：檔案載得到、播出來的是 AudioStreamPlayer3D、
 		#        而且距離衰減參數有設——這三件成立，距離衰減就是引擎在做。
@@ -2366,7 +2422,7 @@ func _refresh_visibility() -> void:
 				if pv.length() > 0.01:
 					var adeg: float = rad_to_deg(acos(clampf(pf.dot(pv.normalized()), -1.0, 1.0)))
 					sight *= (1.0 if adeg <= 60.0 else (0.55 if adeg <= 110.0 else 0.3))
-			sight *= weather_sight_mul()          # 雨雪壓低能見度
+			sight *= weather_sight_mul() * _light_sight_mul()   # 雨雪與光線都壓低能見度
 			for c in _covers:
 				if c["type"] == "bush" and Vector2(c["wx"] - u["wx"], c["wy"] - u["wy"]).length() <= c["r"]:
 					# 草叢隱蔽（GDD/01 §5a）：蹲伏且尚未開火才真的藏得住（發現距離砍到 0.3）；
@@ -2584,6 +2640,7 @@ func _fire(shooter, target, part := "body") -> void:
 		elif target["alive"]:
 			target["node"].take_hit()     # 受擊：立繪換 hurt 表情＋紅閃
 	_splash(shooter, target)
+	_hear_shot(shooter)
 	_refresh_visibility()
 	_check_end()
 
@@ -2631,6 +2688,14 @@ func _bullet_mark(pos: Vector3) -> void:
 #   粒子跟著鏡頭走（只在鏡頭附近下雨），全圖鋪粒子是純浪費。
 var weather := "clear"
 var _weather_node: GPUParticles3D = null
+# 天色對能見度的影響（鐵律 0）：夜裡看不了那麼遠。
+# 先前 sky 只影響畫面色調，戰術上完全沒有差別——夜戰跟白天一樣好打。
+func _light_sight_mul() -> float:
+	match String(map_data.get("sky", "day")):
+		"night": return 0.45
+		"dusk", "dawn": return 0.78
+		_: return 1.0
+
 func weather_sight_mul() -> float:
 	match weather:
 		"rain": return 0.72
@@ -2686,6 +2751,15 @@ func _weather_follow() -> void:
 # 火與煙（GDD/15 G3）。程式生成的粒子，不需要素材：
 # 火＝往上飄的橘色小片（重力為負、隨高度變暗），煙＝更大更慢更暗、飄得更高。
 # 再加一盞會閃的暖光，夜/黃昏下才有「那邊在燒」的感覺。
+# 風向（資料驅動；沒寫就用固定微風）。
+# ⚠ 彈道不吃風是**明文例外**：在核定的壓縮尺度下，20m 內側風造成的偏移是公釐級，
+#   加進去只會讓命中率變成隨機噪音，不會讓遊戲更真實。
+func _wind() -> Vector2:
+	var w = map_data.get("wind", null)
+	if w is Array and (w as Array).size() >= 2:
+		return Vector2(float(w[0]), float(w[1]))
+	return Vector2(0.4, 0.2)
+
 func _add_fire(pos: Vector3, radius: float) -> void:
 	if world == null:
 		return
@@ -2700,7 +2774,7 @@ func _add_fire(pos: Vector3, radius: float) -> void:
 		pm.spread = 14.0
 		pm.initial_velocity_min = float(spec["up"]) * 0.6
 		pm.initial_velocity_max = float(spec["up"])
-		pm.gravity = Vector3(0.4, 0.35, 0.2)          # 火與煙都被風帶著走
+		pm.gravity = Vector3(_wind().x, 0.35, _wind().y)   # 火與煙被風帶著走
 		pm.scale_min = float(spec["sz"]) * 0.5
 		pm.scale_max = float(spec["sz"])
 		pm.color = spec["col"]
@@ -2753,6 +2827,31 @@ func _flicker_fire(delta: float) -> void:
 		if is_instance_valid(l):
 			l.light_energy = k
 
+# 槍聲是情報（GDD/15 F6）。開槍會暴露自己：附近的人會轉頭朝聲音方向。
+# ⚠ 這條要在「視野扇形」之後做才有意義——先前 360 度全視野，轉不轉頭都一樣。
+#   現在背後只有 0.3 倍視距，所以「被聲音吸引轉身」真的會改變偵察結果。
+const HEAR_PX := 460.0        # 聽得到槍聲的距離（比視野遠得多，這是聲音的價值）
+func _hear_shot(shooter) -> void:
+	if not is_instance_valid(shooter["node"]):
+		return
+	var sp: Vector2 = _live_px(shooter)
+	for u in units:
+		if u == shooter or not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		if u == acting:
+			continue                     # 玩家正在操控的人不要被系統搶走視角
+		if Unit.is_vehicle_cls(u["cls"]):
+			continue
+		var up: Vector2 = _live_px(u)
+		if up.distance_to(sp) > HEAR_PX:
+			continue
+		if u["node"].is_moving():
+			continue                     # 正在移動的人不打斷他
+		var to: Vector3 = shooter["node"].global_position - u["node"].global_position
+		to.y = 0.0
+		if to.length() > 0.05:
+			u["node"].face_towards_sound(to.normalized())
+
 # 兩人之間的中點（打在掩體上的音源大致位置）
 func _mid3(a, b) -> Vector3:
 	if not is_instance_valid(a["node"]) or not is_instance_valid(b["node"]):
@@ -2789,8 +2888,36 @@ func _splash(shooter, center) -> void:
 			u["node"].die()
 		else:
 			u["node"].take_hit()
+	_destroy_fortifications(Vector2(cx, cy), r_px)
 	if hit_any > 0 and shooter["side"] == player_side:
 		ui.flash_msg("爆炸波及 %d 人" % hit_any, Color(1.0, 0.75, 0.35))
+
+# 爆炸摧毀工事（GDD/15 G1）。⚠ 三件事必須一起消失，否則就是「畫面沒了但還擋人」
+# 或「畫面還在但穿得過去」——本專案吃過好幾次這種不一致的虧：
+#   ① 網格 ② _blockers 裡的碰撞 ③ _covers 裡的掩體加成
+func _destroy_fortifications(center: Vector2, r_px: float) -> void:
+	if r_px <= 0.0:
+		return
+	var left: Array = []
+	for d in _destructibles:
+		var dc: Vector2 = d["c"]
+		if dc.distance_to(center) > r_px + float(d["r"]) * 0.5:
+			left.append(d)
+			continue
+		if is_instance_valid(d["node"]):
+			d["node"].queue_free()
+		_blockers.erase(d["blk"])
+		_low_blk.erase(d["blk"])
+		var keep_cov: Array = []
+		for c in _covers:
+			if String(c.get("type", "")) == "sandbag" 					and Vector2(float(c["wx"]), float(c["wy"])).distance_to(dc) < float(d["r"]):
+				continue
+			keep_cov.append(c)
+		_covers = keep_cov
+		_rebuild_support_box()
+		_add_fire(_to3d(dc.x, dc.y) + Vector3(0, 0.3, 0), 0.5)   # 炸完會燒
+		ui.flash_msg("工事被摧毀", Color(1.0, 0.6, 0.35))
+	_destructibles = left
 
 # 可瞄準的部位（GDD/01 §4）：軀幹永遠可選；步兵可瞄頭；
 # 坦克散熱器在尾部，射手必須位於車尾 ±60° 扇形內才打得到——繞背後才是坦克戰的解法。
@@ -3665,6 +3792,12 @@ func _pen_count(a: Vector2, b: Vector2, ya: float, yb: float) -> int:
 			n += 1
 	return n
 
+# 這個單位站得比地形高多少（＝站在幾樓／站在矮牆上）
+func _unit_elev(u) -> float:
+	if not is_instance_valid(u["node"]) or terrain == null:
+		return 0.0
+	return maxf(0.0, u["node"].global_position.y - terrain.height_at_world(u["node"].global_position))
+
 # 這個目標是不是在室內（屋頂擋得住拋射彈）
 func _target_indoors(u) -> bool:
 	var p := _live_px(u)
@@ -3677,6 +3810,11 @@ func _shot_clear_units(shooter, target, part := "body") -> bool:
 	# 載具用砲塔／車體高度，不吃姿勢（坦克不會蹲）
 	var ya: float = 1.90 if Unit.is_vehicle_cls(shooter["cls"]) else 1.32
 	var yb: float = 1.40 if Unit.is_vehicle_cls(target["cls"]) else 1.15
+	# 站在二樓射擊，彈道起點就是高 3.1m（鐵律 0②：遮蔽看幾何）。
+	# ⚠ 先前高度一律「相對腳下地面」，於是站二樓跟站平地的遮蔽判定完全一樣，
+	#   佔領制高點沒有任何好處。
+	ya += _unit_elev(shooter)
+	yb += _unit_elev(target)
 	if not Unit.is_vehicle_cls(shooter["cls"]) and is_instance_valid(shooter["node"]):
 		ya = shooter["node"].muzzle_height()
 	if not Unit.is_vehicle_cls(target["cls"]) and is_instance_valid(target["node"]):
@@ -4010,6 +4148,16 @@ func _build_ground() -> void:
 	# ⚠ 先前只問地形，站在二樓的人高度照一樓地面算＝整個人陷進樓板裡。
 	Unit.ground_sampler = _ground_height
 	Unit.water_sampler = func(p: Vector3) -> float: return terrain.water_depth_world(p)
+	# 聲音遮蔽：音源到鏡頭之間有牆就變悶（Audio.sfx3d 用）
+	Audio.los_check = func(p: Vector3) -> bool:
+		if cam == null:
+			return true
+		var mw2: float = map_data.get("w", 960)
+		var mh2: float = map_data.get("h", 600)
+		var a2 := Vector2(p.x / WORLD_SCALE + mw2 * 0.5, p.z / WORLD_SCALE + mh2 * 0.5)
+		var cp: Vector3 = cam.global_position
+		var b2 := Vector2(cp.x / WORLD_SCALE + mw2 * 0.5, cp.z / WORLD_SCALE + mh2 * 0.5)
+		return _los_clear(a2, b2)
 	# 槍口不可以插進固體（使用者 2026-07-26 第二次指正）：把「實體射線」交給 Unit，
 	# 它在瞄準時自己判斷要不要抬槍。見 Unit.solid_probe。
 	Unit.solid_probe = func(a: Vector3, b: Vector3) -> float: return _solid_ray(a, b)
@@ -4037,6 +4185,7 @@ func _build_ground() -> void:
 	_low_blk = []
 	_fire_lights = []
 	_marks = []
+	_destructibles = []
 	_weather_node = null
 	_low_grid = {}
 	_has_support = false
@@ -4126,6 +4275,12 @@ func _build_ground() -> void:
 	# ⚠ 2026-07-26：這裡先前只吃 props.blockers，沙包牆（Fortify 產的）從來沒進碰撞表，
 	#   所以上一批宣稱「所有物體都是實體」時，沙包其實還是可以直接走過去（使用者實測抓到）。
 	#   工事的障礙一定要一起併進來。
+	# 燒毀的車輛會冒煙（GDD/15 G3）：靜態殘骸看起來像剛擺上去的道具。
+	# 只點前兩處，全部點火會太吵也太貴。
+	for wi in mini(2, props.wreck_spots.size()):
+		var wp: Vector2 = props.wreck_spots[wi]
+		_add_fire(_to3d(wp.x, wp.y) + Vector3(0, 0.5, 0), 0.7)
+	_destructibles = fort.destructibles
 	_blockers = props.blockers + fort.blockers + _water_blk
 	_low_blk = []
 	for bk0 in _blockers:

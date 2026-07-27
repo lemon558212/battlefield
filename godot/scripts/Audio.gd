@@ -59,8 +59,15 @@ func voice(cls: String, kind: String) -> void:
 const SFX_DIR := "res://assets/audio/sfx/"
 var _sfx_cache := {}
 var _last_sfx: AudioStreamPlayer3D = null      # 給驗證台檢查參數用
+# 由 Main 注入：這個位置到聽者（鏡頭）之間有沒有被牆擋住。
+# 擋住的聲音要變悶——這是真實的（高頻被牆吸收），也是情報
+# （「聽起來悶悶的」代表對方在牆後面）。
+var los_check: Callable = Callable()
 
 func sfx3d(name: String, pos: Vector3, db := 0.0, pitch := 1.0) -> AudioStreamPlayer3D:
+	var muffled := false
+	if los_check.is_valid():
+		muffled = not bool(los_check.call(pos))
 	var path: String = SFX_DIR + name + ".wav"
 	if not _sfx_cache.has(name):
 		_sfx_cache[name] = load(path) if ResourceLoader.exists(path) else null
@@ -75,8 +82,12 @@ func sfx3d(name: String, pos: Vector3, db := 0.0, pitch := 1.0) -> AudioStreamPl
 	pl.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 	pl.unit_size = 7.0          # 7m 之內接近原音量，之後隨距離反比衰減
 	pl.max_distance = 140.0
-	pl.volume_db = db
+	pl.volume_db = db - (7.0 if muffled else 0.0)
 	pl.pitch_scale = pitch
+	if muffled:
+		# 低通：牆會吃掉高頻，剩下悶悶的低頻。這是 AudioStreamPlayer3D 內建的。
+		pl.attenuation_filter_cutoff_hz = 900.0
+		pl.attenuation_filter_db = -24.0
 	host.add_child(pl)
 	pl.global_position = pos
 	pl.finished.connect(pl.queue_free)

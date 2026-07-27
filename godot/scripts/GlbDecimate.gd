@@ -27,6 +27,11 @@ func _ready() -> void:
 			dst = args[i + 2]
 			if i + 3 < args.size():
 				target = int(args[i + 3])
+	# 手臂診斷：用真實的 Unit.spawn 路徑生一個英雄，站姿持槍，拍正面近照並列出網格
+	for i3 in args.size():
+		if args[i3] == "armdiag":
+			await _armdiag()
+			return
 	# 檢視模式：把一個 glb 載進來，印骨架資訊並拍一張圖（減面後一定要用看的驗）
 	for i2 in args.size():
 		if args[i2] == "glbview" and i2 + 1 < args.size():
@@ -299,3 +304,91 @@ func _count_tris(pos: PackedVector3Array, uv, idx: PackedInt32Array,
 		if a != b and b != c and a != c:
 			cnt += 1
 	return cnt
+
+
+# ---------- 手臂消失診斷 ----------
+# 使用者 2026-07-27 第二次指正「還是沒有手臂」。上一輪我加了 NaN 防護、
+# [armchk] 量骨骼座標全正常——但**畫面上手臂還是不見**。
+# 骨頭在對的地方卻沒被畫出來，代表問題不在姿勢，在**蒙皮或網格**。
+# 這支把真實生成路徑跑一遍，逐個 MeshInstance 印出可見性、表面數與 AABB，
+# 才能分辨是「網格被隱藏」「手臂根本不在網格裡」還是「頂點被塌陷到體內」。
+func _armdiag() -> void:
+	var e := Environment.new()
+	e.background_mode = Environment.BG_COLOR
+	e.background_color = Color(0.35, 0.42, 0.32)
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(1, 1, 1)
+	e.ambient_light_energy = 1.3
+	var we := WorldEnvironment.new()
+	we.environment = e
+	add_child(we)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-40, 28, 0)
+	add_child(sun)
+	var path := "res://assets/models/chars/hr_w_Swat.fbx"
+	print("[armdiag] 模型=", path, " 存在=", ResourceLoader.exists(path))
+	var u = Unit.spawn(path, "sniper", 0, true)
+	add_child(u)
+	u.global_position = Vector3.ZERO
+	await get_tree().process_frame
+	await get_tree().create_timer(1.5).timeout
+	u.aim_point = Vector3(0, 1.3, 6.0)
+	await get_tree().create_timer(1.2).timeout
+	var sks := u.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		print("[armdiag] FAIL 沒有骨架")
+		get_tree().quit(1)
+		return
+	var sk: Skeleton3D = sks[0]
+	for bn in ["Shoulder.R", "UpperArm.R", "LowerArm.R", "Hand.R",
+			"Shoulder.L", "UpperArm.L", "LowerArm.L", "Hand.L", "Hips", "Head"]:
+		var bi: int = sk.find_bone(bn)
+		if bi < 0:
+			print("[armdiag] 骨頭 %s 不存在" % bn)
+			continue
+		var gp: Transform3D = sk.get_bone_global_pose(bi)
+		var wp: Vector3 = sk.global_transform * gp.origin
+		print("[armdiag] %-12s 世界=(%.3f,%.3f,%.3f) 縮放=(%.3f,%.3f,%.3f)" % [bn,
+				wp.x, wp.y, wp.z, gp.basis.get_scale().x, gp.basis.get_scale().y,
+				gp.basis.get_scale().z])
+	for mi in u.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		var mm: Mesh = m.mesh
+		print("[armdiag] mesh %-22s 可見=%s 表面=%d skin=%s AABB=%s" % [m.name, m.visible,
+				(mm.get_surface_count() if mm != null else -1),
+				m.skin != null, (mm.get_aabb() if mm != null else AABB())])
+	var camn := Camera3D.new()
+	add_child(camn)
+	camn.make_current()
+	camn.global_position = Vector3(0.0, 1.35, 2.6)
+	camn.look_at(Vector3(0, 1.15, 0), Vector3.UP)
+	camn.fov = 42.0
+	await get_tree().create_timer(0.5).timeout
+	get_viewport().get_texture().get_image().save_png("res://qa/armdiag_front.png")
+	camn.global_position = Vector3(2.6, 1.35, 0.0)
+	camn.look_at(Vector3(0, 1.15, 0), Vector3.UP)
+	await get_tree().create_timer(0.5).timeout
+	get_viewport().get_texture().get_image().save_png("res://qa/armdiag_side.png")
+	# 使用者截圖的角度＝第三人稱從**背後偏右上**看。手臂往前伸握槍時，
+	# 從這個角度會被軀幹擋住——先拍一張同角度的圖，才知道「沒有手臂」
+	# 是真的沒有，還是視角把手臂藏在身體後面。
+	camn.global_position = Vector3(-0.9, 1.85, -2.4)
+	camn.look_at(Vector3(0, 1.1, 0), Vector3.UP)
+	await get_tree().create_timer(0.5).timeout
+	get_viewport().get_texture().get_image().save_png("res://qa/armdiag_back.png")
+	# 再拍一張「沒有瞄準點」的狀態：遊戲裡站著不動時 aim_point 是 null，
+	# _aim_pose 會走另一條分支，跟上面那張是不同的姿勢來源。
+	u.aim_point = null
+	await get_tree().create_timer(1.2).timeout
+	camn.global_position = Vector3(-0.9, 1.85, -2.4)
+	camn.look_at(Vector3(0, 1.1, 0), Vector3.UP)
+	await get_tree().create_timer(0.4).timeout
+	get_viewport().get_texture().get_image().save_png("res://qa/armdiag_back_noaim.png")
+	var sk2i: int = sk.find_bone("UpperArm.R")
+	var hd2i: int = sk.find_bone("Hand.R")
+	if sk2i >= 0 and hd2i >= 0:
+		var ua: Vector3 = sk.get_bone_global_pose(sk2i).origin
+		var hd: Vector3 = sk.get_bone_global_pose(hd2i).origin
+		print("[armdiag] 無瞄準時 上臂→手 距離=%.4f（骨架空間）" % ua.distance_to(hd))
+	print("[armdiag] DONE")
+	get_tree().quit(0)

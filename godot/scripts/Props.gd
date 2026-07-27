@@ -21,6 +21,8 @@ var _mats := {}
 # ⚠ 只登記「人真的過不去」的東西：路面、瓦礫碎石不登記（那些是跨得過去的）。
 var blockers: Array = []
 var _no_zones: Array[Rect2] = []
+# 有殘骸的位置（Main 拿去點火：燒毀的車輛會一直冒煙，不是乾淨的靜態模型）
+var wreck_spots: Array = []
 
 # 建築周邊禁區判定（門口不能被自家柵欄堵死）
 func _off_limits(p: Vector2) -> bool:
@@ -71,6 +73,7 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	_walls_brick(map_data)
 	_cables(map_data)
 	_scorch(map_data)
+	_clutter(map_data)
 	_flush()
 
 # ---------- 各類物件 ----------
@@ -217,6 +220,8 @@ func _wrecks(m: Dictionary) -> void:
 					atan2(dir.y, dir.x) + rng.randf_range(-0.5, 0.5)])
 	for sp in spots:
 		var p: Vector2 = sp[0]
+		if not _off_limits(p) and (_terrain == null or not _terrain.in_water(p.x, p.y)):
+			wreck_spots.append(p)
 		if _off_limits(p):
 			continue
 		var ang: float = sp[1]
@@ -343,6 +348,130 @@ func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false) -> v
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
 	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen,
 			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
+
+# ---------- 小件雜物（GDD/14 §使用痕跡；使用者 2026-07-27：「場景細膩感還沒有很完全」）----------
+# 使用者的四條判準：細節層次（大形＋中形＋小件）、使用痕跡（不會是新的、不會排整齊）、
+# 材質變化（每個個體顏色不同）、與地面的過渡（不可以硬插進地面）。
+# 先前只有大形（建築、工事）與中形（護欄、電線桿），**小件完全沒有**——
+# 於是每一塊空地都是「乾淨的草皮」，看起來像還沒佈置完的白模。
+#
+# 生成邏輯刻意「圍著建築與道路長」：真實基地的雜物堆在人活動的地方，
+# 不會平均散佈在曠野。每一件都帶隨機色偏、隨機傾斜，底下再壓一圈泥土做過渡。
+const CLUTTER_KINDS := ["crate", "drum", "tyre", "pallet", "block", "canvas", "spool"]
+
+func _clutter(m: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(_mw * 31.0 + _mh * 17.0) + 4242
+	# 聚落中心＝建築周邊與道路沿線，這是雜物真正會出現的地方
+	var hubs: Array = []
+	for sd in m.get("solids", []):
+		hubs.append(Vector2(float(sd.get("x", 0)) + float(sd.get("w", 60)) * 0.5,
+				float(sd.get("y", 0)) + float(sd.get("h", 60)) * 0.5))
+	for r in m.get("roads", []):
+		for k in 3:
+			var t: float = (float(k) + 0.5) / 3.0
+			hubs.append(Vector2(float(r.get("x1", 0)), float(r.get("y1", 0))).lerp(
+					Vector2(float(r.get("x2", 0)), float(r.get("y2", 0))), t))
+	if hubs.is_empty():
+		hubs.append(Vector2(_mw * 0.5, _mh * 0.5))
+	var placed := 0
+	for i in 220:
+		if placed >= 70:
+			break
+		var hub: Vector2 = hubs[rng.randi() % hubs.size()]
+		# 距離用指數分佈：靠近聚落最多，越遠越稀——不是平均亂灑
+		var dist: float = 40.0 + 150.0 * pow(rng.randf(), 2.0)
+		var ang: float = rng.randf() * TAU
+		var p := hub + Vector2(cos(ang), sin(ang)) * dist
+		if p.x < 20.0 or p.y < 20.0 or p.x > _mw - 20.0 or p.y > _mh - 20.0:
+			continue
+		if _off_limits(p) or (_terrain != null and _terrain.in_water(p.x, p.y)):
+			continue
+		if _terrain != null and _terrain.in_trench(p.x, p.y):
+			continue
+		_one_clutter(CLUTTER_KINDS[rng.randi() % CLUTTER_KINDS.size()], p, rng)
+		placed += 1
+	# 地面痕跡：小坑、裂縫、散落碎屑。純視覺、不擋任何東西（跨得過去）。
+	for i in 130:
+		var p2 := Vector2(rng.randf_range(30.0, _mw - 30.0), rng.randf_range(30.0, _mh - 30.0))
+		if _terrain != null and _terrain.in_water(p2.x, p2.y):
+			continue
+		# ⚠ 第一版用 scaled_local 想「調暗」——那是縮放不是顏色，結果是一堆
+		#   浮在坡面上的黑色小方板（實拍抓到）。痕跡要薄、要貼平，而且只能鋪在
+		#   夠平的地方：斜坡上放一片水平方板一定會有一邊翹起來。
+		if _terrain != null and _terrain.slope_at(p2.x, p2.y) > 0.10:
+			continue
+		var sz: float = rng.randf_range(0.25, 0.8)
+		_box("dirt", Vector3(sz, 0.012, sz * rng.randf_range(0.5, 1.4)),
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU), _pos(p2.x, p2.y, -0.004)))
+
+# 單件雜物。每一件都：尺寸抖動、顏色抖動、傾斜一點、底下壓泥土。
+func _one_clutter(kind: String, p: Vector2, rng: RandomNumberGenerator) -> void:
+	var yaw: float = rng.randf() * TAU
+	var tilt: float = rng.randf_range(-0.14, 0.14)      # 東西不會擺得筆直
+	var b := Basis(Vector3.UP, yaw) * Basis(Vector3(1, 0, 0), tilt)
+	match kind:
+		"crate":            # 木彈藥箱，有時疊兩層
+			var w: float = rng.randf_range(0.52, 0.78)
+			var h: float = rng.randf_range(0.34, 0.46)
+			_box("wood", Vector3(w, h, w * rng.randf_range(0.6, 0.85)),
+					Transform3D(b, _pos(p.x, p.y, h * 0.5)))
+			if rng.randf() < 0.45:
+				var w2: float = w * rng.randf_range(0.7, 0.95)
+				_box("wood", Vector3(w2, h * 0.9, w2 * 0.8),
+						Transform3D(Basis(Vector3.UP, yaw + rng.randf_range(-0.5, 0.5)),
+						_pos(p.x + rng.randf_range(-0.1, 0.1), p.y + rng.randf_range(-0.1, 0.1),
+						h * 1.45)))
+			_blk_cir(p, 0.45, 0.42, true)              # 矮＝踩得上去，木頭＝擋不住彈
+		"drum":             # 油桶：站立或倒下
+			if rng.randf() < 0.68:
+				_box("rust", Vector3(0.58, 0.88, 0.58), Transform3D(b, _pos(p.x, p.y, 0.44)))
+				_blk_cir(p, 0.32, 0.88, true)          # 鐵皮桶擋人不擋步槍彈
+			else:
+				_box("rust", Vector3(0.88, 0.56, 0.56),
+						Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3(0, 0, 1), PI * 0.5),
+						_pos(p.x, p.y, 0.28)))
+				_blk_cir(p, 0.34, 0.42, true)
+		"tyre":             # 輪胎堆
+			var n: int = rng.randi_range(2, 4)
+			for k in n:
+				_box("cable", Vector3(0.74, 0.20, 0.74),
+						Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+						_pos(p.x + rng.randf_range(-0.06, 0.06),
+						p.y + rng.randf_range(-0.06, 0.06), 0.10 + float(k) * 0.19)))
+			_blk_cir(p, 0.40, 0.10 + float(n) * 0.19, true)
+		"pallet":           # 木棧板：平放，踩得過去
+			for k in 4:
+				_box("wood", Vector3(1.05, 0.055, 0.14),
+						Transform3D(b, _pos(p.x, p.y, 0.06)
+						+ b * Vector3(0, 0, -0.42 + float(k) * 0.28)))
+			_box("wood", Vector3(1.05, 0.06, 0.92), Transform3D(b, _pos(p.x, p.y, 0.02)))
+		"block":            # 水泥塊／斷樑
+			var l: float = rng.randf_range(0.6, 1.3)
+			_box("concrete", Vector3(l, rng.randf_range(0.22, 0.38), rng.randf_range(0.3, 0.5)),
+					Transform3D(b, _pos(p.x, p.y, 0.16)))
+			_blk_cir(p, l * 0.4, 0.34)                 # 混凝土：真的擋彈
+		"canvas":           # 蓋著帆布的補給堆：不規則、最像「有人用過」
+			for k in 3:
+				var sx: float = rng.randf_range(0.5, 1.1)
+				_box("dirt", Vector3(sx, rng.randf_range(0.22, 0.44), sx * 0.8),
+						Transform3D(Basis(Vector3.UP, yaw + float(k) * 0.7)
+						* Basis(Vector3(1, 0, 0), rng.randf_range(-0.2, 0.2)),
+						_pos(p.x + rng.randf_range(-0.3, 0.3),
+						p.y + rng.randf_range(-0.3, 0.3), 0.18)))
+			_blk_cir(p, 0.55, 0.44, true)
+		_:                  # spool 電纜捲軸
+			_box("wood", Vector3(1.0, 0.10, 1.0), Transform3D(b, _pos(p.x, p.y, 0.06)))
+			_box("cable", Vector3(0.62, 0.42, 0.62), Transform3D(b, _pos(p.x, p.y, 0.32)))
+			_box("wood", Vector3(1.0, 0.10, 1.0), Transform3D(b, _pos(p.x, p.y, 0.58)))
+			_blk_cir(p, 0.5, 0.64, true)
+	# 與地面的過渡：底下壓幾坨土，不然任何物件都像「插進地板」
+	for k2 in 3:
+		var sz: float = rng.randf_range(0.18, 0.4)
+		_box("dirt", Vector3(sz, sz * 0.22, sz * rng.randf_range(0.7, 1.3)),
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+				_pos(p.x + rng.randf_range(-0.45, 0.45),
+				p.y + rng.randf_range(-0.45, 0.45), 0.03)))
 
 # ---------- 幾何合併 ----------
 func _pos(px: float, py: float, y_off: float) -> Vector3:

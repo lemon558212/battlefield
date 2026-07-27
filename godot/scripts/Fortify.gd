@@ -18,6 +18,13 @@ var _mh := 600.0
 var _terrain = null
 var _st: SurfaceTool = null
 var blockers: Array = []          # 同 Props.blockers 的格式，交給 Main 一起吃
+# 可摧毀的工事段（GDD/15 G1）。⚠ 為了 draw call，全部工事本來合併成一個網格，
+#   於是「炸掉其中一段沙包」在技術上做不到（不能隱藏合併網格的一部分）。
+#   折衷：**沙包牆每一道自己一個網格**（一張圖十幾道，多十幾個 draw call，
+#   實測 <0.4ms），其餘工事照舊合併。這樣才有東西可以炸。
+#   每筆 {node: MeshInstance3D, c: Vector2(px), r: 半徑(px), blk: 對應的障礙}
+var destructibles: Array = []
+var _wall_st: SurfaceTool = null      # 目前這道沙包牆專用（不為 null 時 _tri_raw 寫這裡）
 
 func begin(map_w: float, map_h: float, world_scale: float, terrain) -> void:
 	_mw = map_w
@@ -46,6 +53,9 @@ func finish() -> void:
 # 真實沙包牆是「梯形剖面」：底寬頂窄，每層交錯半個袋子（磚砌法），否則會垮。
 # 先前是兩排方盒疊起來，看起來像積木。
 func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
+	# 這一道自己一個 SurfaceTool，才能單獨被炸掉
+	_wall_st = SurfaceTool.new()
+	_wall_st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(absf(cx) * 13.0 + absf(cy) * 7.0) + 5
 	var long_x: bool = w_px >= h_px
@@ -97,6 +107,7 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 	blockers.append({"t": "seg", "a": Vector2(cx, cy) - dpx, "b": Vector2(cx, cy) + dpx,
 			"r": 0.30 / _ws, "h": float(rows) * bag_h * 0.92 + bag_h * 0.5, "k": "sandbag",
 			"m": Vector2(cx, cy), "hl": half_len})
+	var wall_blk = blockers[blockers.size() - 1]
 	# 底部泥土堆：物件與地面的過渡，沒有這層就是「硬插進地面」
 	for k2 in 10:
 		var t2: float = rng.randf_range(-length_m * 0.55, length_m * 0.55)
@@ -104,6 +115,19 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 		var sz: float = rng.randf_range(0.22, 0.5)
 		var p2 := Vector3(dir.x * t2 + dir.y * side, sz * 0.16, dir.y * t2 - dir.x * side)
 		_mound(Vector2(cx, cy), p2, sz, rng)
+	# 這一道結束：commit 成自己的網格，登記進可摧毀清單
+	var wmat := StandardMaterial3D.new()
+	wmat.vertex_color_use_as_albedo = true
+	wmat.roughness = 0.97
+	wmat.metallic_specular = 0.02
+	_wall_st.set_material(wmat)
+	var wmi := MeshInstance3D.new()
+	wmi.name = "SandbagWall"
+	wmi.mesh = _wall_st.commit()
+	add_child(wmi)
+	destructibles.append({"node": wmi, "c": Vector2(cx, cy),
+			"r": maxf(length_m * 0.5 / _ws, 20.0), "blk": wall_blk})
+	_wall_st = null
 
 # 一個沙包：12 個頂點（底/腰/頂三圈），腰部外鼓、頂部內縮＝鬆軟的袋子。
 # 方盒做不出「裝了沙而鼓起來」的感覺，那是它看起來像積木的主因。
@@ -261,7 +285,8 @@ func _tri_raw(a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Colo
 			k1 = k2
 			k2 = tk
 			n = -n
+	var tgt: SurfaceTool = _wall_st if _wall_st != null else _st
 	for item in [[a, ca], [v1, k1], [v2, k2]]:
-		_st.set_normal(n)
-		_st.set_color((item[1] as Color).srgb_to_linear())
-		_st.add_vertex(item[0])
+		tgt.set_normal(n)
+		tgt.set_color((item[1] as Color).srgb_to_linear())
+		tgt.add_vertex(item[0])
