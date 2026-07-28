@@ -9,6 +9,9 @@ signal chapter_chosen(n: int)
 signal deploy_pick(cls: String, named: bool)
 signal deploy_go
 signal end_turn
+signal training_open
+signal training_up(cls: String)
+signal training_back
 signal back_menu
 
 const GOLD := Color(0.945, 0.757, 0.353)
@@ -273,7 +276,7 @@ func show_menu(has_save: bool) -> void:
 			get_viewport().get_visible_rect().size.y / 2 - 140)
 
 # ---------- 章節選擇（名冊立繪）----------
-func show_story(unlocked: int) -> void:
+func show_story(unlocked: int, training := false) -> void:
 	_clear()
 	var bg := _panel(Color(0.04, 0.05, 0.07, 0.96))
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -309,6 +312,74 @@ func show_story(unlocked: int) -> void:
 	var back := _btn("返回主選單", 16)
 	back.position = Vector2(60, vp.y - 70)
 	back.pressed.connect(func(): back_menu.emit())
+	root.add_child(back)
+	# 訓練場（GDD/16）：第 4 章通關後才出現——沒解鎖就不給看，避免「拿了卻沒地方花」
+	if training:
+		var tb := _btn("⚙ 訓練場", 16)
+		tb.position = Vector2(240, vp.y - 70)
+		tb.pressed.connect(func(): training_open.emit())
+		root.add_child(tb)
+
+# ---------- 訓練場（GDD/16 §3）：共用經驗池 → 兵科升級，全科同享 ----------
+func show_training(pool: int, lvs: Dictionary) -> void:
+	_clear()
+	var bg := _panel(Color(0.04, 0.05, 0.07, 0.96))
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(bg)
+	var head := _mk_banner("TRAINING", "訓練場", "把戰場經驗換成部隊實力")
+	head.position = Vector2(60, 40)
+	root.add_child(head)
+	var vp := get_viewport().get_visible_rect().size
+	var pool_lb := Label.new()
+	pool_lb.text = "經驗池  %d XP" % pool
+	pool_lb.add_theme_font_size_override("font_size", 22)
+	pool_lb.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	pool_lb.position = Vector2(660, 76)
+	root.add_child(pool_lb)
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(60, 160)
+	scroll.custom_minimum_size = Vector2(720, vp.y - 260)
+	scroll.size = Vector2(720, vp.y - 260)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+	var grid := VBoxContainer.new()
+	grid.add_theme_constant_override("separation", 8)
+	scroll.add_child(grid)
+	var g: Dictionary = GameData.growth
+	var lv_max: int = int(g.get("lv_max", 10))
+	for cls in g.get("trainable", []):
+		var lv: int = int(lvs.get(cls, 0))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 14)
+		var name_lb := Label.new()
+		name_lb.custom_minimum_size = Vector2(480, 44)   # 要蓋住最長的效果字串，按鈕欄才對得齊
+		name_lb.add_theme_font_size_override("font_size", 18)
+		var eff := "HP+%d%%  命中+%.1f%%  攻擊+%d%%" % [
+				int(round(float(g.get("hp_per_lv", 0.05)) * lv * 100)),
+				float(g.get("acc_per_lv", 0.015)) * lv * 100,
+				int(round(float(g.get("atk_per_lv", 0.03)) * lv * 100))]
+		name_lb.text = "%s  Lv%d　%s" % [
+				GameData.class_base.get(cls, {}).get("zh", cls), lv,
+				(eff if lv > 0 else "未訓練")]
+		row.add_child(name_lb)
+		var up := Button.new()
+		up.focus_mode = Control.FOCUS_NONE
+		up.custom_minimum_size = Vector2(170, 40)
+		if lv >= lv_max:
+			up.text = "已滿級"
+			up.disabled = true
+		else:
+			var cost: int = GameData.growth_cost(lv)
+			up.text = "升級  %d XP" % cost
+			up.disabled = pool < cost
+			if not up.disabled:
+				var cc := String(cls)
+				up.pressed.connect(func(): training_up.emit(cc))
+		row.add_child(up)
+		grid.add_child(row)
+	var back := _btn("返回戰役", 16)
+	back.position = Vector2(60, vp.y - 70)
+	back.pressed.connect(func(): training_back.emit())
 	root.add_child(back)
 
 func _mk_banner(tag: String, title: String, sub: String) -> Control:

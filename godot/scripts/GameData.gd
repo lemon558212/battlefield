@@ -11,6 +11,8 @@ var characters: Dictionary = {}
 var vehicle_unlock: Dictionary = {}
 var difficulty: Dictionary = {}   # 章節難度曲線（data/difficulty.json）
 var terrain_mobility: Dictionary = {}
+var terrain_combat: Dictionary = {}   # 地形戰鬥修正（GDD/01 §4b）
+var growth: Dictionary = {}           # 養成系統數值表（GDD/16）
 var char_look: Dictionary = {}
 
 func _ready() -> void:
@@ -22,6 +24,8 @@ func _ready() -> void:
 	vehicle_unlock = _load_json("res://data/vehicle_unlock.json")
 	difficulty = _load_json("res://data/difficulty.json")
 	terrain_mobility = _load_json("res://data/terrain_mobility.json")
+	terrain_combat = _load_json("res://data/terrain_combat.json")
+	growth = _load_json("res://data/growth.json")
 	char_look = _load_json("res://data/char_look.json")
 	var st = _load_json_any("res://data/story.json")
 	if st is Array:
@@ -103,6 +107,27 @@ func hit_chance(shooter, target, dist_px: float, part := "body") -> float:
 	if shooter.moving:
 		c *= 0.55
 	c *= 0.78 + 0.22 * clampf(shooter.hp_ratio, 0.0, 1.0)
+	# 地形修正（GDD/01 §4b）：射手穩定度 × 目標閃避。數值查 terrain_combat.json。
+	# 載具不吃「涉水不穩／陡坡據槍」——它們沒有「據槍」這回事；高低差照吃。
+	var ts: Dictionary = terrain_combat.get("shooter", {})
+	var tt: Dictionary = terrain_combat.get("target", {})
+	if not Unit.is_vehicle_cls(shooter.cls):
+		if shooter.wade >= float(ts.get("wade_waist_depth", 0.75)):
+			c *= float(ts.get("wade_waist_acc", 0.80))
+		elif shooter.wade >= float(ts.get("wade_knee_depth", 0.35)):
+			c *= float(ts.get("wade_knee_acc", 0.92))
+		if shooter.slope > float(ts.get("slope_min", 0.35)):
+			c *= float(ts.get("slope_acc", 0.88))
+	var dh: float = shooter.elev - target.elev
+	if dh >= float(ts.get("high_ground_dh", 2.5)):
+		c *= float(ts.get("high_ground_acc", 1.10))
+	elif dh <= -float(ts.get("high_ground_dh", 2.5)):
+		c *= float(ts.get("low_ground_acc", 0.90))
+	if not Unit.is_vehicle_cls(target.cls):
+		if target.wade >= float(tt.get("wade_depth", 0.35)):
+			c *= float(tt.get("wade_exposed", 1.12))   # 水拖住腿＝閃不掉
+		if target.in_crater:
+			c *= float(tt.get("crater_profile", 0.85)) # 輪廓低於地平線
 	return clamp(c, 0.0, 0.99)
 
 # GDD/01 §4 剋制兩條（與 js/combat.js 同一套判斷，不另設倍率表）：
@@ -121,4 +146,33 @@ func damage(shooter, target, part := "body") -> int:
 	var eff: float = float(w.get("atk", 10)) * mult
 	var deff: float = GameData.class_base.get(target.cls, {}).get("def", 0)
 	var dmg: float = eff * float(PART_DMG.get(part, 1.0)) * max(0.1, 1.0 - deff / max(1.0, eff) * 0.5)
+	# 地形（GDD/01 §4b）：目標半身泡水，打到下半身的部分被水吸收
+	var td: Dictionary = terrain_combat.get("damage", {})
+	if not Unit.is_vehicle_cls(target.cls) and target.wade >= float(td.get("wade_depth", 0.75)):
+		dmg *= float(td.get("wade_absorb", 0.85))
 	return int(max(1, round(dmg)))
+
+# ---------- 養成系統（GDD/16）：純公式放這裡讓 GrowthProbe 能直接斷言 ----------
+# 升到下一級的花費：80 + 60×目前等級
+func growth_cost(cur_lv: int) -> int:
+	return int(growth.get("cost_base", 80)) + int(growth.get("cost_step", 60)) * cur_lv
+
+# 套用兵科等級到出場屬性（回傳 [hp, weapon]；不改 data/ 基準值，敵軍不吃）
+func growth_apply(base_hp: int, w: Dictionary, lv: int) -> Array:
+	if lv <= 0:
+		return [base_hp, w]
+	var hp: int = int(round(base_hp * (1.0 + float(growth.get("hp_per_lv", 0.05)) * lv)))
+	var w2: Dictionary = w.duplicate(true)
+	w2["acc"] = minf(float(growth.get("acc_cap", 0.95)),
+			float(w.get("acc", 0.7)) + float(growth.get("acc_per_lv", 0.015)) * lv)
+	w2["atk"] = int(round(float(w.get("atk", 10)) * (1.0 + float(growth.get("atk_per_lv", 0.03)) * lv)))
+	return [hp, w2]
+
+# 濺射遮蔽（GDD/01 §4b defilade）：破片走直線，壕溝/彈坑裡的人只吃頂上的那份
+func splash_defilade(in_trench: bool, in_crater: bool) -> float:
+	var td: Dictionary = terrain_combat.get("damage", {})
+	if in_trench:
+		return float(td.get("splash_trench", 0.5))
+	if in_crater:
+		return float(td.get("splash_crater", 0.65))
+	return 1.0

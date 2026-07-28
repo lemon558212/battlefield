@@ -155,6 +155,10 @@ func _ready() -> void:
 	ui.deploy_pick.connect(_on_deploy_pick)
 	ui.deploy_go.connect(_start_battle)
 	ui.end_turn.connect(_end_player_turn)
+	ui.training_open.connect(_open_training)
+	ui.training_up.connect(_on_training_up)
+	ui.training_back.connect(_open_story)
+	_load_growth()
 	ui.end_action.connect(_end_action)
 	ui.back_menu.connect(_open_menu)
 	_open_menu()
@@ -172,6 +176,10 @@ func _ready() -> void:
 		_sceneshots()
 	elif "walk" in OS.get_cmdline_user_args():
 		_walk_all()
+	elif "stress" in OS.get_cmdline_user_args():
+		_stress()
+	elif "trainshot" in OS.get_cmdline_user_args():
+		_trainshot()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -448,10 +456,10 @@ func _walk_all() -> void:
 		pu["wx"] = pos.x
 		pu["wy"] = pos.y
 		await get_tree().create_timer(0.6).timeout
-		await _snap("res://walk_bad_%s.png" % k2)
+		await _snap("res://walk_ch%02d_bad_%s.png" % [_test_chapter(), k2])
 		shot += 1
 	_unshield(pu, save)
-	print("[walk] FAILS=%d（拍了 %d 張現場照）" % [total, shot])
+	print("[walk] ch%02d FAILS=%d（拍了 %d 張現場照）" % [_test_chapter(), total, shot])
 	print("[walk] DONE")
 	get_tree().quit(0)
 
@@ -511,6 +519,185 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 			break                                  # 兩秒沒動：交給呼叫端決定要不要繞路
 	_press_key(KEY_W, false)
 	return _live_px(pu).distance_to(goal) * WORLD_SCALE < 1.2
+
+# ---------- 章節壓力測試（-- stress chNN，2026-07-28 使用者第 5 項）----------
+# 真的打一場仗：走真實 UI 部署 3 個單位，每回合每兵向最近敵人推進（按 W 用走的，
+# 沿用走查台的六條不變量）、射程內開火、按「結束回合」讓敵方 AI 跑完。
+# 量三類問題：①走查不變量 FAIL ②回合末全員位置掃描 ③軟鎖（敵方回合跑不完）＋最差幀時。
+# CP/AP 都吃真實規則（_begin_action 拿不到 CP 就輪空）——壓測要壓的是遊戲，不是作弊碼。
+func _stress() -> void:
+	if not await _boot_to_battle("stress", 3): get_tree().quit(1); return
+	var chn := _test_chapter()
+	# ③ 接線反驗證：印實戰座標下 _wrap 填出的地形事實。公式在 TerrainProbe 驗過，
+	# 這行是防「資料寫好了但沒人讀」——wrap 沒填的話這裡永遠是 0/0/0/false。
+	var w0 = _wrap(_deployed[0])
+	print("[terrchk] 實戰 wrap：wade=%.2fm slope=%.2f elev=%.2fm crater=%s"
+			% [w0.wade, w0.slope, w0.elev, str(w0.in_crater)])
+	var bad := {"solid": [], "air": [], "deep": [], "stuck": [], "cam": [], "oob": []}
+	_walk_bad = bad
+	_walk_checked = 0
+	var fails := 0
+	var worst_ms := 0.0
+	var turns := 0
+	var shots := 0
+	for turn_i in range(12):
+		if st != St.CMD:
+			var tw := 0.0
+			while st != St.CMD and st != St.END and tw < 30.0:
+				await get_tree().create_timer(0.5).timeout
+				tw += 0.5
+		if st == St.END: break
+		if st != St.CMD:
+			print("[stress] FAIL 回合 %d 等不到指揮階段 st=%d" % [turn_i, st])
+			fails += 1
+			break
+		turns += 1
+		for u in _deployed:
+			if st != St.CMD: break
+			if not u["alive"] or not is_instance_valid(u["node"]): continue
+			var tgt = _stress_nearest_enemy(u)
+			if tgt == null: break
+			if not _begin_action(u): continue          # CP 不夠：真實規則，輪空
+			await get_tree().create_timer(0.2).timeout
+			var gpx := Vector2(float(tgt["wx"]), float(tgt["wy"]))
+			var mypx: Vector2 = _live_px(u)
+			# 步幅 160px＝8m/回合：90px 時 12 回合碰不到敵人，戰鬥系統整段沒被壓到
+			var leg: Vector2 = mypx + (gpx - mypx).limit_length(160.0)
+			await _walk_leg(u, leg)
+			var dist_px: float = _live_px(u).distance_to(Vector2(float(tgt["wx"]), float(tgt["wy"])))
+			if tgt["alive"] and u["alive"] and dist_px <= float(u["weapon"].get("range", 200)) \
+					and _any_part_clear(u, tgt):
+				await _fire(u, tgt)
+				shots += 1
+			_end_action()
+			await get_tree().create_timer(0.15).timeout
+		if st == St.END: break
+		if not await _click_btn("結束回合"):
+			_end_player_turn()
+		# 等敵方 AI 跑完；順便量最差幀時（敵方回合是 AI 決策最重的一段）
+		var te := 0.0
+		var prev_t: int = Time.get_ticks_msec()
+		while st == St.ENEMY and te < 90.0:
+			await get_tree().process_frame
+			var nowt: int = Time.get_ticks_msec()
+			worst_ms = maxf(worst_ms, float(nowt - prev_t))
+			prev_t = nowt
+			te += get_process_delta_time()
+		if st == St.ENEMY:
+			print("[stress] FAIL 敵方回合 90 秒沒結束＝軟鎖")
+			fails += 1
+			break
+		fails += _stress_sweep()
+		# 每回合戰況：沒有這行的話「12 回合零交火」跟「打得火熱」在 log 裡長一樣
+		var php := 0
+		var ehp := 0
+		var min_d := 1e18
+		for uu in units:
+			if not uu["alive"]: continue
+			if uu["side"] == player_side: php += int(uu["hp"])
+			else: ehp += int(uu["hp"])
+		for uu in units:
+			if not uu["alive"] or uu["side"] != player_side: continue
+			for ee in units:
+				if not ee["alive"] or ee["side"] == player_side: continue
+				min_d = minf(min_d, Vector2(float(uu["wx"]) - float(ee["wx"]),
+						float(uu["wy"]) - float(ee["wy"])).length())
+		print("[stress] 回合%d 我方開火累計%d 我方HP%d 敵方HP%d 最近敵距%.1fm"
+				% [turns, shots, php, ehp, min_d * WORLD_SCALE])
+	# stuck 不算 FAIL：推進路上被牆/河擋住是正常戰場（要求全圖走得通的是 -- walk）
+	var wtot := 0
+	for k in ["solid", "air", "deep", "cam", "oob"]:
+		var arr: Array = bad[k]
+		if not arr.is_empty():
+			print("[stress][%s] %d 次，第 1 筆：%s" % [k, arr.size(), str(arr[0])])
+		wtot += arr.size()
+	var alive_p := _count_side(player_side)
+	var alive_e := _count_side(1 - player_side)
+	print("[stress] ch%02d 回合=%d 我方存活=%d 敵方存活=%d 取樣=%d 最差幀=%.0fms 結局=%s"
+			% [chn, turns, alive_p, alive_e, _walk_checked, worst_ms,
+			("打完" if st == St.END else "回合上限")])
+	await _snap("res://stress_ch%02d_end.png" % chn)
+	print("[stress] ch%02d FAILS=%d" % [chn, fails + wtot])
+	print("[stress] DONE")
+	get_tree().quit(0)
+
+# ---------- 訓練場 UI 驗收（-- trainshot）----------
+# 不驗內部值先行：開真的訓練場畫面 → 拍圖 → 點真的「升級」按鈕 → 驗池扣了、等級加了
+# → 再拍圖。訊號路徑（training_up → _on_training_up → show_training 刷新）全程真跑。
+func _trainshot() -> void:
+	_test_mode = true
+	await get_tree().create_timer(0.6).timeout
+	_growth = {"pool": 500, "lv": {"assault": 2}}
+	_open_training()
+	await get_tree().create_timer(0.6).timeout
+	await _snap("res://trainshot_before.png")
+	var fails := 0
+	var b := _find_btn("升級")
+	if b == null:
+		print("[train] FAIL 找不到任何可按的升級按鈕")
+		fails += 1
+	else:
+		_send_click(b.get_global_rect().get_center())
+		await get_tree().create_timer(0.5).timeout
+		var pool: int = int(_growth["pool"])
+		var lv_sum := 0
+		for k in _growth["lv"]:
+			lv_sum += int(_growth["lv"][k])
+		print("[train] 點升級後 pool=%d（應 <500）lv合計=%d（應 3） %s"
+				% [pool, lv_sum, "OK" if (pool < 500 and lv_sum == 3) else "FAIL"])
+		if pool >= 500 or lv_sum != 3:
+			fails += 1
+	await _snap("res://trainshot_after.png")
+	# 反驗證：池歸零後所有升級按鈕都要 disabled（不可負債升級）
+	_growth["pool"] = 0
+	ui.show_training(0, _growth["lv"])
+	await get_tree().create_timer(0.4).timeout
+	var any_enabled := false
+	for n in ui.root.find_children("*", "Button", true, false):
+		var bb := n as Button
+		if bb.text.contains("升級") and not bb.disabled:
+			any_enabled = true
+	print("[train] 池=0 時升級按鈕全部鎖定 %s" % ("OK" if not any_enabled else "FAIL(還能負債升級)"))
+	if any_enabled:
+		fails += 1
+	print("[train] FAILS=%d" % fails)
+	print("[train] DONE")
+	get_tree().quit(1 if fails > 0 else 0)
+
+func _stress_nearest_enemy(u):
+	var best = null
+	var bd := 1e18
+	for e in units:
+		if e["side"] == u["side"] or not e["alive"] or not is_instance_valid(e["node"]):
+			continue
+		var d: float = Vector2(float(e["wx"]) - float(u["wx"]), float(e["wy"]) - float(u["wy"])).length_squared()
+		if d < bd:
+			bd = d
+			best = e
+	return best
+
+# 回合末全員掃描：出界／陷進實體／浮空陷地（載具的貼地規則不同，只驗步兵）
+func _stress_sweep() -> int:
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	var n := 0
+	for u in units:
+		if not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		var wp: Vector3 = u["node"].global_position
+		var now := _live_px(u)
+		if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
+			print("[stress] FAIL 出界 %s px=(%.0f,%.0f)" % [u["cls"], now.x, now.y])
+			n += 1
+		var fixed: Vector3 = _resolve_solids(wp, BODY_R, u)
+		if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
+			print("[stress] FAIL 陷進實體 %s px=(%.0f,%.0f)" % [u["cls"], now.x, now.y])
+			n += 1
+		if not Unit.is_vehicle_cls(u["cls"]):
+			if absf(wp.y - _ground_height(wp)) > 0.35:
+				print("[stress] FAIL 浮空/陷地 %s dy=%.2fm" % [u["cls"], wp.y - _ground_height(wp)])
+				n += 1
+	return n
 
 # 使用者 2026-07-27：「反驗證是要實際你自己玩過全部的功能都沒有問題才叫修好」。
 # 這裡不驗任何內部指標，只做玩家會做的事：切換單位、走進屋子、停下來、按姿勢鍵，
@@ -968,12 +1155,31 @@ func _shotseq() -> void:
 
 # 主選單 → 章節 → 簡報 → 對話 → 部署 → 開戰。
 # e2e 與 playtest 共用，兩邊都必須走「真的按 UI」這條路（測試從中間插進去是驗證盲區）。
-func _boot_to_battle(tag: String) -> bool:
+# 測試模式旗標：walk/stress/play/e2e 設起。打贏不可以動 user://unlocked.txt——
+# 壓測跑贏第 15 章會把使用者的真實戰役進度整條解鎖（反驗證時抓到的髒污路徑）。
+var _test_mode := false
+
+# 測試指定章節：`-- walk ch07`／`-- stress ch12`。沒給就第 1 章。
+func _test_chapter() -> int:
+	for a in OS.get_cmdline_user_args():
+		var s := String(a)
+		if s.begins_with("ch") and s.substr(2).is_valid_int():
+			return clampi(int(s.substr(2)), 1, GameData.story.size())
+	return 1
+
+func _boot_to_battle(tag: String, deploy_n := 1) -> bool:
+	_test_mode = true
+	_growth = {"pool": 0, "lv": {}}   # 測試不吃使用者的養成存檔：結果要可重現
 	await get_tree().create_timer(0.6).timeout
 	print("[%s] 1 主選單 → 劇情戰役" % tag)
 	if not await _click_btn("劇情戰役"): return false
-	print("[%s] 2 章節 01" % tag)
-	var chb := _find_btn("01")
+	var chn := _test_chapter()
+	print("[%s] 2 章節 %02d" % [tag, chn])
+	if chn > _unlocked():
+		# 只在畫面上解鎖（不寫 user://），讓測試點得到按鈕；使用者進度不動
+		ui.show_story(GameData.story.size())
+		await get_tree().create_timer(0.3).timeout
+	var chb := _find_btn("%02d" % chn)
 	if chb == null: print("[%s] FAIL 無章節按鈕" % tag); return false
 	_send_click(chb.get_global_rect().get_center())
 	await get_tree().create_timer(0.5).timeout
@@ -1001,6 +1207,35 @@ func _boot_to_battle(tag: String) -> bool:
 	var wp := _to3d(z.get("x", 0) + z.get("w", 300) * 0.5, z.get("y", 0) + z.get("h", 200) * 0.5)
 	_send_click(cam.unproject_position(wp + Vector3(0, 0.05, 0)))
 	await get_tree().create_timer(0.4).timeout
+	# 加碼部署（壓測要多兵）：每次重新找卡片（清單會隨部署刷新）。
+	# 放置點在藍框內試多個候選（中心點附近可能已被上一個兵佔住或壓到障礙），
+	# 全部放不進去要大聲印——靜默跳過等於沒驗（ch01 壓測第一輪就吃過這虧）。
+	for extra_i in range(1, deploy_n):
+		var before_n := _deployed.size()
+		# ⚠ 要點「第 extra_i+1 張」卡：具名英雄每場只能出一次，重複點第一張
+		#   會被 _try_place 的「該隊員已出戰」擋下（ch01 壓測第二輪抓到的真因）
+		var all_cards: Array = []
+		for n2 in ui.root.find_children("*", "Button", true, false):
+			var b2 := n2 as Button
+			if b2.flat and b2.size.x > 250:
+				all_cards.append(b2)
+		if extra_i >= all_cards.size():
+			print("[%s]   加碼部署 %d：名冊只有 %d 張卡，有幾個算幾個" % [tag, extra_i, all_cards.size()])
+			break
+		var cb2: Button = all_cards[extra_i]
+		_send_click(cb2.get_global_rect().get_center())
+		await get_tree().create_timer(0.3).timeout
+		var zw: float = z.get("w", 300)
+		var zh: float = z.get("h", 200)
+		for frac in [Vector2(0.3, 0.5), Vector2(0.7, 0.5), Vector2(0.5, 0.28),
+				Vector2(0.5, 0.72), Vector2(0.25, 0.28), Vector2(0.75, 0.72)]:
+			var wp_e := _to3d(z.get("x", 0) + zw * frac.x, z.get("y", 0) + zh * frac.y)
+			_send_click(cam.unproject_position(wp_e + Vector3(0, 0.05, 0)))
+			await get_tree().create_timer(0.35).timeout
+			if _deployed.size() > before_n:
+				break
+		if _deployed.size() == before_n:
+			print("[%s]   加碼部署 %d FAIL：藍框內 6 個候選點都放不進去" % [tag, extra_i])
 	print("[%s]   已部署數=%d%s" % [tag, _deployed.size(), (" OK" if _deployed.size() > 0 else " FAIL(放不下去)")])
 	if _deployed.is_empty(): return false
 	print("[%s] 6 開始戰鬥" % tag)
@@ -2884,7 +3119,40 @@ func _open_menu() -> void:
 
 func _open_story() -> void:
 	st = St.STORY
-	ui.show_story(_unlocked())
+	ui.show_story(_unlocked(), _growth_unlocked())
+
+# ---------- 養成系統（GDD/16）：戰鬥賺經驗 → 訓練場給兵科升級 ----------
+var _growth := {"pool": 0, "lv": {}}
+
+func _growth_unlocked() -> bool:
+	return _unlocked() > int(GameData.growth.get("unlock_after_ch", 4))
+
+func _load_growth() -> void:
+	if FileAccess.file_exists("user://growth.json"):
+		var p = JSON.parse_string(FileAccess.get_file_as_string("user://growth.json"))
+		if p is Dictionary:
+			_growth = {"pool": int(p.get("pool", 0)), "lv": p.get("lv", {})}
+
+func _save_growth() -> void:
+	if _test_mode:
+		return          # 壓測/走查不可污染玩家真實養成進度（同 unlocked.txt 那條保護）
+	var f := FileAccess.open("user://growth.json", FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(_growth))
+
+func _open_training() -> void:
+	st = St.STORY
+	ui.show_training(int(_growth["pool"]), _growth["lv"])
+
+func _on_training_up(cls: String) -> void:
+	var lv: int = int(_growth["lv"].get(cls, 0))
+	var cost: int = GameData.growth_cost(lv)
+	if int(_growth["pool"]) < cost or lv >= int(GameData.growth.get("lv_max", 10)):
+		return          # UI 已 disable，這裡是第二道閘（防連點與測試直呼）
+	_growth["pool"] = int(_growth["pool"]) - cost
+	_growth["lv"][cls] = lv + 1
+	_save_growth()
+	ui.show_training(int(_growth["pool"]), _growth["lv"])
 
 func _unlocked() -> int:
 	var v := 1
@@ -3436,10 +3704,20 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	var cb: Dictionary = GameData.class_base.get(cls, {})
 	var chr: Dictionary = GameData.characters.get(cls, {}) if named else {}
 	var hp: int = cb.get("hp", 100)
+	var wpn: Dictionary = GameData.weapon_of(nation[side_i], cls)
+	# 養成（GDD/16）：兵科等級套在出場屬性上——只有玩家側，敵軍不吃
+	if side_i == player_side and _growth_unlocked():
+		var glv: int = int(_growth["lv"].get(cls, 0))
+		if glv > 0:
+			var aw: Array = GameData.growth_apply(hp, wpn, glv)
+			hp = aw[0]
+			wpn = aw[1]
+			print("[growth] %s Lv%d 出場 hp=%d acc=%.2f atk=%d"
+					% [cls, glv, hp, wpn.get("acc", 0.0), wpn.get("atk", 0)])
 	var u := {
 		"cls": cls, "side": side_i, "node": node, "wx": wx, "wy": wy,
 		"hp": hp, "maxhp": hp, "alive": true,
-		"weapon": GameData.weapon_of(nation[side_i], cls),
+		"weapon": wpn,
 		"named": named, "char_name": chr.get("name", ""),
 		"acted": false, "cover": "",
 		"orders": 0, "ap": 0.0, "ap_max": float(cb.get("ap", 150)), "fired": false,
@@ -4055,7 +4333,12 @@ func _splash(shooter, center) -> void:
 			continue
 		var fall: float = 1.0 - d / r_px
 		var cov: float = cover_at(u["wx"], u["wy"], cx, cy)
-		var dmg: int = int(round(float(base) * fall * (1.0 - cov * 0.5)))
+		# 遮蔽陣地（GDD/01 §4b）：壕溝/彈坑裡的人對破片有 defilade 保護
+		var defi: float = 1.0
+		if terrain != null and not Unit.is_vehicle_cls(u["cls"]):
+			defi = GameData.splash_defilade(terrain.in_trench(u["wx"], u["wy"]),
+					terrain.in_crater(u["wx"], u["wy"]))
+		var dmg: int = int(round(float(base) * fall * (1.0 - cov * 0.5) * defi))
 		if dmg <= 0:
 			continue
 		u["hp"] -= dmg
@@ -4129,7 +4412,17 @@ func _fire_preview(shooter, target) -> Array:
 
 # GameData 公式吃 .weapon/.cls，包一層
 func _wrap(u: Dictionary):
-	return _UW.new(u)
+	var w := _UW.new(u)
+	# 地形事實（GDD/01 §4b）由 Main 填——公式在 GameData 只查表，不碰場景。
+	# 迎擊射擊包的臨時 dict 沒有座標（sh_w），沒座標就維持中性值＝不修正。
+	if terrain != null and u.has("wx"):
+		var px: float = float(u["wx"])
+		var py: float = float(u["wy"])
+		w.wade = maxf(0.0, terrain.water_depth(px, py))
+		w.slope = terrain.slope_at(px, py)
+		w.elev = terrain.height_at(px, py)
+		w.in_crater = terrain.in_crater(px, py)
+	return w
 class _UW:
 	var weapon: Dictionary
 	var cls: String
@@ -4137,6 +4430,11 @@ class _UW:
 	var stance_acc := 1.0
 	var moving := false
 	var hp_ratio := 1.0
+	# 地形事實（GDD/01 §4b）：涉水深度／坡度／地面高度／是否在彈坑
+	var wade := 0.0
+	var slope := 0.0
+	var elev := 0.0
+	var in_crater := false
 	func _init(u: Dictionary):
 		weapon = u["weapon"]
 		cls = u["cls"]
@@ -5524,12 +5822,26 @@ func _win(winner: int, why: String) -> void:
 	st = St.END
 	var w := winner == player_side
 	var ch: Dictionary = GameData.story[chapter - 1] if chapter > 0 else {}
-	if w and chapter > 0:
+	if w and chapter > 0 and not _test_mode:
 		_set_unlocked(min(chapter + 1, GameData.story.size()))
+	# 經驗結算（GDD/16 §2）：擊殺＋勝利＋存活進共用經驗池。解鎖前不顯示也不累積。
+	var xp_note := ""
+	if w and chapter > 0 and _growth_unlocked():
+		var g: Dictionary = GameData.growth
+		var xp: int = int(g.get("xp_win", 120))
+		for u in units:
+			if u["side"] != player_side and not u["alive"]:
+				xp += int(g.get("xp_kill_vehicle", 90)) if Unit.is_vehicle_cls(u["cls"]) \
+						else int(g.get("xp_kill_inf", 40))
+			elif u["side"] == player_side and u["alive"]:
+				xp += int(g.get("xp_survivor", 15))
+		_growth["pool"] = int(_growth["pool"]) + xp
+		_save_growth()
+		xp_note = "\n獲得經驗 +%d（經驗池 %d，到訓練場升級兵科）" % [xp, int(_growth["pool"])]
 	var rank := "A" if w else ""
 	Audio.sting("victory" if w else "defeat")
 	ui.hide_charcard()
-	ui.show_end(w, why, rank, ch.get("debrief", ""), _open_menu)
+	ui.show_end(w, why, rank, String(ch.get("debrief", "")) + xp_note, _open_menu)
 
 func _teardown_world() -> void:
 	for u in units:

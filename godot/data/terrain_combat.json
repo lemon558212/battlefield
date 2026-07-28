@@ -1,0 +1,24 @@
+{
+ "shooter": {
+  "wade_knee_depth": 0.35,
+  "wade_knee_acc": 0.92,
+  "wade_waist_depth": 0.75,
+  "wade_waist_acc": 0.80,
+  "slope_min": 0.35,
+  "slope_acc": 0.88,
+  "high_ground_dh": 2.5,
+  "high_ground_acc": 1.10,
+  "low_ground_acc": 0.90
+ },
+ "target": {
+  "wade_depth": 0.35,
+  "wade_exposed": 1.12,
+  "crater_profile": 0.85
+ },
+ "damage": {
+  "splash_trench": 0.5,
+  "splash_crater": 0.65,
+  "wade_depth": 0.75,
+  "wade_absorb": 0.85
+ }
+}

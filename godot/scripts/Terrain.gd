@@ -176,6 +176,13 @@ func move_cost(px: float, py: float, mob := "foot") -> float:
 		c = maxf(c, float(tab.get("hill", 1.15)) * 1.3)
 	return c
 
+# 這個點是不是在彈坑裡（GDD/01 §4b：全向低輪廓＋濺射遮蔽；彈坑不在 _covers）
+func in_crater(px: float, py: float) -> bool:
+	for cr in _craters:
+		if Vector2(px - float(cr.get("x", 0)), py - float(cr.get("y", 0))).length() < float(cr.get("r", 36)) * 0.85:
+			return true
+	return false
+
 # 這個點是不是在壕溝裡（半身掩體判定）
 func in_trench(px: float, py: float) -> bool:
 	for t in _trenches:

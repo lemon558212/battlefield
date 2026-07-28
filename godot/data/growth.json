@@ -1,0 +1,15 @@
+{
+ "unlock_after_ch": 4,
+ "xp_kill_inf": 40,
+ "xp_kill_vehicle": 90,
+ "xp_win": 120,
+ "xp_survivor": 15,
+ "lv_max": 10,
+ "cost_base": 80,
+ "cost_step": 60,
+ "hp_per_lv": 0.05,
+ "acc_per_lv": 0.015,
+ "acc_cap": 0.95,
+ "atk_per_lv": 0.03,
+ "trainable": ["rifleman", "assault", "mg", "mortar", "sniper", "at", "engineer", "specops"]
+}
