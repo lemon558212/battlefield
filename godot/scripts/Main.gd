@@ -180,6 +180,10 @@ func _ready() -> void:
 		_stress()
 	elif "trainshot" in OS.get_cmdline_user_args():
 		_trainshot()
+	elif "blkdump" in OS.get_cmdline_user_args():
+		_blkdump()
+	elif "artshots" in OS.get_cmdline_user_args():
+		_artshots()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -587,7 +591,7 @@ func _stress() -> void:
 			print("[stress] FAIL 敵方回合 90 秒沒結束＝軟鎖")
 			fails += 1
 			break
-		fails += _stress_sweep()
+		fails += await _stress_sweep()
 		# 每回合戰況：沒有這行的話「12 回合零交火」跟「打得火熱」在 log 裡長一樣
 		var php := 0
 		var ehp := 0
@@ -619,6 +623,101 @@ func _stress() -> void:
 	await _snap("res://stress_ch%02d_end.png" % chn)
 	print("[stress] ch%02d FAILS=%d" % [chn, fails + wtot])
 	print("[stress] DONE")
+	get_tree().quit(0)
+
+# ---------- 美術特寫（-- artshots chNN）----------
+# mapshots 的人眼鏡頭是「地圖中心固定點」，常常卡在牆裡或巷子裡，
+# 驗水面/樹葉/道具全靠運氣。這裡改成**依內容找景**：岸線、樹叢、貨櫃、碉堡各拍特寫。
+func _artshots() -> void:
+	await get_tree().create_timer(0.6).timeout
+	ui.root.visible = false
+	var chn := _test_chapter()
+	var ch: Dictionary = GameData.story[chn - 1]
+	map_data = GameData.maps[String(ch.get("map", "tutorial"))]
+	_teardown_world()
+	await get_tree().process_frame
+	_build_ground()
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	cam.clear_tps()
+	cam.set_follow(null)
+	await get_tree().create_timer(1.5).timeout
+	# ① 岸線：掃網格找「水深 0.4m」的點，鏡頭從陸側 8m 外、1.7m 高看向水面
+	if terrain != null:
+		var found := Vector2.ZERO
+		var ok := false
+		for gy in range(6, int(mhp / 40)):
+			for gx in range(6, int(mwp / 40)):
+				var px := float(gx) * 40.0
+				var py := float(gy) * 40.0
+				var wd: float = terrain.water_depth(px, py)
+				if wd > 0.25 and wd < 0.6:
+					found = Vector2(px, py)
+					ok = true
+					break
+			if ok: break
+		if ok:
+			# 岸的方向：往四周找乾的那一側
+			var dry := Vector2(1, 0)
+			for dv in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+				if terrain.water_depth(found.x + dv.x * 120.0, found.y + dv.y * 120.0) <= 0.01:
+					dry = dv
+					break
+			var eye_px: Vector2 = found + dry * 140.0
+			cam.focus = _to3d(eye_px.x, eye_px.y) + Vector3(0, 1.2, 0)
+			cam.dist = 7.0
+			cam.pitch_deg = 12.0
+			cam.yaw = atan2(-dry.x, -dry.y)
+			await get_tree().create_timer(1.2).timeout
+			await _snap("res://art_ch%02d_water.png" % chn)
+			# 同一點再拍一張近水面低角度（看漣漪/閃爍/浪花）
+			cam.dist = 3.5
+			cam.pitch_deg = 6.0
+			await get_tree().create_timer(0.8).timeout
+			await _snap("res://art_ch%02d_water2.png" % chn)
+	# ② 樹叢：拿 _tree_feet 裡最靠中央的一棵
+	if not _tree_feet.is_empty():
+		var ctr := Vector2(mwp * 0.5, mhp * 0.5)
+		var best: Vector2 = _tree_feet[0]
+		for tf in _tree_feet:
+			if (tf as Vector2).distance_to(ctr) < best.distance_to(ctr):
+				best = tf
+		cam.focus = _to3d(best.x, best.y) + Vector3(0, 3.2, 0)
+		cam.dist = 9.0
+		cam.pitch_deg = 10.0
+		cam.yaw = 0.9
+		await get_tree().create_timer(1.0).timeout
+		await _snap("res://art_ch%02d_tree.png" % chn)
+	# ③ 貨櫃／④ 碉堡（地圖有才拍）
+	var shots := [["containers", "container", 16.0, 14.0], ["pillboxes", "pillbox", 13.0, 16.0]]
+	for sp in shots:
+		var arr: Array = map_data.get(sp[0], [])
+		if arr.is_empty():
+			continue
+		var it: Dictionary = arr[0]
+		cam.focus = _to3d(float(it.get("x", 0)), float(it.get("y", 0))) + Vector3(0, 1.6, 0)
+		cam.dist = float(sp[2])
+		cam.pitch_deg = float(sp[3])
+		cam.yaw = 0.7
+		await get_tree().create_timer(1.0).timeout
+		await _snap("res://art_ch%02d_%s.png" % [chn, sp[1]])
+	print("[artshots] ch%02d DONE" % chn)
+	get_tree().quit(0)
+
+# ---------- 障礙傾印（-- blkdump chNN）：查「人卡在那裡但不知道撞到什麼」 ----------
+func _blkdump() -> void:
+	if not await _boot_to_battle("blkdump"): get_tree().quit(1); return
+	var x0 := 820.0; var x1 := 960.0; var y0 := 700.0; var y1 := 820.0
+	print("[blkdump] 區域 x∈[%.0f,%.0f] y∈[%.0f,%.0f] 的障礙：" % [x0, x1, y0, y1])
+	for bk in _blockers:
+		var c: Vector2
+		if bk["t"] == "seg":
+			c = (bk["a"] + bk["b"]) * 0.5
+		else:
+			c = bk["c"]
+		if c.x >= x0 and c.x <= x1 and c.y >= y0 and c.y <= y1:
+			print("[blkdump] ", bk)
+	print("[blkdump] DONE")
 	get_tree().quit(0)
 
 # ---------- 訓練場 UI 驗收（-- trainshot）----------
@@ -676,26 +775,41 @@ func _stress_nearest_enemy(u):
 			best = e
 	return best
 
-# 回合末全員掃描：出界／陷進實體／浮空陷地（載具的貼地規則不同，只驗步兵）
+# 回合末全員掃描：出界／陷進實體／浮空陷地（載具的貼地規則不同，只驗步兵）。
+# ⚠ 浮空/陷地要**複查**：走下河堤的自由落體、被推上台階的限速爬升，
+#   單一瞬間都可能 |dy|>0.35，那是物理正常。0.9 秒後還沒回到地面才是 bug
+#   （走查台同一條教訓：連續四次取樣才算）。
 func _stress_sweep() -> int:
 	var mwp: float = map_data.get("w", 960)
 	var mhp: float = map_data.get("h", 600)
 	var n := 0
+	var recheck: Array = []
 	for u in units:
 		if not u["alive"] or not is_instance_valid(u["node"]):
 			continue
 		var wp: Vector3 = u["node"].global_position
 		var now := _live_px(u)
+		var who: String = "%s(%s)" % [u["cls"], ("我方" if u["side"] == player_side else "敵方")]
 		if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
-			print("[stress] FAIL 出界 %s px=(%.0f,%.0f)" % [u["cls"], now.x, now.y])
+			print("[stress] FAIL 出界 %s px=(%.0f,%.0f)" % [who, now.x, now.y])
 			n += 1
 		var fixed: Vector3 = _resolve_solids(wp, BODY_R, u)
 		if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
-			print("[stress] FAIL 陷進實體 %s px=(%.0f,%.0f)" % [u["cls"], now.x, now.y])
+			print("[stress] FAIL 陷進實體 %s px=(%.0f,%.0f)" % [who, now.x, now.y])
 			n += 1
 		if not Unit.is_vehicle_cls(u["cls"]):
 			if absf(wp.y - _ground_height(wp)) > 0.35:
-				print("[stress] FAIL 浮空/陷地 %s dy=%.2fm" % [u["cls"], wp.y - _ground_height(wp)])
+				recheck.append(u)
+	if not recheck.is_empty():
+		await get_tree().create_timer(0.9).timeout
+		for u2 in recheck:
+			if not u2["alive"] or not is_instance_valid(u2["node"]):
+				continue
+			var wp2: Vector3 = u2["node"].global_position
+			var dy2: float = wp2.y - _ground_height(wp2)
+			if absf(dy2) > 0.35:
+				print("[stress] FAIL 浮空/陷地 %s(%s) dy=%.2fm（複查 0.9s 後仍未回地面）"
+						% [u2["cls"], ("我方" if u2["side"] == player_side else "敵方"), dy2])
 				n += 1
 	return n
 
@@ -820,10 +934,36 @@ func _playtest() -> void:
 		print("[play][進屋] 這張圖沒有建築，跳過")
 	else:
 		var door: Vector2 = bd.doors[0] if not bd.doors.is_empty() else bd.rect.get_center()
-		# 走到門口再進去：用真的操作（轉向 + 按 W），不瞬移
-		var ok_in := await _walk_to_px(pu, door, 16.0)
+		# 走到門口再進去：用真的操作（轉向 + 按 W），不瞬移。
+		# 直線不通就用遊戲自己的 _avoid_goal 繞（新 ch01 圖部署區到營舍之間有工事線，
+		# 直線走法會卡在沙包上磨蹭——玩家自己也會繞，測試不該比玩家笨）。
+		# 進門要走三段：門外定位點 → 門內定位點 → 屋中心。
+		# 直接朝「屋中心」走的話，從門口側邊 1m 起步會斜切進牆面、沿牆磨蹭永遠
+		# 進不了門洞（play 第四輪軌跡：x 在 881↔905 之間 ping-pong、y 卡在牆外 771）。
+		var bctr: Vector2 = bd.rect.get_center()
+		var ddv: Vector2 = door - bctr
+		var outward: Vector2 = Vector2(signf(ddv.x), 0.0) if absf(ddv.x) > absf(ddv.y) \
+				else Vector2(0.0, signf(ddv.y))
+		var stage: Vector2 = door + outward * 26.0     # 門外 1.3m
+		var inner: Vector2 = door - outward * 26.0     # 門內 1.3m
+		var ok_in := await _walk_to_px(pu, stage, 16.0, 0.8)
+		for _detour in 4:
+			if ok_in:
+				break
+			var mwp2: float = map_data.get("w", 960)
+			var mhp2: float = map_data.get("h", 600)
+			var way: Vector3 = _avoid_goal(pu["node"].global_position,
+					_to3d(stage.x, stage.y), BODY_R)
+			var wp2 := Vector2(way.x / WORLD_SCALE + mwp2 * 0.5,
+					way.z / WORLD_SCALE + mhp2 * 0.5)
+			if wp2.distance_to(_live_px(pu)) * WORLD_SCALE < 1.0:
+				break
+			await _walk_to_px(pu, wp2, 10.0)
+			ok_in = await _walk_to_px(pu, stage, 16.0, 0.8)
 		if ok_in:
-			ok_in = await _walk_to_px(pu, bd.rect.get_center(), 8.0)
+			ok_in = await _walk_to_px(pu, inner, 8.0, 0.8)
+		if ok_in:
+			ok_in = await _walk_to_px(pu, bctr, 8.0)
 		var inside: bool = bd.inside(_live_px(pu).x, _live_px(pu).y)
 		var here_px := _live_px(pu)
 		print("[play][進屋] 走進去=%s（人在 px(%.0f,%.0f)、門在 px(%.0f,%.0f)、屋框 %s）"
@@ -1096,7 +1236,7 @@ func _nearest_building(p: Vector2):
 
 # 用「真的按鍵」走到地圖上某個 px 座標（先把鏡頭轉到目標方向再按 W）。
 # ⚠ 不可以直接設座標——使用者要求驗收一律「用走的」，瞬移證明不了碰撞與鏡頭。
-func _walk_to_px(u, target_px: Vector2, secs: float) -> bool:
+func _walk_to_px(u, target_px: Vector2, secs: float, tol := 1.1) -> bool:
 	var t3 := _to3d(target_px.x, target_px.y)
 	var deadline: float = Time.get_ticks_msec() / 1000.0 + secs
 	var down := InputEventKey.new()
@@ -1113,7 +1253,7 @@ func _walk_to_px(u, target_px: Vector2, secs: float) -> bool:
 		var here: Vector3 = u["node"].global_position
 		var to := t3 - here
 		to.y = 0.0
-		if to.length() < 1.1:
+		if to.length() < tol:
 			arrived = true
 			break
 		cam.tps_yaw = rad_to_deg(atan2(to.x, to.z))     # 鏡頭朝目標，W＝往鏡頭前方走
@@ -1181,6 +1321,14 @@ func _boot_to_battle(tag: String, deploy_n := 1) -> bool:
 		await get_tree().create_timer(0.3).timeout
 	var chb := _find_btn("%02d" % chn)
 	if chb == null: print("[%s] FAIL 無章節按鈕" % tag); return false
+	# 章節清單是 ScrollContainer：第 10 章以後在畫面外，直接點會點到別的東西
+	# （ch10~15 壓測整排「找不到出擊」的真因）。先捲到按鈕再點。
+	var sc: Node = chb.get_parent()
+	while sc != null and not (sc is ScrollContainer):
+		sc = sc.get_parent()
+	if sc is ScrollContainer:
+		(sc as ScrollContainer).scroll_vertical = maxi(0, int(chb.position.y) - 60)
+		await get_tree().create_timer(0.25).timeout
 	_send_click(chb.get_global_rect().get_center())
 	await get_tree().create_timer(0.5).timeout
 	print("[%s] 3 簡報 → 出擊" % tag)
@@ -4568,6 +4716,18 @@ func _solid_bodies() -> void:
 				var pp := _live_px(uu)
 				uu["wx"] = pp.x
 				uu["wy"] = pp.y
+	# 地圖邊界對每個人每幀都成立（鐵律 0：世界的邊就是邊）。
+	# ⚠ 先前只有玩家鍵盤路徑夾限；上面的推開（推出實體、兩人分開）可以把
+	#   站在邊緣的單位一路擠出地圖——ch03 壓測抓到敵兵被擠到 y=-18px。
+	for u2 in units:
+		if not u2["alive"] or not is_instance_valid(u2["node"]):
+			continue
+		var pcl: Vector3 = _clamp_to_map(u2["node"].global_position)
+		if pcl.distance_squared_to(u2["node"].global_position) > 0.000001:
+			u2["node"].global_position = Vector3(pcl.x, u2["node"].global_position.y, pcl.z)
+			var pq := _live_px(u2)
+			u2["wx"] = pq.x
+			u2["wy"] = pq.y
 
 # 屋頂淡出（GDD/14 §2）：玩家操控的單位進到室內時，那棟樓的屋頂淡掉，
 # 否則第三人稱鏡頭會被屋頂整個擋住、根本看不到自己在做什麼。
@@ -5090,6 +5250,17 @@ func _pos_indoors(p: Vector3) -> bool:
 	var py: float = p.z / WORLD_SCALE + float(map_data.get("h", 600)) * 0.5
 	for bd in _buildings:
 		if bd.inside(px, py):
+			return true
+	return false
+
+# 寬鬆版室內判定（鏡頭約束的「觸發」用）：inside() 內縮 30cm 是給「鏡頭能停哪」用的，
+# 拿它當觸發的話，**人貼牆或站門口那 30cm 殼層時觸發條件會斷開**，
+# 室內鏡頭約束整個關掉、鏡頭穿出牆外＝隔著牆看到外面（2026-07-28 使用者回報）。
+func _pos_indoors_loose(p: Vector3) -> bool:
+	var px: float = p.x / WORLD_SCALE + float(map_data.get("w", 960)) * 0.5
+	var py: float = p.z / WORLD_SCALE + float(map_data.get("h", 600)) * 0.5
+	for bd in _buildings:
+		if bd.rect.grow(-1.0).has_point(Vector2(px, py)):
 			return true
 	return false
 
@@ -5888,6 +6059,7 @@ func _build_ground() -> void:
 	cam.wall_probe = func(a: Vector3, b: Vector3) -> float: return _wall_ray(a, b)
 	cam.ground_probe = func(p: Vector3) -> float: return terrain.height_at_world(p)
 	cam.inside_probe = func(p: Vector3) -> bool: return _pos_indoors(p)
+	cam.inside_loose_probe = func(p: Vector3) -> bool: return _pos_indoors_loose(p)
 	# 地表顏色改走頂點色（見 Terrain._ground_color），材質只要最單純的一顆
 	# 地表：顏色仍由頂點色決定（見 Terrain._ground_color），只疊土質的「法線＋粗糙度」，
 	# 不疊 albedo——把土色乘上去會把草地染成一片灰泥（實拍踩過）。
@@ -6183,28 +6355,8 @@ func _in_any_deploy(sdef: Dictionary) -> bool:
 			return true
 	return false
 
-func _make_sandbag(pos: Vector3, w_px: float, h_px: float) -> void:
-	var holder := Node3D.new()
-	world.add_child(holder)
-	holder.position = pos
-	var long_x: bool = w_px >= h_px
-	var count := 5
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.62, 0.57, 0.42)
-	mat.roughness = 0.95
-	for row in 2:
-		for i in count:
-			var bag := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = Vector3(0.62, 0.28, 0.42)
-			bag.mesh = bm
-			bag.material_override = mat
-			var off: float = (float(i) - (count - 1) * 0.5) * 0.60 + (0.3 if row == 1 else 0.0)
-			bag.position = Vector3(off if long_x else 0.0, 0.16 + row * 0.27, 0.0 if long_x else off)
-			if not long_x:
-				bag.rotation.y = PI / 2.0
-			bag.rotation.y += randf_range(-0.08, 0.08)
-			holder.add_child(bag)
+# （2026-07-28 刪除 _make_sandbag：無人呼叫的死碼。沙包一律走 Fortify.sandbag_wall
+#   ——鼓袋剖面＋磚砌交錯＋每袋色差那一套，兩套並存遲早又出「兩種沙包」的不一致。）
 
 # 巨石散佈（沙漠/海岸）：低多邊形球體壓扁＋隨機傾斜，半埋進地（鐵律 0：有重量會下沉）。
 # 沙漠沒有樹，中景高度全靠巨石；同時登記碰撞與掩體（大石＝半身硬掩體）。
@@ -6347,6 +6499,19 @@ func _build_water() -> void:
 		# 河比海流得快（有河道資料就當河看）
 		wmat.set_shader_parameter("flow_speed",
 				1.9 if not map_data.get("rivers", []).is_empty() else 1.0)
+		# 天空反射與太陽閃爍要跟場景的實際光照一致（黃昏的海反射的就是黃昏的天）
+		if _sun != null and is_instance_valid(_sun):
+			wmat.set_shader_parameter("sun_dir", -_sun.global_transform.basis.z)
+			wmat.set_shader_parameter("sun_col",
+					Vector3(_sun.light_color.r, _sun.light_color.g, _sun.light_color.b))
+			wmat.set_shader_parameter("sun_energy", _sun.light_energy)
+		if _sky_mat != null:
+			var st_c = _sky_mat.get_shader_parameter("top_color")
+			var sh_c = _sky_mat.get_shader_parameter("horizon_color")
+			if st_c != null:
+				wmat.set_shader_parameter("sky_top", Vector3(st_c.r, st_c.g, st_c.b))
+			if sh_c != null:
+				wmat.set_shader_parameter("sky_hor", Vector3(sh_c.r, sh_c.g, sh_c.b))
 		mi.material_override = wmat
 		world.add_child(mi)
 	# 深水圍欄（曲線海岸版）：沿著岸線往海裡走，走到水深 1.5m（及胸）就下一個樁，
@@ -6379,6 +6544,11 @@ func _build_water() -> void:
 # 每個單位每幀問一次太貴。建置期算一次、變成靜態障礙，執行期零成本。
 const DEEP_STEP_PX := 26.0             # 取樣間距（px）＝1.3m
 const DEEP_R_M := 0.80                 # 每個樁的半徑（公尺）：相鄰樁要重疊到人鑽不過去
+# 圍欄門檻要比 WADE_MAX 淺一段：樁立在「第一個超標樣本」上，樣本間距 1.3m、
+# 樁半徑 0.8m，河床坡陡時樁前的縫隙水深已經超標（ch07 壓測實測走到 1.10m）。
+# 收緊 0.20m ＝ 樁立在 0.85m 線上，人被擋下時腳下最深不過涉水上限；
+# 0.8m 的渡口不受影響（mapgen 渡口深度 ≤ 0.8）。
+const DEEP_FENCE_MARGIN := 0.20
 func _build_deepwater_fence() -> void:
 	if terrain == null:
 		return
@@ -6394,7 +6564,7 @@ func _build_deepwater_fence() -> void:
 		var col: Array = []
 		for j in ny + 1:
 			col.append(terrain.water_depth(x0 + float(i) * DEEP_STEP_PX,
-					y0 + float(j) * DEEP_STEP_PX) > WADE_MAX)
+					y0 + float(j) * DEEP_STEP_PX) > WADE_MAX - DEEP_FENCE_MARGIN)
 		deep.append(col)
 	var n := 0
 	for i2 in range(1, nx):
@@ -6466,6 +6636,19 @@ func _build_far_ocean() -> void:
 	wm.set_shader_parameter("flow", Vector2(1.0, 0.15))
 	# 遠洋只有兩個三角形，逐頂點波沒有意義；靠法線漣漪維持「不是鏡子」
 	wm.set_shader_parameter("ripple_far", 0.06)
+	# 遠洋跟近岸吃同一組天空／太陽（否則遠近兩片海顏色對不上，接縫立現）
+	if _sun != null and is_instance_valid(_sun):
+		wm.set_shader_parameter("sun_dir", -_sun.global_transform.basis.z)
+		wm.set_shader_parameter("sun_col",
+				Vector3(_sun.light_color.r, _sun.light_color.g, _sun.light_color.b))
+		wm.set_shader_parameter("sun_energy", _sun.light_energy)
+	if _sky_mat != null:
+		var st_c2 = _sky_mat.get_shader_parameter("top_color")
+		var sh_c2 = _sky_mat.get_shader_parameter("horizon_color")
+		if st_c2 != null:
+			wm.set_shader_parameter("sky_top", Vector3(st_c2.r, st_c2.g, st_c2.b))
+		if sh_c2 != null:
+			wm.set_shader_parameter("sky_hor", Vector3(sh_c2.r, sh_c2.g, sh_c2.b))
 	mi.material_override = wm
 	mi.extra_cull_margin = far
 	world.add_child(mi)
@@ -6536,6 +6719,15 @@ uniform float ripple_far = 0.06;       // 遠處漣漪殘留（0＝鏡子＋摩�
 uniform float flow_speed = 1.0;        // 河比海流得快
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_linear_mipmap;
+// 天空與太陽（由 _build_water 從 _sun/_sky_mat 餵進來）：
+// 真實水面一半是「天空的鏡子」——沒有天空反射，水永遠是一張藍色紙。
+uniform vec3 sun_dir = vec3(0.45, 0.62, 0.64);   // 指向太陽（世界空間，已正規化）
+uniform vec3 sun_col = vec3(1.0, 0.95, 0.86);
+// ⚠ 日夜訊號要用光的能量，不能用太陽仰角——夜戰的「月亮」也在天上 44 度，
+//   靠仰角判斷的話夜裡的焦散/浪脊光/浪花全都全亮（ch10 實拍一圈青色霓虹）。
+uniform float sun_energy = 1.2;
+uniform vec3 sky_top = vec3(0.24, 0.44, 0.74);
+uniform vec3 sky_hor = vec3(0.80, 0.85, 0.88);
 
 varying vec3 wpos;
 
@@ -6609,21 +6801,44 @@ void fragment() {
 	// ⚠ 振幅 5.5 ＝整片海變成雜訊；水面的法線擾動其實很小（波高只有幾公分）
 	NORMAL = normalize(NORMAL + vec3(-nx, 0.0, -nz) * (0.85 * amp));
 
-	// ---- 顏色：深度決定，菲涅耳只當高光不當染色 ----
+	// ---- 顏色：深度決定；菲涅耳負責「反射天空」——真實水面一半是天空的鏡子 ----
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	vec3 shallow_c = vec3(0.20, 0.45, 0.44);
-	vec3 deep_c = vec3(0.02, 0.09, 0.17);
+	float dayness = clamp(sun_energy * 0.85, 0.15, 1.0);
+	vec3 shallow_c = vec3(0.20, 0.45, 0.44) * mix(0.40, 1.0, dayness);
+	vec3 deep_c = vec3(0.02, 0.09, 0.17) * mix(0.55, 1.0, dayness);
 	vec3 body = mix(shallow_c, deep_c, smoothstep(0.06, 0.85, d));
+	// 世界空間的法線與反射向量（fragment 的 NORMAL 是視空間，要轉回世界）
+	vec3 wn = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	vec3 vdir = normalize(wpos - CAMERA_POSITION_WORLD);
+	vec3 refl = reflect(vdir, wn);
+	// 反射的天空色：往上看到天頂色、掠角看到地平線色（跟天空 shader 同一套漸層）
+	vec3 sky_refl = mix(sky_hor, sky_top, pow(clamp(refl.y, 0.0, 1.0), 0.6));
 
 	// ---- 折射：水下的東西會被扭曲。少了這件，水面就是一張貼在地上的色紙 ----
 	//   ⚠ 網頁版走 gl_compatibility，SCREEN_TEXTURE 仍可用但要保守：
 	//     位移量隨水深與距離收斂，太大會在岸邊把陸地也扯進來。
 	vec2 uv_off = vec2(-nx, -nz) * (0.12 * near_k) * clamp(d * 2.0, 0.0, 1.0);
 	vec3 under = texture(screen_tex, SCREEN_UV + uv_off).rgb;
+	// 水對紅光吸收最快、綠次之、藍最慢（潛水照片偏藍綠就是這個）：
+	// 用指數吸收取代單一混色，水下的東西越深越往藍綠沉，不是均勻變暗。
+	under *= exp(-vec3(2.6, 1.1, 0.62) * d * 1.9);
+	// 淺水焦散：陽光被波面聚焦在水底晃動的亮網。兩層錯角雜訊相乘＝細碎的聚光點。
+	float caus = vnoise(wpos.xz * 1.35 + vec2(t * 0.31, -t * 0.22))
+			* vnoise(WROT * wpos.xz * 1.62 - vec2(t * 0.18, t * 0.27));
+	under *= 1.0 + pow(caus, 3.0) * 2.2 * dayness;
 	// 淺水看得到底（折射的畫面佔比高），深水幾乎看不到
 	float see_through = (1.0 - smoothstep(0.05, 0.55, d)) * near_k;
-	vec3 col = mix(body, mix(under, body, 0.35), see_through);
-	col = mix(col, vec3(0.40, 0.54, 0.64), fres * 0.10);
+	vec3 col = mix(body, mix(under, body, 0.30), see_through);
+	// 菲涅耳天空反射：掠角時水面就是天空的鏡子（強度隨距離收一點防遠處死白）
+	col = mix(col, sky_refl, fres * mix(0.30, 0.52, near_k));
+	// 浪脊透光（假次表面散射）：浪峰薄、陽光穿過去會亮成青綠色——
+	// 只在浪峰（fbm 高處）且非鏡面角度時出現，這是「水是液體」的關鍵訊號。
+	col += vec3(0.05, 0.16, 0.13) * smoothstep(0.60, 0.86, n0) * near_k * (1.0 - fres) * dayness;
+	// 太陽閃爍（sun glint）：反射向量對準太陽的窄高光 × 細碎閃點雜訊。
+	// 黃昏的海面那條金色碎光就是它；k 值高＝高光窄，加雜訊才會「碎」。
+	float glint = pow(clamp(dot(refl, normalize(sun_dir)), 0.0, 1.0), 220.0);
+	float sparkle = 0.45 + 0.55 * vnoise(wpos.xz * 6.5 + vec2(t * 1.3, -t * 0.9));
+	col += sun_col * glint * sparkle * 2.4;
 
 	// ---- 岸邊浪花：會一進一退，不是固定寬度的白鑲邊 ----
 	//   浪的相位沿著「離岸方向」推進，所以看起來是浪往岸上打
@@ -6632,7 +6847,15 @@ void fragment() {
 	float lap = mix(0.030, 0.075, wave);           // 浪花線的寬度在呼吸
 	float foam = (1.0 - smoothstep(0.0, lap, d))
 			* (0.55 + 0.45 * water_fbm(wpos.xz * 0.8, TIME * 1.2));
-	col = mix(col, vec3(0.88, 0.92, 0.93), clamp(foam, 0.0, 0.55) * (0.4 + 0.6 * near_k));
+	// 回捲浪（backwash）：主浪花線後面一條更淡、相位相反的碎沫帶——
+	// 浪退下去時留在水面上的那層泡，真實岸邊永遠是兩層不是一層。
+	float back = (1.0 - smoothstep(lap * 1.6, lap * 4.0, d))
+			* smoothstep(0.0, lap * 1.2, d)
+			* (1.0 - wave) * water_fbm(wpos.xz * 1.7 + 31.7, TIME * 0.9);
+	foam = clamp(foam + back * 0.5, 0.0, 1.0);
+	// 浪花的白要跟著時段走：夜戰的泡沫不會自己發光（ch10 實拍是一圈青色霓虹）。
+	vec3 foam_c = vec3(0.88, 0.92, 0.93) * dayness * (0.55 + 0.45 * clamp(sky_hor, 0.0, 1.0).g);
+	col = mix(col, foam_c, clamp(foam, 0.0, 0.55) * (0.4 + 0.6 * near_k));
 
 	ALBEDO = col;
 	// 有折射的地方要不透明（顏色已經含水下畫面），否則會透兩次變得死白
@@ -6874,14 +7097,16 @@ func _scatter_trees(mw: float, mh: float) -> void:
 				# 樹幹擋人也擋彈道（灌木只隱蔽不擋——鐵律 0②看幾何不看標籤）
 				_blockers.append({"t": "cir", "c": tp, "r": trunk_r / WORLD_SCALE, "h": trunk_h})
 		placed += 1
-	var tmat := StandardMaterial3D.new()
-	tmat.vertex_color_use_as_albedo = true
-	tmat.roughness = 0.94
-	# ⚠ StandardMaterial3D 沒有 `specular`（那是 Godot 3 的 SpatialMaterial），
-	#   寫了會噴 remap 警告而且**完全沒作用**。Godot 4 用 metallic_specular。
-	tmat.metallic_specular = 0.15
-	# 葉子要雙面：低多邊形葉片只有一層，背面剔除會讓樹從某些角度變成半棵
-	tmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# 2026-07-28 使用者：「樹木、特別是樹木上的葉子」要更真實。
+	# 換 ShaderMaterial 做三件事：①風搖（整樹低頻搖＋葉面高頻顫）
+	# ②葉片背光透光（迎著太陽看樹，葉緣透出暖綠——葉子是薄的，這是「葉」的關鍵訊號）
+	# ③樹冠高度明暗（下層葉背光偏暗黃、頂層受光偏亮）。per-instance 色偏照舊吃 COLOR。
+	var tmat := ShaderMaterial.new()
+	var tsh := Shader.new()
+	tsh.code = TREE_SHADER
+	tmat.shader = tsh
+	if _sun != null and is_instance_valid(_sun):
+		tmat.set_shader_parameter("sun_dir", -_sun.global_transform.basis.z)
 	for mesh_key2 in xf_by_mesh.keys():
 		var list: Array = xf_by_mesh[mesh_key2]
 		var mm := MultiMesh.new()
@@ -6898,6 +7123,50 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		mmi.material_override = tmat
 		world.add_child(mmi)
 
+
+# 樹木 shader（GDD/06；2026-07-28 樹葉真實化）。
+# ⚠ 葉/幹用「頂點色綠紅差」區分，不另做 surface——樹是合併網格＋MultiMesh，
+#   多一個 surface 就多一倍 draw call。COLOR＝網格頂點色 × 每棵樹的 instance 色偏。
+# ⚠ 風搖寫在 vertex：位移量隨高度平方（樹根不動、樹梢擺最多），時間項用兩個
+#   不成比例的頻率相加——單一 sin 會整片森林同步擺，像跳團體操（空間相位用世界座標打散）。
+const TREE_SHADER := """
+shader_type spatial;
+render_mode cull_disabled;
+
+uniform vec3 sun_dir = vec3(0.45, 0.62, 0.64);
+
+varying vec3 vcol;
+varying float leafm;    // 1＝葉、0＝幹（頂點色綠紅差）
+varying float hfrac;    // 樹內高度 0~1（樹冠明暗用）
+varying vec3 wpv;
+
+void vertex() {
+	vcol = COLOR.rgb;
+	leafm = clamp((COLOR.g - COLOR.r) * 4.0, 0.0, 1.0);
+	hfrac = clamp(VERTEX.y / 6.0, 0.0, 1.0);
+	vec3 wp0 = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float ph = wp0.x * 0.35 + wp0.z * 0.53;      // 每棵樹相位不同：森林不齊步擺
+	float sw = sin(TIME * 1.05 + ph) * 0.6 + sin(TIME * 1.71 + ph * 1.31) * 0.4;
+	vec2 wind = vec2(0.83, 0.55);
+	// 整樹搖：樹梢 ~6cm，樹根 0；葉多搖一點（枝葉柔、樹幹硬）
+	VERTEX.xz += wind * sw * 0.055 * hfrac * hfrac * (0.45 + 0.55 * leafm);
+	// 葉面顫：高頻小振幅，只有葉子有——近看時「葉子各自在動」就是這個
+	VERTEX.y += sin(TIME * 5.3 + ph * 7.7 + VERTEX.x * 3.1) * 0.014 * leafm;
+	wpv = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	// 樹冠明暗：下層葉暗黃（吃不到光的老葉）、頂層亮綠——只作用在葉上
+	vec3 grad = mix(vec3(0.82, 0.86, 0.76), vec3(1.06, 1.05, 0.97), hfrac);
+	ALBEDO = vcol * mix(vec3(1.0), grad, leafm);
+	ROUGHNESS = 0.94;
+	// 背光透光（假 SSS）：太陽在樹後、鏡頭迎光看，薄葉透出暖綠。
+	// 用 EMISSION 疊，不然正面陰影會把它吃掉。
+	float bl = pow(max(dot(normalize(wpv - CAMERA_POSITION_WORLD),
+			normalize(sun_dir)), 0.0), 4.0);
+	EMISSION = vec3(0.10, 0.15, 0.05) * bl * leafm;
+}
+"""
 
 # 天空 shader（雲層）：fbm 雜訊雲＋日盤＋大氣輝光。
 # ⚠ 雲的 UV 要把視線投影到「一個高處的平面」：直接用 EYEDIR.xz 會讓雲在頭頂糊成一團、

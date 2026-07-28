@@ -152,7 +152,16 @@ func _fences(m: Dictionary) -> void:
 		var off: float = float(r.get("w", 40)) * 0.9
 		for side in [-1.0, 1.0]:
 			var d := 40.0
+			var seg_i := 0
 			while d < total - 40.0:
+				seg_i += 1
+				# 隔段留缺（2.75m 柵、2.75m 缺交錯）＝田埂出入口。連續路邊柵欄會把
+				# 路變成一道牆：ch01 壓測抓到人卡在柵欄外 19m 進不了基地。每 4 段留
+				# 1 缺仍不夠——滑行搜尋只有 ±3m，繞路演算法對長牆無力（第二輪實測）。
+				# 兩側錯開半拍，穿越道路是小 zigzag，不會排成對齊的走廊。
+				if seg_i % 2 == (0 if side > 0.0 else 1):
+					d += step
+					continue
 				var p: Vector2 = a + dir * d + nrm * off * side
 				if _off_limits(p) or _off_limits(p + dir * step):
 					d += step
@@ -466,16 +475,33 @@ func _pillboxes(m: Dictionary) -> void:
 				Transform3D(b, _pos(c.x, c.y, h * 0.635) + b * Vector3(0, 0, -d * 0.5 + 0.25 * sz)))
 		_box("concrete", Vector3(w * 1.12, 0.18 * sz, d * 1.12),
 				Transform3D(b, _pos(c.x, c.y, h + 0.09 * sz)))
-		# 與地面的過渡：土堤堆在四周（碉堡不會是「放在草地上的水泥盒」）
+		# 與地面的過渡：土堤堆在四周（碉堡不會是「放在草地上的水泥盒」）。
+		# 2026-07-28 使用者：「土堆要更真實」——原本 8 個平放方盒排一圈，像積木。
+		# 改成：每個位置兩塊**斜插交疊**的土塊（俯仰＋滾轉都亂給，彼此咬合），
+		# 數量加密到 14 塊互相搭接成連續土堤，縫隙再灑碎石。斜插的盒子彼此交疊後
+		# 輪廓線是亂的，讀起來就是「堆出來的土」而不是「擺上去的盒子」。
 		var rng2 := RandomNumberGenerator.new()
 		rng2.seed = int(absf(c.x) * 7.0 + absf(c.y) * 13.0)
-		for k in 8:
-			var a2: float = TAU * float(k) / 8.0 + rng2.randf_range(-0.2, 0.2)
-			var rr: float = (maxf(w, d) * 0.5 + 0.35) * rng2.randf_range(0.9, 1.15)
-			var msz: float = rng2.randf_range(0.5, 1.0) * sz
-			_box("dirt", Vector3(msz, msz * 0.34, msz * 0.8),
-					Transform3D(Basis(Vector3.UP, a2),
-					_pos(c.x + cos(a2) * rr / _ws, c.y + sin(a2) * rr / _ws, msz * 0.12)))
+		for k in 14:
+			var a2: float = TAU * float(k) / 14.0 + rng2.randf_range(-0.16, 0.16)
+			var rr: float = (maxf(w, d) * 0.5 + 0.35) * rng2.randf_range(0.88, 1.12)
+			var bx: float = c.x + cos(a2) * rr / _ws
+			var by: float = c.y + sin(a2) * rr / _ws
+			for layer in 2:
+				var msz: float = rng2.randf_range(0.45, 0.95) * sz * (1.0 - 0.25 * float(layer))
+				var tiltb := Basis(Vector3.UP, a2 + rng2.randf_range(-0.5, 0.5)) \
+						* Basis(Vector3(1, 0, 0), rng2.randf_range(-0.30, 0.30)) \
+						* Basis(Vector3(0, 0, 1), rng2.randf_range(-0.22, 0.22))
+				_box("dirt", Vector3(msz, msz * 0.42, msz * 0.75),
+						Transform3D(tiltb, _pos(bx + rng2.randf_range(-3.0, 3.0),
+						by + rng2.randf_range(-3.0, 3.0),
+						msz * (0.10 + 0.16 * float(layer)))))
+			if rng2.randf() < 0.6:
+				var ssz: float = rng2.randf_range(0.10, 0.22) * sz
+				_box("rock", Vector3(ssz, ssz * 0.8, ssz),
+						Transform3D(Basis(Vector3.UP, rng2.randf() * TAU),
+						_pos(bx + rng2.randf_range(-5.0, 5.0),
+						by + rng2.randf_range(-5.0, 5.0), ssz * 0.3)))
 		_blk_cir(c, maxf(w, d) * 0.52, h)
 
 # 貨櫃：港口與城區最好用的掩體，也是第 10 章的劇情道具（走私貨櫃）。
@@ -495,9 +521,29 @@ func _containers(m: Dictionary) -> void:
 			var off: Vector3 = b * Vector3(rng.randf_range(-0.12, 0.12), 0.0,
 					rng.randf_range(-0.08, 0.08))
 			_box(key, Vector3(12.2, 2.59, 2.44), Transform3D(b, _pos(c.x, c.y, yy) + off))
+			# 瓦楞側板（2026-07-28 使用者：貨櫃要更真實）：貨櫃側面是垂直波浪板，
+			# 不是平板。每 0.55m 一條凸稜（同色，靠自身陰影讀出起伏——低多邊形的做法），
+			# 兩長側各 21 條。頂樓那層看得到的稜多、地面那層常被擋，全都給。
+			var ribs := 21
+			for ri in ribs:
+				var rx: float = (float(ri) - float(ribs - 1) * 0.5) * 0.55
+				for sgn0 in [-1.0, 1.0]:
+					_box(key, Vector3(0.24, 2.45, 0.07),
+							Transform3D(b, _pos(c.x, c.y, yy) + off
+							+ b * Vector3(rx, 0.0, sgn0 * 1.24)))
+			# 端框（角柱）
 			for sgn in [-1.0, 1.0]:
 				_box("steel", Vector3(0.12, 2.59, 2.5),
 						Transform3D(b, _pos(c.x, c.y, yy) + off + b * Vector3(sgn * 6.05, 0, 0)))
+			# 門端（+X 端）：兩扇門的分縫＋四根垂直鎖桿＋把手——貨櫃的「臉」，
+			# 沒有它兩端長一樣，怎麼看都是一塊漆了色的磚。
+			_box("steel", Vector3(0.05, 2.45, 0.06),
+					Transform3D(b, _pos(c.x, c.y, yy) + off + b * Vector3(6.12, 0, 0)))
+			for rz in [-0.92, -0.36, 0.36, 0.92]:
+				_box("steel", Vector3(0.09, 2.45, 0.09),
+						Transform3D(b, _pos(c.x, c.y, yy) + off + b * Vector3(6.14, 0, rz)))
+				_box("steel", Vector3(0.16, 0.10, 0.28),
+						Transform3D(b, _pos(c.x, c.y, yy - 0.35) + off + b * Vector3(6.16, 0, rz)))
 		_blk_obb(c, ang, Vector2(6.2, 1.3), 2.59 + float(stack - 1) * 2.62)
 
 # 碼頭：伸進水裡的混凝土平台＋繫船柱。是**可以走上去的平台**，不是障礙。

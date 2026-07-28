@@ -24,10 +24,22 @@ var _shoulder := 1.0              # 目前在哪一側肩膀（1＝右、-1＝�
 #   ground_probe.call(pos) -> float     該點的地面高度
 var wall_probe: Callable = Callable()
 var ground_probe: Callable = Callable()
-#   inside_probe.call(pos) -> bool        這個世界座標是不是在某棟建築室內
+#   inside_probe.call(pos) -> bool        這個世界座標是不是在某棟建築室內（嚴格：內縮 30cm，
+#                                         給「鏡頭能停哪」用）
+#   inside_loose_probe.call(pos) -> bool  寬鬆版（幾乎整個腳印）：給「角色在不在室內」的
+#                                         **觸發**用。用嚴格版當觸發的話，人貼牆/站門口那
+#                                         30cm 殼層會讓約束斷開，鏡頭穿出牆外（使用者回報
+#                                         「很容易從牆壁看到外面」的真因）。
 var inside_probe: Callable = Callable()
+var inside_loose_probe: Callable = Callable()
 
+var _tps_snap := false
 func set_tps(n: Node3D) -> void:
+	# 切到很遠的另一個單位時要用「剪接」不是「平移」：平滑飛越會讓鏡頭
+	# 穿過沿路每一棟建築（ch02 壓測 22 次鏡頭穿牆的主因，玩家切兵也看得到）。
+	# VC 本家也是快切。6m 內仍平滑（同一個交火圈裡的隊友）。
+	if n != null and global_position.distance_to(n.global_position) > 6.0:
+		_tps_snap = true
 	tps_node = n
 	if n != null:
 		tps_yaw = rad_to_deg(n.rotation.y)
@@ -148,7 +160,8 @@ func _apply_tps(delta: float) -> void:
 	# ⚠ `wall_probe` 是線段對牆段求交：鏡頭若從門窗缺口穿出去再停在牆體裡，
 	#   那條線段沒有命中任何牆段，判定不出來（實拍：室內環顧有一格整片紅磚）。
 	#   所以用「幾何歸屬」再收一次——二分逼近，找出仍在室內的最遠點。
-	if inside_probe.is_valid() and bool(inside_probe.call(tps_node.global_position)):
+	var trig: Callable = inside_loose_probe if inside_loose_probe.is_valid() else inside_probe
+	if inside_probe.is_valid() and bool(trig.call(tps_node.global_position)):
 		if not bool(inside_probe.call(want)):
 			var lo := 0.0
 			var hi := 1.0
@@ -163,7 +176,19 @@ func _apply_tps(delta: float) -> void:
 		var gy: float = float(ground_probe.call(want)) + 0.45
 		if want.y < gy:
 			want.y = gy                     # 鏡頭不鑽進地面/壕溝壁
-	global_position = global_position.lerp(want, 1.0 - exp(-14.0 * delta))
+	if _tps_snap:
+		global_position = want          # 剪接：新目標的第一幀就定位，不穿場平移
+		_tps_snap = false
+	else:
+		var newp: Vector3 = global_position.lerp(want, 1.0 - exp(-14.0 * delta))
+		# 平滑「過程」也不可以穿牆：急轉向時 want 跳到另一側，收斂路徑會瞬間
+		# 掃過身旁的貨櫃/牆（ch08/ch12 壓測各抓到 1~2 幀）。這裡只做「往 head 收縮」
+		# 的單調修正，不會跟 want 上的約束互相打架（那才是以前畫面抖動的原因）。
+		if wall_probe.is_valid():
+			var kt: float = float(wall_probe.call(head, newp))
+			if kt < 1.0:
+				newp = head.lerp(newp, clampf(kt - 0.12, 0.04, 1.0))
+		global_position = newp
 	var look_at_p: Vector3 = head + tps_forward() * 12.0 + right * TPS_SHOULDER * _shoulder * 0.5
 	look_at(look_at_p, Vector3.UP)
 

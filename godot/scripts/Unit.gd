@@ -892,6 +892,12 @@ func _stick_to_ground(delta: float) -> void:
 		if global_position.y <= gy:
 			global_position.y = gy
 			_fall_v = 0.0
+	elif dy < -0.6:
+		# 深度穿地（比任何台階都深）＝狀態本身不合法：人不可能在山體裡面。
+		# 陡坡上水平推進比 CLIMB_SPEED 快時會逐漸沉進坡體（ch11 壓測抓到 -2.64m），
+		# 這種情況直接回貼地面——「地面把你推出來」沒有速度上限（鐵律 0①）。
+		global_position.y = gy
+		_fall_v = 0.0
 	elif dy < -0.001:
 		# 地面在腳底上方（踩上坡／被推上台階）：限速抬起，不瞬移
 		global_position.y = minf(gy, global_position.y + CLIMB_SPEED * delta)
