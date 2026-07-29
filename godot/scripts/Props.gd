@@ -62,6 +62,8 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 		"brick": BattleMats.pbr("RedBrick", 1.6, 0.96, Color(1.30, 1.10, 0.98)),
 		"brick2": BattleMats.pbr("RedBrick", 1.6, 0.97, Color(1.05, 0.86, 0.76)),
 		"cable": _mat(Color(0.09, 0.09, 0.10), 0.85),
+		"pole": _mat(Color(0.30, 0.24, 0.17), 0.95),        # 電線桿：焦油防腐的深褐
+		"porcelain": _mat(Color(0.84, 0.86, 0.88), 0.35),   # 礙子：白瓷微亮
 		"steel": _mat(Color(0.42, 0.44, 0.46), 0.55),
 		"cargo1": _mat(Color(0.55, 0.24, 0.18), 0.88),
 		"cargo2": _mat(Color(0.18, 0.36, 0.44), 0.88),
@@ -179,7 +181,14 @@ func _fences(m: Dictionary) -> void:
 							Transform3D(Basis(Vector3.UP, -ang), _pos(p2.x, p2.y, hh)))
 				d += step
 
+# 電線桿（2026-07-29 使用者：「電線杆太假」——之前只是一根直方柱）。
+# 真電線桿的訊號：①上細下粗 ②沒有一根是筆直的（老桿都歪）③頂端橫擔＋白瓷礙子
+# ④桿與桿之間**下垂的電線**（懸鏈線）——沒有線的電線桿只是路邊一根柱子。
+var pole_spots: Array = []   # 實際放置的桿位（px）：美術特寫要對準真的桿，不要用公式猜
+var _cable_n := 0            # 電線段計數（驗「線真的有被產出」——沒有數字就只能猜）
+
 func _poles(m: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
 	for r in m.get("roads", []):
 		var a := Vector2(float(r.get("x1", 0)), float(r.get("y1", 0)))
 		var b := Vector2(float(r.get("x2", 0)), float(r.get("y2", 0)))
@@ -187,15 +196,65 @@ func _poles(m: Dictionary) -> void:
 		var nrm := Vector2(-dir.y, dir.x)
 		var total: float = a.distance_to(b)
 		var d := 120.0
+		var prev_ins: Array = []          # 上一根桿的三個礙子頂（世界座標）；空＝斷線
+		rng.seed = int(a.x * 3.0 + a.y * 7.0 + b.x) + 11
 		while d < total - 60.0:
-			var p: Vector2 = a + dir * d + nrm * float(r.get("w", 40)) * 1.6
-			if _off_limits(p) or (_terrain != null and _terrain.in_water(p.x, p.y)):
-				d += 260.0
+			# 桿位撞到禁區就沿路滑一點再試：固定間距的取樣相位可能整排撞在
+			# 建築群上（實測 190px 間距只剩 1 桿）。真實的電線桿本來就會避開門口。
+			var p := Vector2.INF
+			for probe in [0.0, 45.0, -45.0, 90.0]:
+				var cand: Vector2 = a + dir * (d + probe) + nrm * float(r.get("w", 40)) * 1.6
+				if not _off_limits(cand) \
+						and not (_terrain != null and _terrain.in_water(cand.x, cand.y)):
+					p = cand
+					break
+			if p == Vector2.INF:
+				d += 190.0
+				# ⚠ 不清 prev_ins：一清就永遠湊不成相鄰桿（實測 4 桿 0 線）。
+				#   拉不拉由 30m 距離檢查決定——電線在 6m 高，跨單層屋頂合理。
 				continue
 			_blk_cir(p, 0.32, 6.2, true)                    # 木電線桿：擋人不擋彈
-			_box("wood", Vector3(0.22, 6.2, 0.22), Transform3D(Basis(), _pos(p.x, p.y, 3.1)))
-			_box("wood", Vector3(1.6, 0.14, 0.14), Transform3D(Basis(), _pos(p.x, p.y, 5.6)))
-			d += 260.0
+			pole_spots.append(p)
+			# 微傾：軸向亂數 1.5~3 度——整排筆直的桿一看就是複製貼上
+			var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.04, 0.04)) \
+					* Basis(Vector3(0, 0, 1), rng.randf_range(-0.04, 0.04))
+			var base3: Vector3 = _pos(p.x, p.y, 0.0)
+			# 上細下粗（兩節：下 0.27、上 0.19），都掛在同一個傾斜 basis 下
+			_box("pole", Vector3(0.27, 3.5, 0.27),
+					Transform3D(lean, base3 + lean * Vector3(0, 1.75, 0)))
+			_box("pole", Vector3(0.19, 3.2, 0.19),
+					Transform3D(lean, base3 + lean * Vector3(0, 4.95, 0)))
+			# 橫擔（垂直於走線方向）＋斜撐＋三顆白瓷礙子
+			var nrm3 := Vector3(nrm.x, 0, nrm.y)
+			var arm_c: Vector3 = base3 + lean * Vector3(0, 6.05, 0)
+			var arm_b := Basis(Vector3.UP, -atan2(nrm.y, nrm.x)) * lean
+			_box("pole", Vector3(1.75, 0.11, 0.09), Transform3D(arm_b, arm_c))
+			_box("pole", Vector3(0.06, 0.95, 0.06),
+					Transform3D(arm_b * Basis(Vector3(0, 0, 1), 0.72),
+					base3 + lean * Vector3(0, 5.55, 0) + arm_b * Vector3(0.35, 0, 0)))
+			var ins: Array = []
+			for oi in [-0.68, 0.0, 0.68]:
+				var ip: Vector3 = arm_c + arm_b * Vector3(oi, 0.13, 0.0)
+				_box("porcelain", Vector3(0.08, 0.15, 0.08), Transform3D(arm_b, ip))
+				ins.append(ip + Vector3(0, 0.09, 0))
+			# 電線：三條各自從上一根桿垂到這一根（懸鏈線用 4 段折線近似，
+			# 垂度＝跨距的 4%——電線繃成直線比沒有線更假）
+			if prev_ins.size() == 3:
+				for wi in 3:
+					var A: Vector3 = prev_ins[wi]
+					var B: Vector3 = ins[wi]
+					var span: float = A.distance_to(B)
+					if span < 30.0:       # 只連相鄰桿；隔著缺口的不連
+						var sag: float = span * 0.04
+						var pts: Array = []
+						for k in 5:
+							var t: float = float(k) / 4.0
+							pts.append(A.lerp(B, t) + Vector3(0, -sag * 4.0 * t * (1.0 - t), 0))
+						for k2 in 4:
+							_cable_seg(pts[k2], pts[k2 + 1])
+			prev_ins = ins
+			d += 190.0
+	print("[poles] 桿=%d 電線段=%d" % [pole_spots.size(), _cable_n])
 
 func _rubble(m: Dictionary) -> void:
 	# 彈坑與建築附近散落瓦礫：碎石是「這裡打過仗」最直接的視覺線索
@@ -381,6 +440,18 @@ func _scorch_at(c: Vector2, r_m: float) -> void:
 # 0.95m 的護欄擋得住趴著與蹲著的人的彈道，擋不住站姿對站姿的對射——這是
 # 使用者 2026-07-26 指正「子彈可以穿過這些物體」的正解，不是一律擋或一律不擋。
 # pen＝子彈打得穿（鐵律 0②：材質不同，擋彈能力就不同）。
+# 任意兩個世界座標之間拉一段細線（電線/纜繩）：先繞 Y 對準方位、再繞 Z 給俯仰
+func _cable_seg(w1: Vector3, w2: Vector3, r := 0.05) -> void:
+	var dv: Vector3 = w2 - w1
+	var L: float = dv.length()
+	if L < 0.01:
+		return
+	var yaw: float = atan2(dv.z, dv.x)
+	var pitch: float = asin(clampf(dv.y / L, -1.0, 1.0))
+	var bb := Basis(Vector3.UP, -yaw) * Basis(Vector3(0, 0, 1), pitch)
+	_cable_n += 1
+	_box("cable", Vector3(L, r, r), Transform3D(bb, (w1 + w2) * 0.5))
+
 # 木柵欄、木電線桿擋得住人，但擋不住步槍彈——真實步槍彈輕鬆穿過 2cm 木板。
 # 沙包、混凝土龍牙、車體才是真的擋彈物。
 func _blk_cir(c: Vector2, r_m: float, h_m: float, pen := false) -> void:

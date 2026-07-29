@@ -16,6 +16,8 @@ class MU:
 	var slope := 0.0
 	var elev := 0.0
 	var in_crater := false
+	var env_acc := 1.0     # 天候（GDD/04）：探針預設晴天＝中性
+	var env_dodge := 1.0
 	func _init(c := "assault"):
 		cls = c
 		weapon = {"acc": 0.6, "range": 200, "atk": 30, "shots": 1}

@@ -120,7 +120,7 @@ static func _pine(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 		var hh: float = h * rng.randf_range(0.13, 0.19)
 		# 每層略微偏心：正圓錐疊起來像聖誕樹玩具，偏心才像真的
 		var off := Vector3(rng.randf_range(-0.2, 0.2), 0, rng.randf_range(-0.2, 0.2))
-		_cone(st, Vector3(0, y, 0) + off, rad, hh, 7, leaf * rng.randf_range(0.88, 1.10))
+		_cone(st, Vector3(0, y, 0) + off, rad, hh, 7, leaf * rng.randf_range(0.88, 1.10), rng)
 
 static func _palm(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 	var h: float = rng.randf_range(5.5, 9.5)
@@ -185,6 +185,41 @@ static func _dead(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 
 # ---------- 幾何基本件 ----------
 
+# ---------- 岩石原型（2026-07-29 使用者：「石頭還是太假」）----------
+# 舊做法＝共用 SphereMesh 壓扁（平滑法線）＝一窩光滑的蛋。
+# 岩石的「真」來自：稜角（大位移＋平面法線）、逐面色差、頂面曬白/底部沾土。
+# 跟樹一樣建置期產原型、MultiMesh 鋪場，每顆只是變換與色偏不同。
+static func build_rock_protos(variants := 5, seed_v := 20260729) -> Array:
+	var out: Array = []
+	var rng := RandomNumberGenerator.new()
+	for v in variants:
+		rng.seed = seed_v + v * 131
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var rows := 4
+		var cols := 6
+		var pts: Array = []
+		for iy in range(rows + 1):
+			var row: Array = []
+			var phi: float = PI * float(iy) / float(rows)
+			for ix in cols:
+				var th: float = TAU * (float(ix) + rng.randf_range(-0.22, 0.22)) / float(cols)
+				# 位移大到 −28%~+30%：這是「稜」的來源；壓扁讓它像臥在地上的岩塊
+				var j: float = rng.randf_range(0.72, 1.30)
+				row.append(Vector3(sin(phi) * cos(th) * j,
+						cos(phi) * 0.62 * j, sin(phi) * sin(th) * j))
+			pts.append(row)
+		for iy in rows:
+			# 頂面曬白 1.18 → 底部沾土 0.55（半埋的石頭底緣永遠是髒的）
+			var sh: float = lerpf(1.18, 0.55, (float(iy) + 0.5) / float(rows))
+			for ix in cols:
+				var nx: int = (ix + 1) % cols
+				var fc := Color(sh, sh, sh) * rng.randf_range(0.88, 1.12)
+				_quad(st, pts[iy][ix], pts[iy][nx], pts[iy + 1][nx], pts[iy + 1][ix], fc)
+		st.generate_normals()
+		out.append(st.commit())
+	return out
+
 static func _bark(rng: RandomNumberGenerator) -> Color:
 	return Color(0.30, 0.23, 0.16).lerp(Color(0.44, 0.36, 0.26), rng.randf())
 
@@ -210,33 +245,46 @@ static func _taper(st: SurfaceTool, a: Vector3, b: Vector3, ra: float, rb: float
 # 樹冠團塊：壓扁的多面體。用 8 面而不是 icosphere——低多邊形風格要看得出面
 static func _blob(st: SurfaceTool, c: Vector3, r: float, squash: float, col: Color,
 		rng: RandomNumberGenerator) -> void:
+	# ★2026-07-29 再修（使用者：「樹木還是太假」）。假的三個來源：
+	#   ① 頂點抖動 ±14% 太client——遠看仍是圓球。拉到 −22%~+26%，剪影才會碎。
+	#   ② 六等分經線太密＝面太小看不出「面」。5 等分，面大才有低多邊形的稜。
+	#   ③ 整團同一個綠——真樹冠上面吃光下面背光，臨接的葉簇色也不同。
+	#     逐面亂數色差 ±10% ＋ 由上到下 1.14→0.66 的明暗，兩者都烘進頂點色。
 	var rows := 3
-	var cols := 6
+	var cols := 5
 	var pts: Array = []
 	for iy in range(rows + 1):
 		var row: Array = []
 		var phi: float = PI * float(iy) / float(rows)
 		for ix in cols:
-			var th: float = TAU * float(ix) / float(cols)
-			# 每個頂點加一點亂數＝團塊不規則，不是一顆完美的球
-			var j: float = rng.randf_range(0.86, 1.14)
+			var th: float = TAU * (float(ix) + rng.randf_range(-0.18, 0.18)) / float(cols)
+			var j: float = rng.randf_range(0.78, 1.26)
 			row.append(c + Vector3(sin(phi) * cos(th) * r * j,
 					cos(phi) * r * squash * j, sin(phi) * sin(th) * r * j))
 		pts.append(row)
 	for iy in rows:
+		var sh: float = lerpf(1.14, 0.66, (float(iy) + 0.5) / float(rows))
 		for ix in cols:
 			var nx: int = (ix + 1) % cols
-			_quad(st, pts[iy][ix], pts[iy][nx], pts[iy + 1][nx], pts[iy + 1][ix], col)
+			_quad(st, pts[iy][ix], pts[iy][nx], pts[iy + 1][nx], pts[iy + 1][ix],
+					col * sh * rng.randf_range(0.90, 1.10))
 
-static func _cone(st: SurfaceTool, c: Vector3, r: float, h: float, sides: int, col: Color) -> void:
+static func _cone(st: SurfaceTool, c: Vector3, r: float, h: float, sides: int, col: Color,
+		rng: RandomNumberGenerator = null) -> void:
 	var apex: Vector3 = c + Vector3(0, h, 0)
+	# 針葉層的緣要參差＋逐面色差：正圓錐一圈同色＝塑膠聖誕樹（使用者再次點名太假）
+	var jr: Array = []
+	for i in range(sides + 1):
+		jr.append(1.0 if rng == null else rng.randf_range(0.80, 1.18))
+	jr[sides] = jr[0]
 	for i in sides:
 		var t0: float = TAU * float(i) / float(sides)
 		var t1: float = TAU * float(i + 1) / float(sides)
-		var p0: Vector3 = c + Vector3(cos(t0) * r, 0, sin(t0) * r)
-		var p1: Vector3 = c + Vector3(cos(t1) * r, 0, sin(t1) * r)
-		_tri(st, p0, p1, apex, col)
-		_tri(st, p1, p0, c, col)          # 底面：從下方看不會破洞
+		var p0: Vector3 = c + Vector3(cos(t0) * r * jr[i], 0, sin(t0) * r * jr[i])
+		var p1: Vector3 = c + Vector3(cos(t1) * r * jr[i + 1], 0, sin(t1) * r * jr[i + 1])
+		var fc: Color = col if rng == null else col * rng.randf_range(0.90, 1.10)
+		_tri(st, p0, p1, apex, fc)
+		_tri(st, p1, p0, c, fc * 0.72)    # 底面：從下方看不會破洞；針葉層底面背光要暗
 
 static func _frond(st: SurfaceTool, a: Vector3, mid: Vector3, tip: Vector3, w: float,
 		col: Color) -> void:

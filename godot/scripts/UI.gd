@@ -731,7 +731,7 @@ func show_hud() -> void:
 	ea.pressed.connect(func(): end_action.emit())
 	root.add_child(ea)
 
-func update_hud(turn: int, phase: String, cp: int) -> void:
+func update_hud(turn: int, phase: String, cp: int, wx := "") -> void:
 	var head := root.find_child("HudBanner", true, false)
 	if head == null:
 		return
@@ -741,7 +741,7 @@ func update_hud(turn: int, phase: String, cp: int) -> void:
 			if l.get_theme_color("font_color") == GOLD and l.position.y < 30:
 				l.text = "ENEMY PHASE" if phase == "enemy" else "PLAYER PHASE"
 			elif l.position.y > 30 and l.position.y < 60:
-				l.text = "第 %d 回合｜CP %d" % [turn, cp]
+				l.text = "第 %d 回合｜CP %d" % [turn, cp] + ("" if wx == "" else "｜" + wx)
 
 # 戰場角色卡（選中單位大立繪）
 func show_charcard(cls: String, disp_name: String, trait_desc: String, hp: int, maxhp: int) -> void:

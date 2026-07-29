@@ -870,6 +870,12 @@ const VEH_HW := 1.75
 func _support_height() -> float:
 	var gy: float = float(ground_sampler.call(global_position))
 	if not _is_vehicle:
+		# 腳掌有面積（鐵律 0⑤）：站在護壁板/坑緣時，身體中心可能已越過邊緣，
+		# 但腳尖還踩著支撐。單點取樣會回報「腳下是溝底」→ 人浮空 0.62m
+		# （ch03 走查在壕溝護壁頂穩定重現）。±0.18m＝一個腳掌的跨距，取最高。
+		for off in [Vector3(0.18, 0, 0), Vector3(-0.18, 0, 0),
+				Vector3(0, 0, 0.18), Vector3(0, 0, -0.18)]:
+			gy = maxf(gy, float(ground_sampler.call(global_position + off)))
 		return gy
 	var f: Vector3 = facing_dir()
 	var r := Vector3(f.z, 0.0, -f.x)

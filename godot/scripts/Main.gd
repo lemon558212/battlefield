@@ -109,6 +109,7 @@ const LOWGRID_PX := 100.0            # 格子邊長（px）＝5m
 var _low_grid := {}                  # Vector2i(格) -> Array[矮障礙]
 var _has_support := false
 var _tree_feet: Array = []             # 樹腳位置（px）：Terrain 在樹底補草做過渡
+var _pole_spots: Array = []            # 電線桿實際位置（px）：美術特寫取景用
 const MAX_BUILDINGS := 24              # 一張圖最多幾棟可進入建築（村莊/街廓要用到十幾棟）
 const BODY_R := 0.42                   # 步兵肩寬半徑
 # ⚠ 2026-07-27 使用者實測：「從戰車後面可以穿過車尾走到車子中間」。
@@ -491,6 +492,11 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 	while t < budget:
 		await get_tree().create_timer(0.2).timeout
 		t += 0.2
+		# 死人不走路：單位中途陣亡（迎擊/交火）就中止這一段。
+		# 不中止的話會對凍結的屍體連續取樣，而死亡已把鏡頭切回俯瞰——
+		# 「頭→鏡頭」射線橫跨半張地圖，鏡頭穿牆檢查全是假警報（ch02 壓測 12 筆）。
+		if not pu["alive"] or not is_instance_valid(pu["node"]):
+			break
 		var now: Vector2 = _live_px(pu)
 		var moved: float = now.distance_to(last) * WORLD_SCALE
 		last = now
@@ -514,8 +520,12 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 			_walk_bad["deep"].append([now, wd])
 		if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
 			_walk_bad["oob"].append(now)
-		if _wall_ray(wp + Vector3(0, 1.6, 0), cam.global_position) < 0.92:
+		# 鏡頭穿牆只在「TPS 真的跟拍這個人」時才有意義（俯瞰鏡頭本來就隔很遠）
+		if cam.is_tps() and _wall_ray(wp + Vector3(0, 1.6, 0), cam.global_position) < 0.92:
 			_walk_bad["cam"].append(now)
+			# 兇手識別：不印出「撞到什麼」的鏡頭穿牆報告只能猜（ch02 查了兩輪）
+			print("[walkcam] px=(%.0f,%.0f) 擋住頭→鏡頭的是：%s"
+					% [now.x, now.y, _wall_ray_why(wp + Vector3(0, 1.6, 0), cam.global_position)])
 		if now.distance_to(goal) * WORLD_SCALE < 0.9:
 			break
 		slow = (slow + 0.2) if moved < WALK_SPEED_MIN * 0.2 else 0.0
@@ -637,11 +647,87 @@ func _artshots() -> void:
 	_teardown_world()
 	await get_tree().process_frame
 	_build_ground()
+	# 部署藍框不是場景的一部分：留著會像一條青色地毯鋪在地上（sceneshots 同一課）
+	if is_instance_valid(_zone_mesh):
+		_zone_mesh.visible = false
 	var mwp: float = map_data.get("w", 960)
 	var mhp: float = map_data.get("h", 600)
 	cam.clear_tps()
 	cam.set_follow(null)
 	await get_tree().create_timer(1.5).timeout
+	# ⓪ 氣氛鏡頭（無條件）：地圖中心附近的**空曠點**人眼視角。
+	#   直接用中心點會掉進建築物裡（ch01 實拍整張是室內牆）；
+	#   往外螺旋找第一個「不在屋裡、不在水裡」的點。
+	var spot := Vector2(mwp * 0.5, mhp * 0.55)
+	for ring in range(0, 8):
+		var found_dry := false
+		for aa in range(0, 8):
+			var cand: Vector2 = Vector2(mwp * 0.5, mhp * 0.55) \
+					+ Vector2.from_angle(TAU * float(aa) / 8.0) * float(ring) * 60.0
+			var in_bld := false
+			for bd in _buildings:
+				if bd.rect.grow(30.0).has_point(cand):
+					in_bld = true
+					break
+			if not in_bld and (terrain == null or terrain.water_depth(cand.x, cand.y) <= 0.01):
+				spot = cand
+				found_dry = true
+				break
+		if found_dry:
+			break
+	cam.focus = _to3d(spot.x, spot.y) + Vector3(0, 1.5, 0)
+	cam.dist = 10.0
+	cam.pitch_deg = 9.0
+	cam.yaw = 0.6
+	await get_tree().create_timer(2.5).timeout    # 粒子要時間長滿
+	await _snap("res://art_ch%02d_scene.png" % chn)
+	# ⓪b 道路鏡頭（有路才拍）：沿路看過去——電線桿、電線垂度、路邊柵欄一次入鏡
+	var roads: Array = map_data.get("roads", [])
+	if not roads.is_empty():
+		# 挑「離建築最遠」的路段取樣點：第一條路的中點常在營房縫裡（實拍卡牆）
+		var best_pt := Vector2.ZERO
+		var best_dir := Vector2.RIGHT
+		var best_score := -1.0
+		for rd0 in roads:
+			var ra0 := Vector2(float(rd0.get("x1", 0)), float(rd0.get("y1", 0)))
+			var rb0 := Vector2(float(rd0.get("x2", 0)), float(rd0.get("y2", 0)))
+			for tt in [0.25, 0.4, 0.5, 0.6, 0.75]:
+				var cand: Vector2 = ra0.lerp(rb0, tt)
+				var score := 1e9
+				for bd in _buildings:
+					score = minf(score, bd.rect.get_center().distance_to(cand)
+							- maxf(bd.rect.size.x, bd.rect.size.y) * 0.5)
+				if score > best_score:
+					best_score = score
+					best_pt = cand
+					best_dir = (rb0 - ra0).normalized()
+		var rm: Vector2 = best_pt
+		var rdir: Vector2 = best_dir
+		cam.focus = _to3d(rm.x, rm.y) + Vector3(0, 2.2, 0)
+		cam.dist = 14.0
+		cam.pitch_deg = 10.0
+		cam.yaw = atan2(-rdir.x, -rdir.y)
+		await get_tree().create_timer(0.8).timeout
+		await _snap("res://art_ch%02d_road.png" % chn)
+		# 電線桿特寫：對準 Props 實際放置的桿（用公式猜會拍到屋頂——猜過兩輪了）。
+		# 挑「有相鄰桿」的一根（桿距 <300px），鏡頭橫著看，電線垂度才入鏡。
+		if _pole_spots.size() >= 2:
+			var pi_best := 0
+			for pi3 in _pole_spots.size() - 1:
+				if (_pole_spots[pi3] as Vector2).distance_to(_pole_spots[pi3 + 1]) < 300.0:
+					pi_best = pi3
+					break
+			var pp0: Vector2 = _pole_spots[pi_best]
+			var pp1: Vector2 = _pole_spots[mini(pi_best + 1, _pole_spots.size() - 1)]
+			var mid_p: Vector2 = pp0.lerp(pp1, 0.5)
+			var wire_dir: Vector2 = (pp1 - pp0).normalized()
+			var side_n := Vector2(-wire_dir.y, wire_dir.x)
+			cam.focus = _to3d(mid_p.x, mid_p.y) + Vector3(0, 4.4, 0)
+			cam.dist = 11.0
+			cam.pitch_deg = 8.0
+			cam.yaw = atan2(side_n.x, side_n.y)
+			await get_tree().create_timer(0.8).timeout
+			await _snap("res://art_ch%02d_pole.png" % chn)
 	# ① 岸線：掃網格找「水深 0.4m」的點，鏡頭從陸側 8m 外、1.7m 高看向水面
 	if terrain != null:
 		var found := Vector2.ZERO
@@ -3447,7 +3533,7 @@ func _begin_action(u) -> bool:
 	acting = u
 	_act_last = u["node"].global_position
 	if u["side"] == player_side:
-		ui.update_hud(turn, "player", cp)
+		ui.update_hud(turn, "player", cp, _hud_wx())
 		ui.show_ap(u["ap"], u["ap_max"])
 		_update_ap_ring()
 		# 下令＝進入第三人稱操控（GDD/07）：鏡頭滑到角色背後、滑鼠鎖定成自由視角
@@ -3816,7 +3902,7 @@ func _start_battle() -> void:
 		_zone_mesh.visible = false        # 開戰後收起部署藍框
 	ui.show_hud()
 	ui.show_minimap(func(): return _minimap_data())
-	ui.update_hud(turn, "player", cp)
+	ui.update_hud(turn, "player", cp, _hud_wx())
 	_refresh_visibility()
 	# 相機框住我方部隊重心
 	var c := Vector3.ZERO
@@ -4132,7 +4218,7 @@ func _fire(shooter, target, part := "body") -> void:
 	var dist_px := Vector2(target["wx"] - shooter["wx"], target["wy"] - shooter["wy"]).length()
 	shooter["node"].shoot_at(target["node"])
 	shooter["fired"] = true      # 每次行動只能開火一次；CP 在下令時就扣過了（GDD/01 §1-2）
-	ui.update_hud(turn, "player" if st == St.CMD else "enemy", cp)
+	ui.update_hud(turn, "player" if st == St.CMD else "enemy", cp, _hud_wx())
 	await get_tree().create_timer(0.32).timeout
 	if not shooter["alive"] or not target["alive"]:
 		return
@@ -4213,6 +4299,38 @@ func _bullet_mark(pos: Vector3) -> void:
 #   粒子跟著鏡頭走（只在鏡頭附近下雨），全圖鋪粒子是純浪費。
 var weather := "clear"
 var _weather_node: GPUParticles3D = null
+var _fog_base := 0.012                    # 起霧前的環境霧密度（霧散要收回來）
+var _water_mats: Array = []               # 水面材質（時段切換要重餵太陽/天空色）
+var _tree_mats: Array = []                # 樹木材質（同上，背光透光的太陽方向）
+
+# 把目前的太陽與天空色餵給所有需要的材質（開戰建置時與時段切換時各呼叫一次）。
+# 不做這件事的話，黃昏轉夜後海面還在反射黃昏的天空（兩個世界各過各的時間）。
+func _feed_env_uniforms() -> void:
+	var sun_v := Vector3(0.45, 0.62, 0.64)
+	var sun_c := Vector3(1.0, 0.95, 0.86)
+	var sun_e := 1.2
+	if _sun != null and is_instance_valid(_sun):
+		sun_v = -_sun.global_transform.basis.z
+		sun_c = Vector3(_sun.light_color.r, _sun.light_color.g, _sun.light_color.b)
+		sun_e = _sun.light_energy
+	var top_v = null
+	var hor_v = null
+	if _sky_mat != null:
+		var tc = _sky_mat.get_shader_parameter("top_color")
+		var hc = _sky_mat.get_shader_parameter("horizon_color")
+		if tc != null: top_v = Vector3(tc.r, tc.g, tc.b)
+		if hc != null: hor_v = Vector3(hc.r, hc.g, hc.b)
+	for m in _water_mats:
+		if not is_instance_valid(m):
+			continue
+		m.set_shader_parameter("sun_dir", sun_v)
+		m.set_shader_parameter("sun_col", sun_c)
+		m.set_shader_parameter("sun_energy", sun_e)
+		if top_v != null: m.set_shader_parameter("sky_top", top_v)
+		if hor_v != null: m.set_shader_parameter("sky_hor", hor_v)
+	for m2 in _tree_mats:
+		if is_instance_valid(m2):
+			m2.set_shader_parameter("sun_dir", sun_v)
 # 天色對能見度的影響（鐵律 0）：夜裡看不了那麼遠。
 # 先前 sky 只影響畫面色調，戰術上完全沒有差別——夜戰跟白天一樣好打。
 func _light_sight_mul() -> float:
@@ -4222,56 +4340,138 @@ func _light_sight_mul() -> float:
 		_: return 1.0
 
 func weather_sight_mul() -> float:
-	match weather:
-		"rain": return 0.72
-		"snow": return 0.62
-		_: return 1.0
+	# 查表（GDD/04 天候節）：視野/移動/命中/閃避同一張表，不再各寫各的數字
+	return float(GameData.weather_fx(weather).get("sight", 1.0))
 
 func weather_move_mul() -> float:
-	match weather:
-		"rain": return 1.12          # 泥濘
-		"snow": return 1.25
-		_: return 1.0
+	return float(GameData.weather_fx(weather).get("move", 1.0))
 
+# ---------- 回合時鐘與動態天氣（GDD/04 天候節；2026-07-28 使用者核定）----------
+var clock_hour := 10.0          # 戰場時刻（開戰時由該圖 sky 決定）
+var _hpt := 1.0                 # 每回合幾小時（story.json 每章可覆寫 "hpt"）
+var _wrng := RandomNumberGenerator.new()
+
+# HUD 右側的「時刻｜天氣」字串
+func _hud_wx() -> String:
+	return "%02d:00 %s" % [int(fposmod(clock_hour, 24.0)),
+			String(GameData.weather_fx(weather).get("zh", ""))]
+
+func _init_clock() -> void:
+	var sky: String = String(map_data.get("sky", "day"))
+	clock_hour = float(GameData.weather_sys.get("start_hour", {}).get(sky, 10))
+	var ch: Dictionary = GameData.story[chapter - 1] if chapter > 0 else {}
+	_hpt = float(ch.get("hpt", GameData.weather_sys.get("hpt_default", 1)))
+	_wrng.seed = 20260728 + chapter * 97      # 每章固定：測試可重現
+
+# 每回合結束時推進時間、擲天氣。時段跨界→換天色；天氣改變→重建粒子＋提示
+func _advance_time_weather() -> void:
+	if bool(map_data.get("weather_dyn", true)) == false:
+		return
+	var tod0: String = GameData.tod_for_hour(clock_hour)
+	clock_hour += _hpt
+	var tod1: String = GameData.tod_for_hour(clock_hour)
+	if tod1 != tod0:
+		_apply_sky(tod1)
+		_feed_env_uniforms()
+		ui.flash_msg("時刻 %02d:00——%s" % [int(fposmod(clock_hour, 24.0)),
+				{"dawn": "天亮了", "day": "日上三竿", "dusk": "暮色四合", "night": "夜幕降臨"}.get(tod1, "")],
+				Color(0.95, 0.88, 0.6))
+	if terrain == null:
+		return
+	var wn: String = GameData.weather_next(String(terrain.biome.get("key", "grass")), weather, _wrng)
+	if wn != weather:
+		_apply_weather_change(wn)
+
+func _apply_weather_change(wn: String) -> void:
+	if _weather_node != null and is_instance_valid(_weather_node):
+		_weather_node.queue_free()
+		_weather_node = null
+	# 霧散時把環境霧收回基準值（_build_weather 起霧時會抬高）
+	if _env != null and weather == "fog" and wn != "fog":
+		_env.fog_density = _fog_base
+	weather = wn
+	map_data["weather"] = wn        # _build_weather 讀 map_data；保持單一入口
+	_build_weather()
+	_refresh_visibility()           # 能見度變了，迷霧要重算
+	var zh: String = String(GameData.weather_fx(wn).get("zh", wn))
+	ui.flash_msg("天氣轉變：%s" % zh, Color(0.7, 0.85, 1.0))
+	print("[weather] 回合 %d %02d:00 → %s" % [turn, int(fposmod(clock_hour, 24.0)), zh])
+
+# 天候渲染（2026-07-28 使用者：「沙漠為什麼會下雨」）。
+# ⚠ 舊版是二分法：不是雪就畫雨——於是 sand（沙暴）與 fog（霧）都在下雨。
+#   資料層一直是對的（ch05=sand、ch09/10=fog），是渲染層把三種天氣畫成同一種。
+#   每種天氣照物理各給各的：雨＝直落水條、雪＝慢飄小片、沙＝橫飛沙塵、霧＝環境霧（不是粒子）。
 func _build_weather() -> void:
 	weather = String(map_data.get("weather", "clear"))
-	if weather == "clear" or world == null:
+	if world == null or weather == "clear":
 		return
-	var is_snow: bool = weather == "snow"
+	_init_clock()
+	if weather == "fog":
+		# 霧不是粒子——粒子做的霧只會像「下白點」。霧走環境層。
+		if _env != null:
+			_env.fog_enabled = true
+			_fog_base = _env.fog_density
+			_env.fog_density = maxf(_env.fog_density, 0.035)
+		return
 	var pm := ParticleProcessMaterial.new()
-	pm.direction = Vector3(0.12, -1, 0.08)
-	pm.spread = 3.0 if not is_snow else 22.0
-	pm.initial_velocity_min = 9.0 if not is_snow else 1.1
-	pm.initial_velocity_max = 13.0 if not is_snow else 2.0
-	pm.gravity = Vector3(0.6, -2.0 if not is_snow else -0.4, 0.4)
+	var qm := QuadMesh.new()
+	var mat := StandardMaterial3D.new()
+	var ps := GPUParticles3D.new()
+	match weather:
+		"snow":
+			pm.direction = Vector3(0.12, -1, 0.08)
+			pm.spread = 22.0
+			pm.initial_velocity_min = 1.1
+			pm.initial_velocity_max = 2.0
+			pm.gravity = Vector3(0.6, -0.4, 0.4)
+			qm.size = Vector2(0.06, 0.06)
+			mat.albedo_color = Color(1, 1, 1, 0.85)
+			ps.amount = 520
+			ps.lifetime = 5.0
+		"sand":
+			# 沙暴：沙是被風「吹著走」的，不是掉下來的——主速度水平、
+			# 微微下沉，色帶沙黃半透明；密度高、速度快才有「暴」的壓迫感
+			pm.direction = Vector3(-1.0, -0.10, 0.18)
+			pm.spread = 9.0
+			pm.initial_velocity_min = 15.0
+			pm.initial_velocity_max = 24.0
+			pm.gravity = Vector3(-2.5, -0.5, 0.4)
+			qm.size = Vector2(0.14, 0.02)          # 橫向速條（billboard 下讀成風痕）
+			mat.albedo_color = Color(0.80, 0.68, 0.46, 0.30)
+			ps.amount = 1200
+			ps.lifetime = 1.1
+		_:      # rain
+			pm.direction = Vector3(0.12, -1, 0.08)
+			pm.spread = 3.0
+			pm.initial_velocity_min = 9.0
+			pm.initial_velocity_max = 13.0
+			pm.gravity = Vector3(0.6, -2.0, 0.4)
+			qm.size = Vector2(0.02, 0.42)
+			mat.albedo_color = Color(0.72, 0.78, 0.85, 0.42)
+			ps.amount = 900
+			ps.lifetime = 1.4
 	pm.scale_min = 0.5
 	pm.scale_max = 1.0
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents = Vector3(22, 1, 22)
-	var qm := QuadMesh.new()
-	qm.size = Vector2(0.02, 0.42) if not is_snow else Vector2(0.06, 0.06)
-	var mat := StandardMaterial3D.new()
+	pm.emission_box_extents = Vector3(22, 1, 22) if weather != "sand" \
+			else Vector3(30, 8, 30)                # 沙暴是一整層，不是頭頂一片
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = (Color(0.72, 0.78, 0.85, 0.42) if not is_snow
-			else Color(1, 1, 1, 0.85))
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	qm.material = mat
-	var ps := GPUParticles3D.new()
-	ps.amount = 900 if not is_snow else 520
-	ps.lifetime = 1.4 if not is_snow else 5.0
 	ps.process_material = pm
 	ps.draw_pass_1 = qm
 	ps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	ps.visibility_aabb = AABB(Vector3(-30, -30, -30), Vector3(60, 60, 60))
+	ps.visibility_aabb = AABB(Vector3(-40, -30, -40), Vector3(80, 60, 80))
 	world.add_child(ps)
 	_weather_node = ps
 
 func _weather_follow() -> void:
 	if _weather_node == null or cam == null:
 		return
-	# 只在鏡頭上方 14m 的一塊區域降雨，跟著鏡頭移動
-	_weather_node.global_position = cam.global_position + Vector3(0, 14.0, 0)
+	# 雨雪從鏡頭上方 14m 落下；沙暴是貼著地表吹的一整層，掛在鏡頭高度附近
+	var wy: float = 3.0 if weather == "sand" else 14.0
+	_weather_node.global_position = cam.global_position + Vector3(0, wy, 0)
 
 # 火與煙（GDD/15 G3）。程式生成的粒子，不需要素材：
 # 火＝往上飄的橘色小片（重力為負、隨高度變暗），煙＝更大更慢更暗、飄得更高。
@@ -4570,6 +4770,9 @@ func _wrap(u: Dictionary):
 		w.slope = terrain.slope_at(px, py)
 		w.elev = terrain.height_at(px, py)
 		w.in_crater = terrain.in_crater(px, py)
+	var wfx: Dictionary = GameData.weather_fx(weather)
+	w.env_acc = float(wfx.get("acc", 1.0))
+	w.env_dodge = float(wfx.get("dodge", 1.0))
 	return w
 class _UW:
 	var weapon: Dictionary
@@ -4583,6 +4786,9 @@ class _UW:
 	var slope := 0.0
 	var elev := 0.0
 	var in_crater := false
+	# 天候（GDD/04 天候節）：當射手用 env_acc、當目標用 env_dodge（由 _wrap 填）
+	var env_acc := 1.0
+	var env_dodge := 1.0
 	func _init(u: Dictionary):
 		weapon = u["weapon"]
 		cls = u["cls"]
@@ -4637,7 +4843,7 @@ func _end_player_turn() -> void:
 	enemy_cp = _enemy_turn_cp()
 	_ai_state = ""
 	_enemy_t = 0.6
-	ui.update_hud(turn, "enemy", enemy_cp)
+	ui.update_hud(turn, "enemy", enemy_cp, _hud_wx())
 
 func _dist_to_nearest_foe(u) -> float:
 	var best := 1e9
@@ -4994,7 +5200,7 @@ func _enemy_step() -> void:
 			cam.set_follow(e["node"])
 		else:
 			cam.set_follow(null)
-		ui.update_hud(turn, "enemy", enemy_cp)
+		ui.update_hud(turn, "enemy", enemy_cp, _hud_wx())
 		# 玩家看不見的敵人加速行軍：整場敵方階段實測 21.5 秒太久，
 		# 但看得見的那段不能加速——那正是玩家要看、也是迎擊發生的地方。
 		e["node"].speed_mul = 1.0 if e["node"].visible else 3.0
@@ -5200,12 +5406,13 @@ func _end_enemy_turn() -> void:
 	if turn > 30:
 		_win(1 - player_side, "防守方撐過 30 回合")
 		return
+	_advance_time_weather()      # 回合時鐘：推進時刻、擲天氣（GDD/04 天候節）
 	st = St.CMD
 	cp = _turn_cp()
 	for u in units:
 		u["acted"] = false
 		u["orders"] = 0
-	ui.update_hud(turn, "player", cp)
+	ui.update_hud(turn, "player", cp, _hud_wx())
 
 # ---------- 警戒射擊（GDD/01 §3：本作靈魂，不可閹割） ----------
 # 敵單位「移動中」會被我方警戒單位自動射擊；傷害減半、不消耗 CP、不算該單位已行動。
@@ -5220,6 +5427,10 @@ const ALERT_DMG_K := 0.5
 
 # 單位「當下」的遊戲座標：wx/wy 在下令當下就跳到終點，迎擊要用畫面上真實的位置。
 func _live_px(u) -> Vector2:
+	# 節點可能在同一幀內被擊殺釋放（die → queue_free），但 arrived 等訊號還在路上。
+	# 死者回傳最後已知座標——比在每個呼叫端各加一層 is_instance_valid 可靠。
+	if not is_instance_valid(u.get("node")):
+		return Vector2(float(u.get("wx", 0.0)), float(u.get("wy", 0.0)))
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
 	var p: Vector3 = u["node"].global_position
@@ -5264,6 +5475,16 @@ func _pos_indoors_loose(p: Vector3) -> bool:
 			return true
 	return false
 
+# 視線是否越過障礙頂（鐵律 0②：遮蔽看幾何不看標籤）。
+# ⚠ _wall_ray 原本是純 2D——1.0m 的鐵絲網把 1.6m 高的視線「擋住」，
+#   鏡頭被一道跨得過去的鐵絲網一路往回拉（ch15 壓測 [walkcam] 抓到的兇手）。
+#   視線在障礙頂之上就不算擋。h≥6（建築實牆/樹冠）直接當擋，省一次地形取樣。
+func _ray_over(a: Vector3, b: Vector3, t: float, h: float, hx: float, hy: float) -> bool:
+	if h >= 6.0:
+		return false
+	var gy: float = terrain.height_at(hx, hy) if terrain != null else 0.0
+	return a.y + (b.y - a.y) * t > gy + h + 0.08
+
 func _wall_ray(a: Vector3, b: Vector3) -> float:
 	if _buildings.is_empty() and _blockers.is_empty():
 		return 1.0
@@ -5284,7 +5505,9 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 			var t: float = (p3 - p1).cross(d2) / den
 			var u: float = (p3 - p1).cross(d1) / den
 			if t > 0.0 and t < best and u > 0.0 and u < 1.0:
-				best = t
+				var hp := p1 + d1 * t
+				if not _ray_over(a, b, t, float(w.get("h", 99.0)), hp.x, hp.y):
+					best = t
 	# 樹與粗障礙也要擋鏡頭（半徑 0.35m 以上：樹幹/樹叢/龍牙）。
 	# 電線桿 0.32m、柵欄 0.14m 不列入——那麼細的東西一直把鏡頭往回拉很煩，
 	# 而且它們本來就遮不住什麼。
@@ -5307,7 +5530,9 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 				# ⚠ 這個迴圈裡的 a/b 是 Vector3（世界座標）；線段求交要用換算好的 px 座標 p1/p2
 				var ts: float = _seg_param(p1, p2, bk["a"], bk["b"])
 				if ts > 0.0 and ts < best:
-					best = ts
+					var hps := p1 + d1 * ts
+					if not _ray_over(a, b, ts, float(bk.get("h", 0.0)), hps.x, hps.y):
+						best = ts
 				continue
 			# ⚠ 深水圍欄是**看不見的**（h=0，只擋人不擋彈也不該擋鏡頭）。
 			#   2026-07-28 加了 52 根樁之後，鏡頭穿牆從 4 次跳到 19 次——
@@ -5319,7 +5544,9 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 				# 長條形障礙（車輛殘骸）：鏡頭一樣不能鑽進去
 				var tb: float = _blk_ray_t(bk, p1, p2)
 				if tb > 0.0 and tb < best:
-					best = tb
+					var hpo := p1 + d1 * tb
+					if not _ray_over(a, b, tb, float(bk.get("h", 2.0)), hpo.x, hpo.y):
+						best = tb
 				continue
 			# ⚠ 0.35m 會把樹幹算進來（椰子/松/闊葉的幹是 0.21~0.41m）。
 			#   走查實拍：鏡頭被一根椰子樹幹卡住，畫面右半邊全是樹皮。
@@ -5335,8 +5562,77 @@ func _wall_ray(a: Vector3, b: Vector3) -> float:
 			var half: float = sqrt(rr * rr - perp * perp) / seg_len
 			var t_enter: float = t_close - half
 			if t_enter > 0.0 and t_enter < best:
-				best = t_enter
+				var hpc := p1 + d1 * t_enter
+				if not _ray_over(a, b, t_enter, float(bk.get("h", 9.0)), hpc.x, hpc.y):
+					best = t_enter
 	return best
+
+# 診斷版：跟 _wall_ray 同一套過濾，但回傳「最先擋住的是什麼」的描述。
+# 只給測試臺印報告用——鏡頭穿牆抓到卻不知道兇手是誰，就只能一輪一輪猜（ch02 教訓）。
+func _wall_ray_why(a: Vector3, b: Vector3) -> String:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p1 := Vector2(a.x / WORLD_SCALE + mw * 0.5, a.z / WORLD_SCALE + mh * 0.5)
+	var p2 := Vector2(b.x / WORLD_SCALE + mw * 0.5, b.z / WORLD_SCALE + mh * 0.5)
+	var best := 1.0
+	var why := "（找不到＝可能是 building 牆之外的東西）"
+	var d1: Vector2 = p2 - p1
+	for bd in _buildings:
+		for w in bd.walls:
+			var p3: Vector2 = w["a"]
+			var d2: Vector2 = (w["b"] as Vector2) - p3
+			var den: float = d1.cross(d2)
+			if absf(den) < 0.00001:
+				continue
+			var t: float = (p3 - p1).cross(d2) / den
+			var u: float = (p3 - p1).cross(d1) / den
+			if t > 0.0 and t < best and u > 0.0 and u < 1.0 \
+					and not _ray_over(a, b, t, float(w.get("h", 99.0)),
+					(p1 + d1 * t).x, (p1 + d1 * t).y):
+				best = t
+				why = "建築牆 %s" % [str(bd.rect)]
+	var l2: float = d1.length_squared()
+	if l2 > 0.0001:
+		var seg_len: float = sqrt(l2)
+		for bk in _blockers:
+			var rr: float = float(bk["r"])
+			if bk["t"] == "seg":
+				if rr * WORLD_SCALE < 0.18 or float(bk.get("h", 0.0)) < 1.0:
+					continue
+				var ts: float = _seg_param(p1, p2, bk["a"], bk["b"])
+				if ts > 0.0 and ts < best \
+						and not _ray_over(a, b, ts, float(bk.get("h", 0.0)),
+						(p1 + d1 * ts).x, (p1 + d1 * ts).y):
+					best = ts
+					why = "線段障礙 k=%s r=%.2fm h=%.2fm" % [str(bk.get("k", "?")),
+							rr * WORLD_SCALE, float(bk.get("h", 0.0))]
+				continue
+			if String(bk.get("k", "")) == "deepwater":
+				continue
+			if bk["t"] == "obb":
+				var tb: float = _blk_ray_t(bk, p1, p2)
+				if tb > 0.0 and tb < best \
+						and not _ray_over(a, b, tb, float(bk.get("h", 2.0)),
+						(p1 + d1 * tb).x, (p1 + d1 * tb).y):
+					best = tb
+					why = "OBB k=%s" % str(bk.get("k", "車骸"))
+				continue
+			if bk["t"] != "cir" or rr * WORLD_SCALE < 0.55:
+				continue
+			var c: Vector2 = bk["c"]
+			var t_close: float = (c - p1).dot(d1) / l2
+			var perp: float = (p1 + d1 * t_close).distance_to(c)
+			if perp >= rr:
+				continue
+			var half: float = sqrt(rr * rr - perp * perp) / seg_len
+			var t_enter: float = t_close - half
+			if t_enter > 0.0 and t_enter < best \
+					and not _ray_over(a, b, t_enter, float(bk.get("h", 9.0)),
+					(p1 + d1 * t_enter).x, (p1 + d1 * t_enter).y):
+				best = t_enter
+				why = "圓障礙 k=%s r=%.2fm h=%.2fm c=(%.0f,%.0f)" % [str(bk.get("k", "樹/石?")),
+						rr * WORLD_SCALE, float(bk.get("h", 0.0)), c.x, c.y]
+	return why
 
 # 彈道是否通暢（GDD/01 §3、GDD/14 §2）。
 # ⚠ 為什麼不能沿用 _los_clear：那支只掃建築牆，於是沙包、樹、護欄、拒馬、磚牆殘段、
@@ -6020,6 +6316,9 @@ func _teardown_world() -> void:
 			u["node"].queue_free()
 	units = []
 	selected = null
+	_water_mats = []
+	_tree_mats = []
+	_weather_node = null
 	if world and is_instance_valid(world):
 		world.queue_free()
 	world = null
@@ -6210,6 +6509,7 @@ func _build_ground() -> void:
 		_add_fire(_to3d(wp.x, wp.y) + Vector3(0, 0.5, 0), 0.7)
 	_destructibles = fort.destructibles
 	_blockers = props.blockers + fort.blockers + _water_blk + _bld_blk
+	_pole_spots = props.pole_spots
 	_low_blk = []
 	for bk0 in _blockers:
 		if float(bk0.get("h", 1.2)) <= STEP_UP and String(bk0.get("k", "")) != "deepwater":
@@ -6367,18 +6667,20 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 	# ⚠ 5.5 在 48×30m 的舊圖上剛好，地圖放大到 70×50m 之後變成滿地鵝卵蛋（實拍）。
 	#   巨石是「點綴」不是地被——密度砍到 2.2，並且下面加上顏色與大小的變化。
 	var want: int = int(gwp * ghp / 52000.0 * rmul * 2.2)
-	var sm := SphereMesh.new()
-	sm.radial_segments = 7
-	sm.rings = 4
-	sm.radius = 1.0
-	sm.height = 1.5
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
-	mat.vertex_color_use_as_albedo = true      # per-instance 顏色要吃得到
-	mat.roughness = 0.97
-	sm.material = mat
-	var xfs: Array = []
-	var cols: Array = []
+	# ★2026-07-29（使用者：「石頭還是太假」）：共用 SphereMesh（平滑法線）＝一窩光滑
+	#   的蛋。改用 Trees.build_rock_protos 的碎面原型：稜角、逐面色差、頂白底髒都烘在
+	#   頂點色裡；per-instance 色偏照舊由 MultiMesh instance color 乘上去。
+	var protos: Array = TREES.build_rock_protos()
+	var rmat := StandardMaterial3D.new()
+	rmat.albedo_color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
+	rmat.vertex_color_use_as_albedo = true
+	rmat.roughness = 0.97
+	var xfs_by: Array = []       # 每個原型自己一份 [Transform3D]
+	var cols_by: Array = []
+	for _p in protos.size():
+		xfs_by.append([])
+		cols_by.append([])
+	var placed_pos: Array = []   # 最小間距檢查用（原本借 xfs，分流後要自己存）
 	var placed := 0
 	var guard := 0
 	while placed < want and guard < want * 25:
@@ -6394,10 +6696,10 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 		if bad or (terrain != null and (terrain.in_trench(px, py) or terrain.in_water(px, py))):
 			continue
 		# 最小間距：巨石成堆貼在一起就是「一窩蛋」，散開才像地質
+		var mypos := Vector2((px - gwp * 0.5) * WORLD_SCALE, (py - ghp * 0.5) * WORLD_SCALE)
 		var too_close := false
-		for ex in xfs:
-			if Vector2((ex as Transform3D).origin.x, (ex as Transform3D).origin.z).distance_to(
-					Vector2((px - gwp * 0.5) * WORLD_SCALE, (py - ghp * 0.5) * WORLD_SCALE)) < 3.5:
+		for ex in placed_pos:
+			if (ex as Vector2).distance_to(mypos) < 3.5:
 				too_close = true
 				break
 		if too_close:
@@ -6412,37 +6714,43 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 				* Basis(Vector3(1, 0, 0), rng.randf_range(-0.25, 0.25))).scaled(
 				Vector3(sc * rx, sc * ry, sc))
 		# 半埋：底部沉進地面 1/3，石頭才是「長在地裡」不是「擺在地上」
-		xfs.append(Transform3D(b, Vector3((px - gwp * 0.5) * WORLD_SCALE,
-				ty + sc * 0.28, (py - ghp * 0.5) * WORLD_SCALE)))
+		var pi2: int = rng.randi() % protos.size()
+		xfs_by[pi2].append(Transform3D(b, Vector3(mypos.x, ty + sc * 0.28, mypos.y)))
+		placed_pos.append(mypos)
 		# ★2026-07-27：門檻原本是 sc > 0.7，於是**半徑近 1m 的石頭完全沒有碰撞**——
 		#   人直接走過去。石頭是石頭，不管大小都不能穿過（鐵律 0①）。
 		#   矮的（≤ STEP_UP）由 _ground_height 給頂面支撐＝踩上去，不是繞過去。
-		# 幾何：SphereMesh 半徑 1.0、高 1.5，再乘上面的縮放；埋進地裡 sc*0.28 之上。
-		var rock_r: float = sc * maxf(rx, 1.0)                    # 水平半徑（公尺）
-		var rock_h: float = sc * (0.28 + 0.75 * ry)               # 露出地面的高度
+		# 幾何：原型岩半徑 ~1.0、半高 0.62（碎面位移 ±30%），再乘縮放；埋 sc*0.28。
+		var rock_r: float = sc * maxf(rx, 1.0) * 1.15             # 水平半徑（含位移上緣）
+		var rock_h: float = sc * (0.28 + 0.62 * ry)               # 露出地面的高度
 		if sc > 0.30:
 			_blockers.append({"t": "cir", "c": tp, "r": rock_r / WORLD_SCALE, "h": rock_h})
 		# 每顆石頭色偏不同：一整片同色的粉灰色圓球是本專案被指正過的「一片純色」
-		cols.append(Color(rng.randf_range(0.72, 1.16), rng.randf_range(0.74, 1.12),
+		cols_by[pi2].append(Color(rng.randf_range(0.72, 1.16), rng.randf_range(0.74, 1.12),
 				rng.randf_range(0.70, 1.10)))
 		if rock_h > STEP_UP:
 			_covers.append({"wx": px, "wy": py, "r": rock_r * 1.05 / WORLD_SCALE,
 					"val": 0.5, "type": "sandbag"})
 		placed += 1
-	if xfs.is_empty():
+	if placed_pos.is_empty():
 		return
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.mesh = sm
-	mm.instance_count = xfs.size()
-	for k in xfs.size():
-		mm.set_instance_transform(k, xfs[k])
-		mm.set_instance_color(k, cols[k])
-	var mmi := MultiMeshInstance3D.new()
-	mmi.name = "Rocks"
-	mmi.multimesh = mm
-	world.add_child(mmi)
+	for pidx in protos.size():
+		var lst: Array = xfs_by[pidx]
+		if lst.is_empty():
+			continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = protos[pidx]
+		mm.instance_count = lst.size()
+		for k in lst.size():
+			mm.set_instance_transform(k, lst[k])
+			mm.set_instance_color(k, cols_by[pidx][k])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Rocks%d" % pidx
+		mmi.multimesh = mm
+		mmi.material_override = rmat
+		world.add_child(mmi)
 
 # 水面（海灘/海峽/港口）：一片起伏的半透明水色平面蓋在水域上。
 # 深水對步兵不可通行（鐵律 0：人不會走進兩公尺深的海裡打仗），登記成線段圍欄。
@@ -6505,6 +6813,7 @@ func _build_water() -> void:
 			wmat.set_shader_parameter("sun_col",
 					Vector3(_sun.light_color.r, _sun.light_color.g, _sun.light_color.b))
 			wmat.set_shader_parameter("sun_energy", _sun.light_energy)
+		_water_mats.append(wmat)
 		if _sky_mat != null:
 			var st_c = _sky_mat.get_shader_parameter("top_color")
 			var sh_c = _sky_mat.get_shader_parameter("horizon_color")
@@ -6642,6 +6951,7 @@ func _build_far_ocean() -> void:
 		wm.set_shader_parameter("sun_col",
 				Vector3(_sun.light_color.r, _sun.light_color.g, _sun.light_color.b))
 		wm.set_shader_parameter("sun_energy", _sun.light_energy)
+	_water_mats.append(wm)
 	if _sky_mat != null:
 		var st_c2 = _sky_mat.get_shader_parameter("top_color")
 		var sh_c2 = _sky_mat.get_shader_parameter("horizon_color")
@@ -7107,6 +7417,7 @@ func _scatter_trees(mw: float, mh: float) -> void:
 	tmat.shader = tsh
 	if _sun != null and is_instance_valid(_sun):
 		tmat.set_shader_parameter("sun_dir", -_sun.global_transform.basis.z)
+	_tree_mats.append(tmat)
 	for mesh_key2 in xf_by_mesh.keys():
 		var list: Array = xf_by_mesh[mesh_key2]
 		var mm := MultiMesh.new()

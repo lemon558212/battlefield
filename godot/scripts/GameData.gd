@@ -13,6 +13,7 @@ var difficulty: Dictionary = {}   # 章節難度曲線（data/difficulty.json）
 var terrain_mobility: Dictionary = {}
 var terrain_combat: Dictionary = {}   # 地形戰鬥修正（GDD/01 §4b）
 var growth: Dictionary = {}           # 養成系統數值表（GDD/16）
+var weather_sys: Dictionary = {}      # 動態天候系統（GDD/04 天候節）
 var char_look: Dictionary = {}
 
 func _ready() -> void:
@@ -26,6 +27,7 @@ func _ready() -> void:
 	terrain_mobility = _load_json("res://data/terrain_mobility.json")
 	terrain_combat = _load_json("res://data/terrain_combat.json")
 	growth = _load_json("res://data/growth.json")
+	weather_sys = _load_json("res://data/weather_system.json")
 	char_look = _load_json("res://data/char_look.json")
 	var st = _load_json_any("res://data/story.json")
 	if st is Array:
@@ -128,6 +130,8 @@ func hit_chance(shooter, target, dist_px: float, part := "body") -> float:
 			c *= float(tt.get("wade_exposed", 1.12))   # 水拖住腿＝閃不掉
 		if target.in_crater:
 			c *= float(tt.get("crater_profile", 0.85)) # 輪廓低於地平線
+	# 天候（GDD/04 天候節）：雨霧沙暴壓命中、抬目標閃避——載具乘員一樣看不清，全體吃
+	c *= float(shooter.env_acc) * float(target.env_dodge)
 	return clamp(c, 0.0, 0.99)
 
 # GDD/01 §4 剋制兩條（與 js/combat.js 同一套判斷，不另設倍率表）：
@@ -151,6 +155,36 @@ func damage(shooter, target, part := "body") -> int:
 	if not Unit.is_vehicle_cls(target.cls) and target.wade >= float(td.get("wade_depth", 0.75)):
 		dmg *= float(td.get("wade_absorb", 0.85))
 	return int(max(1, round(dmg)))
+
+# ---------- 動態天候（GDD/04 天候節）：純函式放這裡讓 WeatherProbe 能直接斷言 ----------
+func weather_fx(w: String) -> Dictionary:
+	return weather_sys.get("effects", {}).get(w, {})
+
+# 時刻 → 天色時段。bands 沒涵蓋的（20~05）＝夜
+func tod_for_hour(h: float) -> String:
+	var hh: float = fposmod(h, 24.0)
+	for band in weather_sys.get("tod_bands", []):
+		if hh >= float(band[0]) and hh < float(band[1]):
+			return String(band[2])
+	return "night"
+
+# 天氣轉移：有慣性（stickiness 機率維持原狀），否則依該 biome 的池加權抽。
+# 池就是合理性的邊界——沙漠池裡沒有 rain，規則層面保證沙漠永不下雨。
+func weather_next(biome_key: String, cur: String, rng: RandomNumberGenerator) -> String:
+	var pool: Dictionary = weather_sys.get("pools", {}).get(biome_key, {})
+	if pool.is_empty():
+		return cur
+	if pool.has(cur) and rng.randf() < float(weather_sys.get("stickiness", 0.6)):
+		return cur
+	var total := 0.0
+	for k in pool:
+		total += float(pool[k])
+	var r: float = rng.randf() * maxf(total, 0.0001)
+	for k in pool:
+		r -= float(pool[k])
+		if r <= 0.0:
+			return String(k)
+	return cur
 
 # ---------- 養成系統（GDD/16）：純公式放這裡讓 GrowthProbe 能直接斷言 ----------
 # 升到下一級的花費：80 + 60×目前等級
