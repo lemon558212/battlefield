@@ -10,7 +10,10 @@ static func _arg(key: String, dflt: String) -> String:
 			return a.substr(key.length() + 1)
 	return dflt
 
-var MODEL := "res://assets/models/chars/%s.fbx" % _arg("model", "hr_m_Soldier")
+# 帶副檔名就照用（tripo 英雄是 .glb），沒帶維持舊慣例補 .fbx
+var MODEL := "res://assets/models/chars/%s" % (
+		_arg("model", "hr_m_Soldier") if _arg("model", "hr_m_Soldier").contains(".")
+		else _arg("model", "hr_m_Soldier") + ".fbx")
 var CLS := _arg("cls", "rifleman")
 
 var _cam: Camera3D

@@ -7,8 +7,9 @@
   "lower": "#c9c7c0",
   "accent": "#8d8f96",
   "base": "res://assets/models/chars/sniper-hero.glb",
-  "head": "boonie",
-  "pack": "slim",
+  "own_look": true,
+  "head": "none",
+  "pack": "none",
   "build": [
    0.97,
    1.02
@@ -20,9 +21,10 @@
   "coat": "#3b3a34",
   "lower": "#404240",
   "accent": "#6b6f5e",
-  "base": "res://assets/models/chars/hr_m_Soldier.fbx",
-  "head": "cap",
-  "pack": "slim",
+  "base": "res://assets/models/chars/rifleman-hero.glb",
+  "own_look": true,
+  "head": "none",
+  "pack": "none",
   "build": [
    1.0,
    1.0
@@ -48,9 +50,10 @@
   "coat": "#313027",
   "lower": "#3d3b34",
   "accent": "#7a6a4f",
-  "base": "res://assets/models/chars/hr_m_Adventurer.fbx",
-  "head": "helmet_net",
-  "pack": "ammo",
+  "base": "res://assets/models/chars/mg-hero.glb",
+  "own_look": true,
+  "head": "none",
+  "pack": "none",
   "build": [
    1.08,
    1.0

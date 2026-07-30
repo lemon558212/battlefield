@@ -245,6 +245,11 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 		u._model = model
 		u.add_child(model)
 		u._fit_model(model)
+		# 立繪本人模型（own_look）：骨長啟發式會把人拉到 1.9m+，違反真實尺度。
+		# 這類模型是單一蒙皮網格、AABB 可信，直接把網格身高歸一化到 1.75m
+		# （體型差異由 char_look.build 控制，不在這裡疊）。
+		if is_player and bool(GameData.char_look.get(p_cls, {}).get("own_look", false)):
+			u._normalize_height(model, 1.75)
 		model.rotation.y = _forward_fix(model)   # ★正面軸對齊：讓模型正面朝 Unit 的 +Z
 		if is_player:
 			u._apply_look(model, p_cls)                    # 依立繪配色換裝（2026-07-24）
@@ -377,6 +382,20 @@ func _fit_model(model: Node) -> void:
 	model.position.y = -base_y * k
 	_model_base_y = model.position.y
 
+# 把模型實際網格身高歸一化到 target_h（_fit_model 之後再修一次）
+func _normalize_height(model: Node, target_h: float) -> void:
+	var box := _merged_aabb(model)
+	# _merged_aabb 量的是模型局部座標，還要乘上 _fit_model 已套的縮放才是實際身高
+	var mdl := model as Node3D
+	var h: float = box.size.y * mdl.scale.y
+	if h < 0.5 or h > 5.0:
+		push_warning("Unit._normalize_height 量到異常身高 %.2f，跳過" % h)
+		return
+	var k: float = target_h / h
+	mdl.scale *= k
+	mdl.position.y = -(box.position.y) * mdl.scale.y
+	_model_base_y = mdl.position.y
+
 # 遞迴累積父階變換算 AABB。
 # ⚠ 舊版只用 mi.transform（沒累積父階），巢狀模型會被量得極小 → _fit_model 縮放暴衝
 #   → 單位變成一個橫跨畫面的巨人（使用者看到的「場景黑色邊/灰色巨牆」真因，2026-07-24）。
@@ -405,7 +424,35 @@ func _merged_aabb(node: Node) -> AABB:
 # 模型材質具名(Hair/Skin/Eye/Eyebrows/各衣著色)，依名稱分部位套色；皮膚與眼睛不動。
 const _KEEP := ["skin", "eye", "eyebrow", "moustache", "teeth", "mouth", "visor"]
 func _apply_look(model: Node, p_cls: String) -> void:
-	_apply_palette(model, GameData.char_look.get(p_cls, {}))
+	var look: Dictionary = GameData.char_look.get(p_cls, {})
+	# 立繪本人（tripo）模型自帶 2K 烘焙貼圖＝角色本來的樣子，絕不可再拿配色乘上去
+	# （暗色外套色 × 貼圖＝整身變暗）。own_look 走材質修正分支，旗標在 char_look.json。
+	if bool(look.get("own_look", false)):
+		_fix_hero_mats(model)
+		return
+	_apply_palette(model, look)
+
+# tripo glb 的 metallicFactor 缺省＝glTF 預設 1.0（全金屬）：diffuse 全黑、albedo 變
+# 鏡面 F0，就是試點實拍「太暗太油」的物理成因。金屬度歸零、粗糙度拉滿，
+# 貼圖層次由 ORM 綠通道（roughness）保留。
+func _fix_hero_mats(model: Node) -> void:
+	var fixed := 0
+	for m in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		var cnt: int = maxi(mi.get_surface_override_material_count(), 1)
+		for si in cnt:
+			var base := mi.get_active_material(si)
+			if not (base is StandardMaterial3D):
+				continue
+			var dup: StandardMaterial3D = (base as StandardMaterial3D).duplicate()
+			dup.metallic = 0.0
+			dup.roughness = 1.0
+			dup.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			_add_rim(dup)
+			mi.set_surface_override_material(si, dup)
+			fixed += 1
+	if fixed == 0:
+		print("[look] FAIL %s 本人模型沒有任何材質被修正（材質型別不符？）" % cls)
 
 # 依調色盤重刷全身材質（我方吃 char_look 各角色色；敵軍吃 enemy_look 統一制服色）
 func _apply_palette(model: Node, look: Dictionary) -> void:
@@ -468,7 +515,7 @@ func _apply_palette(model: Node, look: Dictionary) -> void:
 # ---------- 裝具與體型（GDD/06 外觀 v2）----------
 const GEAR := preload("res://scripts/Gear.gd")
 const HEAD_BONES := ["Head", "head"]
-const SPINE_BONES := ["Spine2", "Chest", "Spine1", "Spine", "spine_02"]
+const SPINE_BONES := ["Spine2", "Chest", "Spine1", "Spine", "spine_02", "Spine02", "Spine01"]
 var _gear_fix: Array = []      # [{mount, node}]：進場景樹後做縮放/朝向補償（同槍械的坑）
 
 func _attach_gear(model: Node, p_cls: String, is_player: bool) -> void:
