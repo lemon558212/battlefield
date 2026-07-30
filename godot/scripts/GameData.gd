@@ -15,6 +15,7 @@ var terrain_combat: Dictionary = {}   # 地形戰鬥修正（GDD/01 §4b）
 var growth: Dictionary = {}           # 養成系統數值表（GDD/16）
 var weather_sys: Dictionary = {}      # 動態天候系統（GDD/04 天候節）
 var char_look: Dictionary = {}
+var enemy_look: Dictionary = {}       # 敵軍外觀（GDD/06 外觀 v2：敵我基底分池）
 
 func _ready() -> void:
 	nations = _load_json("res://data/nations.json")
@@ -29,6 +30,7 @@ func _ready() -> void:
 	growth = _load_json("res://data/growth.json")
 	weather_sys = _load_json("res://data/weather_system.json")
 	char_look = _load_json("res://data/char_look.json")
+	enemy_look = _load_json("res://data/enemy_look.json")
 	var st = _load_json_any("res://data/story.json")
 	if st is Array:
 		story = st

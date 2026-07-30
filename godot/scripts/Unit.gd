@@ -249,7 +249,14 @@ static func spawn(model_path: String, p_cls: String, p_side: int, is_player: boo
 		if is_player:
 			u._apply_look(model, p_cls)                    # 依立繪配色換裝（2026-07-24）
 		else:
-			u._tint(model, Color(0.9, 0.2, 0.16), 0.4)     # 敵軍紅疊色一眼可辨
+			# 外觀 v2：敵軍穿制式冷灰綠制服（enemy_look.palette），再壓淡紅疊色保識別。
+			# 舊的 40% 紅疊色把敵軍畫成一隊紅人——真軍隊沒有紅制服（合理化鐵則）。
+			# 外觀 v2：敵軍冷灰綠制服＋紅臂章識別（_attach_gear 加掛）。
+			# ⚠ 不可再全身紅疊色：暗綠制服 × 16% 紅 × 兩次可讀性提亮＝全部布料
+			#   收斂成肉膚色，整排敵軍看起來裸體（lookshots 實測 albedo 對上算式）。
+			u._apply_palette(model, GameData.enemy_look.get("palette", {}))
+		u._attach_gear(model, p_cls, is_player)            # 頭具/背具（外觀 v2）
+		u._apply_build(model, p_cls, is_player)            # 體型微調
 		var aps := model.find_children("*", "AnimationPlayer", true, false)
 		# 注意：FBX 匯入可能產生「空的 AnimationPlayer」，那也算沒有動畫，
 		# 否則會走進原生動畫分支卻一支都播不出來，角色停在 rest 姿勢。
@@ -398,13 +405,17 @@ func _merged_aabb(node: Node) -> AABB:
 # 模型材質具名(Hair/Skin/Eye/Eyebrows/各衣著色)，依名稱分部位套色；皮膚與眼睛不動。
 const _KEEP := ["skin", "eye", "eyebrow", "moustache", "teeth", "mouth", "visor"]
 func _apply_look(model: Node, p_cls: String) -> void:
-	var look: Dictionary = GameData.char_look.get(p_cls, {})
+	_apply_palette(model, GameData.char_look.get(p_cls, {}))
+
+# 依調色盤重刷全身材質（我方吃 char_look 各角色色；敵軍吃 enemy_look 統一制服色）
+func _apply_palette(model: Node, look: Dictionary) -> void:
 	if look.is_empty():
 		return
 	var c_hair := Color(look.get("hair", "#333333"))
 	var c_coat := Color(look.get("coat", "#3b3b3b"))
 	var c_low := Color(look.get("lower", "#4a4a4a"))
 	var c_acc := Color(look.get("accent", "#7a7a7a"))
+	var recolored := 0
 	for m in model.find_children("*", "MeshInstance3D", true, false):
 		var mi := m as MeshInstance3D
 		var cnt: int = maxi(mi.get_surface_override_material_count(), 1)
@@ -448,6 +459,90 @@ func _apply_look(model: Node, p_cls: String) -> void:
 			dup.albedo_color = _readable(src.lerp(toned, 0.92))
 			_add_rim(dup)
 			mi.set_surface_override_material(si, dup)
+			recolored += 1
+	# 換色一件都沒成功要大聲喊：新基底的材質若不是 StandardMaterial3D，
+	# 整套配色會靜默失效——角色穿著原模型預設色出場（lookshots 抓到整身紅的艾拉）
+	if recolored == 0:
+		print("[look] FAIL %s 沒有任何材質被換色（材質型別不符？）" % cls)
+
+# ---------- 裝具與體型（GDD/06 外觀 v2）----------
+const GEAR := preload("res://scripts/Gear.gd")
+const HEAD_BONES := ["Head", "head"]
+const SPINE_BONES := ["Spine2", "Chest", "Spine1", "Spine", "spine_02"]
+var _gear_fix: Array = []      # [{mount, node}]：進場景樹後做縮放/朝向補償（同槍械的坑）
+
+func _attach_gear(model: Node, p_cls: String, is_player: bool) -> void:
+	var look: Dictionary = GameData.char_look.get(p_cls, {}) if is_player \
+			else GameData.enemy_look.get(p_cls, {})
+	if look.is_empty():
+		return
+	var pal: Dictionary = look if is_player else GameData.enemy_look.get("palette", {})
+	var main_c := Color(pal.get("coat", "#4a4a46"))
+	var acc_c := Color(pal.get("accent", "#6a6a60"))
+	var sks := model.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk := sks[0] as Skeleton3D
+	var specs: Array = [[String(look.get("head", "")), HEAD_BONES, Vector3(0, 0.02, 0)],
+			[String(look.get("pack", "")), SPINE_BONES, Vector3(0, 0.0, 0)]]
+	if not is_player:
+		# 敵軍識別＝左臂紅臂章（真實軍隊的敵我識別做法；全身紅疊色已證實會把
+		# 暗色制服洗成肉色）
+		specs.append(["armband", ["L_Upperarm", "UpperArm.L", "Shoulder.L"], Vector3.ZERO])
+	for spec in specs:
+		var item: String = spec[0]
+		if item == "" or item == "none":
+			continue
+		var bone := ""
+		for b in spec[1]:
+			if sk.find_bone(b) >= 0:
+				bone = b
+				break
+		if bone == "":
+			print("[gear] FAIL %s 找不到掛骨 %s" % [item, str(spec[1])])
+			continue
+		var node := GEAR.build(item, main_c, acc_c)
+		if node == null:
+			continue
+		var mount := BoneAttachment3D.new()
+		mount.name = "GearMount_" + item
+		mount.bone_name = bone
+		sk.add_child(mount)
+		mount.add_child(node)
+		_gear_fix.append({"m": mount, "n": node, "off": spec[2]})
+
+# 裝具縮放/朝向補償：BoneAttachment 世界縮放非 1（此類模型 100 倍，同槍械的坑）。
+# 一次性：頭盔跟著頭骨轉，之後不再重算。朝向對齊 Unit 本體（+Z＝臉的朝向）。
+func _fix_gear() -> void:
+	if _gear_fix.is_empty() or not is_inside_tree():
+		return
+	var done: Array = []
+	for g in _gear_fix:
+		var mount: BoneAttachment3D = g["m"]
+		if not mount.is_inside_tree():
+			continue
+		var node: Node3D = g["n"]
+		# 跟 _fix_gun_scale 同一套公式（那套已在槍上驗證過）：
+		# bone 基底相對 Unit 的朝向取逆 × 期望朝向，再除掛點世界縮放。
+		var wrist := (global_transform.affine_inverse() * mount.global_transform).basis.orthonormalized()
+		var ws: Vector3 = mount.global_transform.basis.get_scale()
+		var s: float = maxf((absf(ws.x) + absf(ws.y) + absf(ws.z)) / 3.0, 0.0001)
+		var b := (wrist.inverse() * Basis.IDENTITY).scaled(Vector3.ONE * (1.0 / s))
+		node.transform = Transform3D(b, b * (g["off"] as Vector3))
+		done.append(g)
+	for g2 in done:
+		_gear_fix.erase(g2)
+
+# 體型微調（build=[寬,高]）：套在 _fit_model 之後的模型節點上，±8% 內
+func _apply_build(model: Node, p_cls: String, is_player: bool) -> void:
+	var look: Dictionary = GameData.char_look.get(p_cls, {}) if is_player \
+			else GameData.enemy_look.get(p_cls, {})
+	var bld = look.get("build", null)
+	if bld is Array and bld.size() >= 2:
+		var w: float = clampf(float(bld[0]), 0.92, 1.08)
+		var h: float = clampf(float(bld[1]), 0.94, 1.06)
+		if model is Node3D:
+			(model as Node3D).scale *= Vector3(w, h, w)
 
 # 角色的可讀性下限（2026-07-27）：黃昏側逆光下，深色戰術裝的 albedo 只有 0.06~0.10，
 # 一旦人站在建築陰影裡就變成一片純黑剪影——使用者看到的「沒有手臂」有一半是這個，
@@ -870,12 +965,10 @@ const VEH_HW := 1.75
 func _support_height() -> float:
 	var gy: float = float(ground_sampler.call(global_position))
 	if not _is_vehicle:
-		# 腳掌有面積（鐵律 0⑤）：站在護壁板/坑緣時，身體中心可能已越過邊緣，
-		# 但腳尖還踩著支撐。單點取樣會回報「腳下是溝底」→ 人浮空 0.62m
-		# （ch03 走查在壕溝護壁頂穩定重現）。±0.18m＝一個腳掌的跨距，取最高。
-		for off in [Vector3(0.18, 0, 0), Vector3(-0.18, 0, 0),
-				Vector3(0, 0, 0.18), Vector3(0, 0, -0.18)]:
-			gy = maxf(gy, float(ground_sampler.call(global_position + off)))
+		# ⚠ 2026-07-30 撤銷「腳掌面積 ±0.18m 取最高」：物理上就是錯的——
+		#   重心出了支撐面就該倒/掉，max 取樣讓人永久墊高在任何低物邊緣，
+		#   而走查檢查用單點取樣＝同一條規則兩種算法，一夜炸出 400+ 筆浮空回歸。
+		#   步兵支撐＝身體中心單點（重心在支撐面內才算踩著），與檢查同源。
 		return gy
 	var f: Vector3 = facing_dir()
 	var r := Vector3(f.z, 0.0, -f.x)
@@ -1448,6 +1541,7 @@ func _process(delta: float) -> void:
 		_vehicle_process(delta)
 		return
 	_fix_gun_scale()
+	_fix_gear()
 	# 重定向模式：模型本身沒有動畫在寫骨骼，skeleton_updated 永遠不會發，
 	# 所以姿勢必須由這裡主動驅動（也不會與任何動畫打架，因為根本沒有）。
 	if _retarget:

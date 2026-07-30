@@ -1,0 +1,54 @@
+{
+ "_doc": "敵軍外觀(GDD/06 v2)：全軍統一 hr_m_Suit 基底（我方永不用；legacy hr_soldier/hr_swat 是貼圖材質換色失效，2026-07-31 實拍肉色半裸感棄用）。冷灰綠制服＋兵種裝具區分＋淡紅疊色識別。",
+ "palette": {
+  "hair": "#3a3a38",
+  "coat": "#4a5248",
+  "lower": "#3d443c",
+  "accent": "#5c6456"
+ },
+ "rifleman": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "helmet",
+  "pack": "slim"
+ },
+ "assault": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "helmet",
+  "pack": "ruck"
+ },
+ "mg": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "helmet_net",
+  "pack": "ammo"
+ },
+ "sniper": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "hood",
+  "pack": "slim"
+ },
+ "at": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "helmet",
+  "pack": "tube"
+ },
+ "mortar": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "cap",
+  "pack": "tube"
+ },
+ "engineer": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "goggles",
+  "pack": "ruck"
+ },
+ "specops": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "balaclava",
+  "pack": "slim"
+ },
+ "sam": {
+  "base": "res://assets/models/chars/hr_m_Suit.fbx",
+  "head": "helmet",
+  "pack": "radio"
+ }
+}

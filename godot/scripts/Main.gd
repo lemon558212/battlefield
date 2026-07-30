@@ -163,6 +163,13 @@ func _ready() -> void:
 	ui.end_action.connect(_end_action)
 	ui.back_menu.connect(_open_menu)
 	_open_menu()
+	# 測試模式一律靜音（2026-07-30 使用者：「測試階段不要播背景音樂」）——
+	# 跑批一跑七小時，BGM 跟著響七小時。靜音掛在 Master bus，不動遊戲本身的音量設定。
+	for targ in ["e2e", "selftest", "shotseq", "mapshots", "play", "scene",
+			"walk", "stress", "trainshot", "blkdump", "artshots"]:
+		if targ in OS.get_cmdline_user_args():
+			AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
+			break
 	if "e2e" in OS.get_cmdline_user_args():
 		_e2e()
 	elif "selftest" in OS.get_cmdline_user_args():
@@ -185,6 +192,8 @@ func _ready() -> void:
 		_blkdump()
 	elif "artshots" in OS.get_cmdline_user_args():
 		_artshots()
+	elif "lookshots" in OS.get_cmdline_user_args():
+		_lookshots()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -431,7 +440,17 @@ func _walk_all() -> void:
 				if bd.rect.has_point(goal):
 					goal_in_bld = true
 					break
-			if _path_clear(pu["node"].global_position, gw, BODY_R) 					and not (goal_blocked or goal_wet or goal_in_bld):
+			# 陡坡也是合法理由（ch11 群山）：爬坡限速 2.4m/s 是物理，走不快不是卡死。
+			# 沿直線取樣 8 點，任何一點坡度 >0.35 就不以卡死論。
+			var steep := false
+			if terrain != null:
+				var from_px := _live_px(pu)
+				for si in range(1, 8):
+					var sp2: Vector2 = from_px.lerp(goal, float(si) / 8.0)
+					if terrain.slope_at(sp2.x, sp2.y) > 0.35:
+						steep = true
+						break
+			if _path_clear(pu["node"].global_position, gw, BODY_R) 					and not (goal_blocked or goal_wet or goal_in_bld or steep):
 				bad["stuck"].append([_live_px(pu), goal, _live_px(pu).distance_to(goal) * WORLD_SCALE])
 	var checked: int = _walk_checked
 	print("[walk] 走完 %d 段，抵達 %d 段；共 %d 次取樣檢查" % [pts.size() - 1, reached, checked])
@@ -634,6 +653,110 @@ func _stress() -> void:
 	print("[stress] ch%02d FAILS=%d" % [chn, fails + wtot])
 	print("[stress] DONE")
 	get_tree().quit(0)
+
+# ---------- 角色外觀驗收（-- lookshots；GDD/06 外觀 v2）----------
+# 我方九人一排、敵軍九兵種一排。兩件事：
+#   ① 程式斷言：我方兩兩「簽名」(基底,頭具,背具,主色) 相異；敵我任兩人基底必不同（分池）。
+#   ② 實拍正面近景給使用者看——符不符合人設最終是人眼說了算。
+func _lookshots() -> void:
+	_test_mode = true
+	await get_tree().create_timer(0.6).timeout
+	ui.root.visible = false
+	# 用自由模式平原圖當攝影棚：空曠無建築，不用跟章節地圖的地物搶鏡位
+	map_data = GameData.maps.get("plain", GameData.maps[GameData.maps.keys()[0]])
+	_teardown_world()
+	await get_tree().process_frame
+	_build_ground()
+	if is_instance_valid(_zone_mesh):
+		_zone_mesh.visible = false
+	nation[0] = "usa"
+	nation[1] = "russia"
+	player_side = 0
+	units = []
+	var classes: Array = ["rifleman", "assault", "mg", "sniper", "at",
+			"mortar", "engineer", "specops", "sam"]
+	var fails := 0
+	var sigs := {}
+	# 展示場＝全圖離建築最遠的乾地（放地圖中心會排進營房巷子裡，實拍整張是牆）
+	var mwp: float = map_data.get("w", 960)
+	var mhp2: float = map_data.get("h", 600)
+	var best_s := -1.0
+	var base_p := Vector2(mwp * 0.5, mhp2 * 0.5)
+	for gy in range(2, int(mhp2 / 100.0) - 1):
+		for gx in range(3, int(mwp / 100.0) - 3):
+			var cand := Vector2(float(gx) * 100.0, float(gy) * 100.0)
+			if terrain != null and terrain.water_depth(cand.x, cand.y) > 0.01:
+				continue
+			if terrain != null and terrain.water_depth(cand.x + 480.0, cand.y + 90.0) > 0.01:
+				continue                    # 兩排 9 人寬 480px，整片都要乾
+			var sc := 1e9
+			for bd in _buildings:
+				sc = minf(sc, bd.rect.get_center().distance_to(cand + Vector2(240, 45)))
+			# 展示區周邊也要避開大型障礙（殘骸/巨石會擋鏡頭——第二輪實拍前景一團火）
+			for bk in _blockers:
+				if float(bk.get("h", 0.0)) < 1.0 or bk.get("t", "") != "cir":
+					continue
+				var bc: Vector2 = bk["c"]
+				if bc.x > cand.x - 60.0 and bc.x < cand.x + 540.0 \
+						and bc.y > cand.y - 120.0 and bc.y < cand.y + 210.0:
+					sc = minf(sc, 40.0)
+			if sc > best_s:
+				best_s = sc
+				base_p = cand
+	for i in classes.size():
+		var cls: String = classes[i]
+		var fu = _spawn_unit(cls, 0, base_p.x + float(i) * 60.0, base_p.y, true)
+		fu["node"].auto_stance = false
+		var eu = _spawn_unit(cls, 1, base_p.x + float(i) * 60.0, base_p.y + 90.0, false)
+		eu["node"].auto_stance = false
+		var lkp: Dictionary = GameData.char_look.get(cls, {})
+		var lke: Dictionary = GameData.enemy_look.get(cls, {})
+		sigs["我方" + cls] = [String(lkp.get("base", "?")), String(lkp.get("head", "")),
+				String(lkp.get("pack", "")), String(lkp.get("coat", ""))]
+		sigs["敵軍" + cls] = [String(lke.get("base", "?")), String(lke.get("head", "")),
+				String(lke.get("pack", "")), "enemy"]
+	# ① 我方兩兩簽名相異
+	for a in classes:
+		for b in classes:
+			if a >= b:
+				continue
+			if sigs["我方" + a] == sigs["我方" + b]:
+				print("[lookchk] FAIL 我方 %s 與 %s 外觀簽名完全相同 %s" % [a, b, str(sigs["我方" + a])])
+				fails += 1
+	# ② 敵我基底分池：任何我方基底不得出現在敵軍
+	for a2 in classes:
+		for b2 in classes:
+			if sigs["我方" + a2][0] == sigs["敵軍" + b2][0]:
+				print("[lookchk] FAIL 敵我共用基底：我方 %s 與敵軍 %s 都用 %s"
+						% [a2, b2, sigs["我方" + a2][0]])
+				fails += 1
+	for k in sigs:
+		print("[lookchk] %s → %s" % [k, str(sigs[k])])
+	await get_tree().create_timer(2.0).timeout    # 等裝具縮放校正跑完
+	cam.clear_tps()
+	cam.set_follow(null)
+	# 三人一組近景輪拍（遠景合照什麼人設都看不出來——第一輪實拍證實）
+	for gi in 3:
+		var gx: float = base_p.x + (float(gi) * 3.0 + 1.0) * 60.0
+		cam.focus = _to3d(gx, base_p.y) + Vector3(0, 1.15, 0)
+		cam.dist = 5.5
+		cam.pitch_deg = 4.0
+		cam.yaw = PI
+		await get_tree().create_timer(0.9).timeout
+		await _snap("res://look_friend%d.png" % gi)
+		cam.focus = _to3d(gx, base_p.y + 90.0) + Vector3(0, 1.15, 0)
+		cam.yaw = 0.0
+		await get_tree().create_timer(0.9).timeout
+		await _snap("res://look_enemy%d.png" % gi)
+	cam.focus = _to3d(base_p.x + 240.0, base_p.y + 45.0) + Vector3(0, 1.2, 0)
+	cam.dist = 26.0
+	cam.pitch_deg = 16.0
+	cam.yaw = 2.4
+	await get_tree().create_timer(0.8).timeout
+	await _snap("res://look_both.png")
+	print("[lookchk] FAILS=%d" % fails)
+	print("[lookchk] DONE")
+	get_tree().quit(1 if fails > 0 else 0)
 
 # ---------- 美術特寫（-- artshots chNN）----------
 # mapshots 的人眼鏡頭是「地圖中心固定點」，常常卡在牆裡或巷子裡，
@@ -3922,6 +4045,19 @@ func _spawn_unit(cls: String, side_i: int, wx: float, wy: float, named: bool):
 	var mp: String = CLASS_MODEL.get(cls, "res://assets/models/chars/soldier.glb")
 	if side_i == player_side and HERO_MODEL.has(cls):
 		mp = HERO_MODEL[cls]
+	# 外觀 v2（GDD/06）：資料層可覆寫基底。敵我分池——敵軍查 enemy_look
+	# （只用 hr_soldier/hr_swat），我方查 char_look（九人各佔一顆），永不同款。
+	var lk2: Dictionary = GameData.char_look.get(cls, {}) if side_i == player_side \
+			else GameData.enemy_look.get(cls, {})
+	if lk2.has("base"):
+		if ResourceLoader.exists(String(lk2["base"])):
+			mp = String(lk2["base"])
+		else:
+			# 覆寫指到不存在的資源要大聲喊——靜默退回舊款＝敵我同款悄悄復活
+			print("[look] FAIL 基底不存在：%s（cls=%s side=%d），退回 %s"
+					% [String(lk2["base"]), cls, side_i, mp])
+	if _test_mode:
+		print("[look] spawn %s side=%d player_side=%d mp=%s" % [cls, side_i, player_side, mp])
 	var node := Unit.spawn(mp, cls, side_i, side_i == player_side)
 	add_child(node)
 	node.position = _to3d(wx, wy)
@@ -7403,8 +7539,12 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			_covers.append({"wx": px, "wy": py, "r": (34.0 if kind != "shrub" else 22.0) * sc,
 					"val": 0.30, "type": "bush"})
 			_tree_feet.append(tp)
-			if kind != "shrub":
-				# 樹幹擋人也擋彈道（灌木只隱蔽不擋——鐵律 0②看幾何不看標籤）
+			if kind != "shrub" and px > 30.0 and py > 30.0 \
+					and px < gwp - 30.0 and py < ghp - 30.0:
+				# 樹幹擋人也擋彈道（灌木只隱蔽不擋——鐵律 0②看幾何不看標籤）。
+				# ⚠ 邊界 30px（1.5m）內不登記碰撞：_clamp_to_map 把人限制在邊界帶裡，
+				#   帶內有樹＝樹推人出去、clamp 拉人回來，人被永久夾在樹裡
+				#   （walk ch01 在 (1142,980) 抓到）。樹照畫，但視為界外景物。
 				_blockers.append({"t": "cir", "c": tp, "r": trunk_r / WORLD_SCALE, "h": trunk_h})
 		placed += 1
 	# 2026-07-28 使用者：「樹木、特別是樹木上的葉子」要更真實。
