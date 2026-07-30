@@ -1,0 +1,27 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+
+[GameData] nations=14 classes=17 maps=25 story=15
+[obbchk] 盒外不推                                       得到 (-4.0, 0.0) 應為 (-4.0, 0.0) OK
+[obbchk] 車尾內側推回車尾外                                  得到 (-3.42, 0.0) 應為 (-3.42, 0.0) OK
+[obbchk] 深陷車底走最近的面                                  得到 (-1.0, 2.17) 應為 (-1.0, 2.17) OK
+[obbchk] 貼車尾面                                       得到 (-3.42, 0.0) 應為 (-3.42, 0.0) OK
+[obbchk] 側面內部往側面推                                   得到 (-1.0, 2.17) 應為 (-1.0, 2.17) OK
+[obbchk] 角落外側距角點                                    得到 0.41999992728233 應為 0.42 OK
+[obbchk] 轉90度後車尾內側                                  得到 (0.0, -3.42) 應為 (0.0, -3.42) OK
+[obbchk] 轉90度後側面內側                                  得到 (2.17, 0.0) 應為 (2.17, 0.0) OK
+[obbchk] 轉90度後側面外不推                                 得到 (2.5, 0.0) 應為 (2.5, 0.0) OK
+[obbchk] 射線從車尾進入                                    得到 0.35 應為 0.35 OK
+[obbchk] 射線錯過回 -1                                   得到 -1.0 應為 -1.0 OK
+[obbchk] 射線橫穿側面                                     得到 0.325 應為 0.325 OK
+[obbchk] 盒內判定                                       得到 1.0 應為 1.0 OK
+[obbchk] 盒外判定                                       得到 0.0 應為 0.0 OK
+[obbchk] 45度外接框半寬                                   得到 3.35875701904297 應為 3.3587572106361 OK
+[obbchk] 圓 推出                                       得到 (2.42, 0.0) 應為 (2.42, 0.0) OK
+[obbchk] 圓 射線進入                                     得到 0.4 應為 0.4 OK
+[obbchk] 線段 推出                                      得到 (0.0, 0.92) 應為 (0.0, 0.92) OK
+[obbchk] FAILS=0
+[obbchk] DONE
+WARNING: 3 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 1 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

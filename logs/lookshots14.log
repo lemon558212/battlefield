@@ -1,0 +1,74 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=25 story=15
+ERROR: [bldskip] 壓在部署區被丟掉：?（改 maps.json 的 deploy 讓開，別讓劇情建築消失）
+   at: push_error (core/variant/variant_utility.cpp:1023)
+   GDScript backtrace (most recent call first):
+       [0] _build_ground (res://scripts/Main.gd:6542)
+       [1] _lookshots (res://scripts/Main.gd:669)
+[bldskip] FAIL 壓在部署區 → ?
+[poles] 桿=6 電線段=60
+[look] spawn rifleman side=0 player_side=0 mp=res://assets/models/chars/hr_m_Soldier.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn assault side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
+[rig] assault 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] assault 重定向骨對數=20
+[look] spawn mg side=0 player_side=0 mp=res://assets/models/chars/hr_m_Adventurer.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Farmer.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn at side=0 player_side=0 mp=res://assets/models/chars/hr_m_Punk.fbx
+[rig] at 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] at 重定向骨對數=20
+[look] spawn mortar side=0 player_side=0 mp=res://assets/models/chars/hr_w_Casual.fbx
+[rig] mortar 重定向骨對數=20
+[look] spawn mortar side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mortar 重定向骨對數=20
+[look] spawn engineer side=0 player_side=0 mp=res://assets/models/chars/hr_m_Worker.fbx
+[rig] engineer 重定向骨對數=20
+[look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] engineer 重定向骨對數=20
+[look] spawn specops side=0 player_side=0 mp=res://assets/models/chars/hr_m_SciFi.fbx
+[rig] specops 重定向骨對數=20
+[look] spawn specops side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] specops 重定向骨對數=20
+[look] spawn sam side=0 player_side=0 mp=res://assets/models/chars/hr_w_Spacesuit.fbx
+[rig] sam 重定向骨對數=20
+[look] spawn sam side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sam 重定向骨對數=20
+[lookchk] 我方rifleman → ["res://assets/models/chars/hr_m_Soldier.fbx", "cap", "slim", "#3b3a34"]
+[lookchk] 敵軍rifleman → ["res://assets/models/chars/hr_m_Suit.fbx", "helmet", "slim", "enemy"]
+[lookchk] 我方assault → ["res://assets/models/chars/hr_w_Swat.fbx", "helmet", "ruck", "#522a25"]
+[lookchk] 敵軍assault → ["res://assets/models/chars/hr_m_Suit.fbx", "helmet", "ruck", "enemy"]
+[lookchk] 我方mg → ["res://assets/models/chars/hr_m_Adventurer.fbx", "helmet_net", "ammo", "#313027"]
+[lookchk] 敵軍mg → ["res://assets/models/chars/hr_m_Suit.fbx", "helmet_net", "ammo", "enemy"]
+[lookchk] 我方sniper → ["res://assets/models/chars/hr_w_Farmer.fbx", "boonie", "slim", "#3c3c3d"]
+[lookchk] 敵軍sniper → ["res://assets/models/chars/hr_m_Suit.fbx", "hood", "slim", "enemy"]
+[lookchk] 我方at → ["res://assets/models/chars/hr_m_Punk.fbx", "helmet", "tube", "#4f4b3c"]
+[lookchk] 敵軍at → ["res://assets/models/chars/hr_m_Suit.fbx", "helmet", "tube", "enemy"]
+[lookchk] 我方mortar → ["res://assets/models/chars/hr_w_Casual.fbx", "cap", "tube", "#2e2d2c"]
+[lookchk] 敵軍mortar → ["res://assets/models/chars/hr_m_Suit.fbx", "cap", "tube", "enemy"]
+[lookchk] 我方engineer → ["res://assets/models/chars/hr_m_Worker.fbx", "goggles", "ruck", "#3f3c3f"]
+[lookchk] 敵軍engineer → ["res://assets/models/chars/hr_m_Suit.fbx", "goggles", "ruck", "enemy"]
+[lookchk] 我方specops → ["res://assets/models/chars/hr_m_SciFi.fbx", "balaclava", "slim", "#26272d"]
+[lookchk] 敵軍specops → ["res://assets/models/chars/hr_m_Suit.fbx", "balaclava", "slim", "enemy"]
+[lookchk] 我方sam → ["res://assets/models/chars/hr_w_Spacesuit.fbx", "helmet", "radio", "#3e3533"]
+[lookchk] 敵軍sam → ["res://assets/models/chars/hr_m_Suit.fbx", "helmet", "radio", "enemy"]
+[selftest] saved res://qa/look_friend0.png
+[selftest] saved res://qa/look_enemy0.png
+[selftest] saved res://qa/look_friend1.png
+[selftest] saved res://qa/look_enemy1.png
+[selftest] saved res://qa/look_friend2.png
+[selftest] saved res://qa/look_enemy2.png
+[selftest] saved res://qa/look_both.png
+[lookchk] FAILS=0
+[lookchk] DONE

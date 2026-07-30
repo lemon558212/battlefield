@@ -1,0 +1,51 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=25 story=15
+[water] 深水圍欄 78 根樁（水深 > 1.05m 的邊界）
+[poles] 桿=4 電線段=12
+[rig] rifleman 重定向骨對數=20
+[rig] rifleman 重定向骨對數=20
+[rig] assault 重定向骨對數=20
+[rig] assault 重定向骨對數=20
+[rig] mg 重定向骨對數=20
+[rig] mg 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] mortar 重定向骨對數=20
+[rig] mortar 重定向骨對數=20
+[rig] engineer 重定向骨對數=20
+[rig] engineer 重定向骨對數=20
+[rig] specops 重定向骨對數=20
+[rig] specops 重定向骨對數=20
+[rig] sam 重定向骨對數=20
+[rig] sam 重定向骨對數=20
+[lookchk] 我方rifleman → ["res://assets/models/chars/hr_m_Soldier.fbx", "cap", "slim", "#3b3a34"]
+[lookchk] 敵軍rifleman → ["res://assets/models/chars/hr_soldier.fbx", "helmet", "slim", "enemy"]
+[lookchk] 我方assault → ["res://assets/models/chars/hr_w_Casual.fbx", "helmet", "ruck", "#522a25"]
+[lookchk] 敵軍assault → ["res://assets/models/chars/hr_soldier.fbx", "helmet", "ruck", "enemy"]
+[lookchk] 我方mg → ["res://assets/models/chars/hr_m_Adventurer.fbx", "helmet_net", "ammo", "#313027"]
+[lookchk] 敵軍mg → ["res://assets/models/chars/hr_soldier.fbx", "helmet_net", "ammo", "enemy"]
+[lookchk] 我方sniper → ["res://assets/models/chars/hr_w_Swat.fbx", "boonie", "slim", "#3c3c3d"]
+[lookchk] 敵軍sniper → ["res://assets/models/chars/hr_swat.fbx", "hood", "slim", "enemy"]
+[lookchk] 我方at → ["res://assets/models/chars/hr_m_Punk.fbx", "helmet", "tube", "#4f4b3c"]
+[lookchk] 敵軍at → ["res://assets/models/chars/hr_soldier.fbx", "helmet", "tube", "enemy"]
+[lookchk] 我方mortar → ["res://assets/models/chars/hr_w_Farmer.fbx", "cap", "tube", "#2e2d2c"]
+[lookchk] 敵軍mortar → ["res://assets/models/chars/hr_soldier.fbx", "cap", "tube", "enemy"]
+[lookchk] 我方engineer → ["res://assets/models/chars/hr_m_Worker.fbx", "goggles", "ruck", "#3f3c3f"]
+[lookchk] 敵軍engineer → ["res://assets/models/chars/hr_soldier.fbx", "goggles", "ruck", "enemy"]
+[lookchk] 我方specops → ["res://assets/models/chars/hr_m_SciFi.fbx", "balaclava", "slim", "#26272d"]
+[lookchk] 敵軍specops → ["res://assets/models/chars/hr_swat.fbx", "balaclava", "slim", "enemy"]
+[lookchk] 我方sam → ["res://assets/models/chars/hr_w_Spacesuit.fbx", "helmet", "radio", "#3e3533"]
+[lookchk] 敵軍sam → ["res://assets/models/chars/hr_soldier.fbx", "helmet", "radio", "enemy"]
+[selftest] saved res://qa/look_friend0.png
+[selftest] saved res://qa/look_enemy0.png
+[selftest] saved res://qa/look_friend1.png
+[selftest] saved res://qa/look_enemy1.png
+[selftest] saved res://qa/look_friend2.png
+[selftest] saved res://qa/look_enemy2.png
+[selftest] saved res://qa/look_both.png
+[lookchk] FAILS=0
+[lookchk] DONE

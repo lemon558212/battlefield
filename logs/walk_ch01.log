@@ -1,0 +1,34 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=25 story=15
+[walk] 1 主選單 → 劇情戰役
+[walk] 2 章節 01
+[walk] 3 簡報 → 出擊
+[walk] 4 對話：連點推進 (st=3)
+[water] 深水圍欄 78 根樁（水深 > 1.05m 的邊界）
+[poles] 桿=4 電線段=12
+[rig] mg 重定向骨對數=20
+[rig] at 重定向骨對數=20
+[rig] sniper 重定向骨對數=20
+[diff] 第 1 章：敵步兵 3、敵載具 0、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
+[walk]   對話結束 st=4 (應為 DEPLOY=4)
+[walk] 5 部署：點卡片 → 點藍框放置
+[rig] sniper 重定向骨對數=20
+[walk]   已部署數=1 OK
+[walk] 6 開始戰鬥
+[walk]   st=5 (應為 CMD=5)
+[walk] 路線 130 個取樣點（10 列 × 13 行，間距 5.5m），地圖 70×50 m
+[walk] 起點 px(350,18)（第 3 個點；前面的都在海裡或障礙裡）
+[walk] 走完 129 段，抵達 26 段；共 6679 次取樣檢查
+[walk][陷進實體(人在障礙裡)] FAIL 2 次，前 6 筆：
+    (1142.204, 980.0)
+    (1142.141, 980.0)
+[walk][浮空或陷地(>0.3m)] 0 次 OK
+[walk][走進深水(>1.35m)] 0 次 OK
+[walk][卡死(目標是空地卻走不到)] 0 次 OK
+[walk][鏡頭穿牆] 0 次 OK
+[walk][走出地圖] 0 次 OK
+[selftest] saved res://qa/walk_ch01_bad_solid.png
+[walk] ch01 FAILS=2（拍了 1 張現場照）
+[walk] DONE
