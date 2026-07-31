@@ -7,23 +7,30 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 3 簡報 → 出擊
 [walk] 4 對話：連點推進 (st=3)
 [diff] 地形加碼（×0.15）：彈坑 +1、工事 +1
-[poles] 桿=2 電線段=12
+[poles] 桿=0 電線段=0
+[edgeclr] 邊界帶內丟棄障礙 5 個（帶寬 1.6m）
 [city] 街廓建築 68 棟、網格 3 種
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] rifleman 重定向骨對數=20
 [diff] 第 4 章：敵步兵 5、敵載具 0、掩體 0.20 集火 0.00 側翼 0.00 地形 0.15
 [walk]   對話結束 st=4 (應為 DEPLOY=4)
 [walk] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
 [rig] sniper 重定向骨對數=20
 [walk]   已部署數=1 OK
 [walk] 6 開始戰鬥
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 176 個取樣點（11 列 × 16 行，間距 5.5m），地圖 85×60 m
 [walk] 起點 px(18,18)（第 0 個點；前面的都在海裡或障礙裡）
-[walk] 走完 175 段，抵達 87 段；共 7109 次取樣檢查
+[walk] 走完 175 段，抵達 80 段；共 7488 次取樣檢查
 [walk][陷進實體(人在障礙裡)] 0 次 OK
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK

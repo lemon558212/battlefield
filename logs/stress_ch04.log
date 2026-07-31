@@ -7,31 +7,37 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 3 簡報 → 出擊
 [stress] 4 對話：連點推進 (st=3)
 [diff] 地形加碼（×0.15）：彈坑 +1、工事 +1
-[poles] 桿=2 電線段=12
+[poles] 桿=0 電線段=0
+[edgeclr] 邊界帶內丟棄障礙 5 個（帶寬 1.6m）
 [city] 街廓建築 68 棟、網格 3 種
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] rifleman 重定向骨對數=20
 [diff] 第 4 章：敵步兵 5、敵載具 0、掩體 0.20 集火 0.00 側翼 0.00 地形 0.15
 [stress]   對話結束 st=4 (應為 DEPLOY=4)
 [stress] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
 [rig] sniper 重定向骨對數=20
+[look] spawn mg side=0 player_side=0 mp=res://assets/models/chars/hr_m_Adventurer.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn rifleman side=0 player_side=0 mp=res://assets/models/chars/hr_m_Soldier.fbx
 [rig] rifleman 重定向骨對數=20
 [stress]   已部署數=3 OK
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.03 elev=-0.04m crater=false
-[stress] 回合1 我方開火累計0 我方HP300 敵方HP540 最近敵距15.2m
-[stress] 回合2 我方開火累計2 我方HP278 敵方HP415 最近敵距7.1m
-[weather] 回合 4 10:00 → 雨
-[stress] 回合3 我方開火累計5 我方HP196 敵方HP313 最近敵距1.1m
-[weather] 回合 5 11:00 → 晴
-[stress] 回合4 我方開火累計8 我方HP173 敵方HP91 最近敵距3.7m
-[stress] 回合5 我方開火累計9 我方HP173 敵方HP33 最近敵距10.7m
-[stress] ch04 回合=6 我方存活=3 敵方存活=0 取樣=215 最差幀=111ms 結局=打完
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP540 最近敵距9.3m
+[stress] 回合2 我方開火累計3 我方HP73 敵方HP346 最近敵距1.5m
+[stress] 回合3 我方開火累計5 我方HP73 敵方HP263 最近敵距0.7m
+[stress] 回合4 我方開火累計7 我方HP66 敵方HP58 最近敵距3.5m
+[stress] ch04 回合=5 我方存活=2 敵方存活=0 取樣=142 最差幀=70ms 結局=打完
 [selftest] saved res://qa/stress_ch04_end.png
 [stress] ch04 FAILS=0
 [stress] DONE

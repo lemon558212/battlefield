@@ -9,48 +9,121 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [diff] 地形加碼（×0.55）：彈坑 +4、工事 +3
 [water] 深水圍欄 90 根樁（水深 > 1.05m 的邊界）
 [poles] 桿=6 電線段=48
+[edgeclr] 邊界帶內丟棄障礙 2 個（帶寬 1.6m）
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+[rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] rifleman 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] rifleman 重定向骨對數=20
+[look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] engineer 重定向骨對數=20
+[look] spawn mortar side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mortar 重定向骨對數=20
 ERROR: [diff] 第 9 章要出 2 台敵方載具，但這張圖沒有任何已解鎖的載具可選
    at: push_error (core/variant/variant_utility.cpp:1023)
    GDScript backtrace (most recent call first):
-       [0] _ai_deploy (res://scripts/Main.gd:3887)
-       [1] _open_deploy (res://scripts/Main.gd:3432)
-       [2] <anonymous lambda> (res://scripts/Main.gd:3420)
+       [0] _ai_deploy (res://scripts/Main.gd:4232)
+       [1] _open_deploy (res://scripts/Main.gd:3777)
+       [2] <anonymous lambda> (res://scripts/Main.gd:3765)
        [3] _dlg_step (res://scripts/UI.gd:461)
        [4] _input (res://scripts/UI.gd:580)
-       [5] _send_click (res://scripts/Main.gd:1607)
-       [6] _boot_to_battle (res://scripts/Main.gd:1432)
+       [5] _send_click (res://scripts/Main.gd:1952)
+       [6] _boot_to_battle (res://scripts/Main.gd:1777)
 [diff] 第 9 章：敵步兵 8、敵載具 2、掩體 0.48 集火 0.37 側翼 0.24 地形 0.55
 [stress]   對話結束 st=4 (應為 DEPLOY=4)
 [stress] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
 [rig] sniper 重定向骨對數=20
+[look] spawn mg side=0 player_side=0 mp=res://assets/models/chars/hr_m_Adventurer.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn rifleman side=0 player_side=0 mp=res://assets/models/chars/hr_m_Soldier.fbx
 [rig] rifleman 重定向骨對數=20
 [stress]   已部署數=3 OK
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.10 elev=0.16m crater=false
 [weather] 回合 2 11:00 → 晴
-[stress] 回合1 我方開火累計3 我方HP257 敵方HP554 最近敵距1.9m
-[stress] 回合2 我方開火累計5 我方HP30 敵方HP459 最近敵距1.6m
+[stress] 回合1 我方開火累計3 我方HP250 敵方HP683 最近敵距0.7m
+[stress] 回合2 我方開火累計6 我方HP211 敵方HP597 最近敵距0.7m
 [weather] 回合 4 10:00 → 濃霧
-[stress] 回合3 我方開火累計6 我方HP19 敵方HP459 最近敵距0.8m
+[stress] 回合3 我方開火累計8 我方HP86 敵方HP320 最近敵距3.3m
 [weather] 回合 5 11:00 → 晴
-[stress] 回合4 我方開火累計7 我方HP8 敵方HP459 最近敵距0.7m
-[stress] 回合5 我方開火累計8 我方HP6 敵方HP459 最近敵距0.7m
-[weather] 回合 7 10:00 → 濃霧
-[stress] 回合6 我方開火累計9 我方HP6 敵方HP438 最近敵距2.6m
-[weather] 回合 8 11:00 → 晴
-[stress] 回合7 我方開火累計9 我方HP6 敵方HP375 最近敵距0.8m
-[stress] 回合8 我方開火累計9 我方HP0 敵方HP348 最近敵距50000000000000000.0m
-[stress] ch09 回合=8 我方存活=0 敵方存活=5 取樣=59 最差幀=40ms 結局=打完
+[stress] 回合4 我方開火累計10 我方HP10 敵方HP275 最近敵距0.7m
+[stress] 回合5 我方開火累計11 我方HP0 敵方HP238 最近敵距50000000000000000.0m
+[stress] ch09 回合=5 我方存活=0 敵方存活=4 取樣=33 最差幀=71ms 結局=打完
 [selftest] saved res://qa/stress_ch09_end.png
 [stress] ch09 FAILS=0
 [stress] DONE

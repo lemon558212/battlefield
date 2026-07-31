@@ -8,21 +8,94 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 4 對話：連點推進 (st=3)
 [diff] 地形加碼（×0.15）：彈坑 +1、工事 +1
 [poles] 桿=0 電線段=0
+[edgeclr] 邊界帶內丟棄障礙 6 個（帶寬 1.6m）
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7069)
+       [2] _scatter_trees (res://scripts/Main.gd:7773)
+       [3] _build_ground (res://scripts/Main.gd:6915)
+       [4] _open_deploy (res://scripts/Main.gd:3775)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:1952)
+       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+[rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.3194, 0.2888, 0.2484, 1.0)
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] rifleman 重定向骨對數=20
 [diff] 第 3 章：敵步兵 5、敵載具 0、掩體 0.20 集火 0.00 側翼 0.00 地形 0.15
 [walk]   對話結束 st=4 (應為 DEPLOY=4)
 [walk] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
 [rig] sniper 重定向骨對數=20
 [walk]   已部署數=1 OK
 [walk] 6 開始戰鬥
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 176 個取樣點（11 列 × 16 行，間距 5.5m），地圖 85×60 m
 [walk] 起點 px(18,18)（第 0 個點；前面的都在海裡或障礙裡）
-[walk] 走完 175 段，抵達 61 段；共 7490 次取樣檢查
+[walk] 走完 175 段，抵達 113 段；共 6242 次取樣檢查
 [walk][陷進實體(人在障礙裡)] 0 次 OK
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK
