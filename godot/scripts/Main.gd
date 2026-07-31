@@ -525,7 +525,9 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 		last = now
 		_walk_checked += 1
 		var wp: Vector3 = pu["node"].global_position
-		var fixed: Vector3 = _resolve_solids(wp, BODY_R, pu)
+		# 判準要跟遊戲實際用的落位函式同一支：走查用 _resolve_solids、遊戲用 _settle
+		# 的話，量的是「解算前」的狀態，邊界上必然天天報 FAIL（同一條規則兩個數字）
+		var fixed: Vector3 = _settle(wp, BODY_R, pu)
 		if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
 			_walk_bad["solid"].append(now)
 		# ⚠ 「離地 0.3m」單次成立不是 bug——從 0.5m 河堤走下來本來就在自由落體。
@@ -746,6 +748,53 @@ func _sinkscan() -> void:
 	print("[sink] ch%02d FAILS=%d" % [chn, bad])
 	print("[sink] DONE")
 	get_tree().quit(0)
+
+
+# 剔除「長在地圖邊界夾限帶裡」的障礙（2026-07-31，walk ch01/06/13 同一根因）。
+# _clamp_to_map 把人夾在離邊界 1m 的線上；若障礙長在那條線的外側或線上，
+# 每幀就是「障礙把人推出去 → clamp 把人拉回來」的死夾，走查報「陷進實體」或
+# 「卡死」。上一輪只排除了樹，但沙包/柵欄/電線桿/岩石/瓦礫全都會長到邊界。
+# 這裡在**組裝後統一過濾**——不管障礙來自哪個產生器，規則只有一份（單一真相）。
+# 安全帶＝clamp 邊界 1m ＋ 身體半徑 0.42m ＋ 餘裕 0.2m ≒ 1.62m。
+const EDGE_SAFE_M := 1.62
+func _strip_edge_blockers(list: Array, mw_px: float, mh_px: float) -> Array:
+	var pad: float = EDGE_SAFE_M / WORLD_SCALE
+	var out: Array = []
+	var cut := 0
+	for bk in list:
+		# 深水圍欄本來就該貼著水域邊緣立，不受此限（它擋的是「別走進海裡」）
+		if String(bk.get("k", "")) == "deepwater":
+			out.append(bk)
+			continue
+		var near_edge := false
+		var pts: Array = []
+		match String(bk.get("t", "")):
+			"cir":
+				pts.append(bk["c"])
+			"seg":
+				pts.append(bk["a"])
+				pts.append(bk["b"])
+			"obb":
+				pts.append(bk["c"])
+			_:
+				out.append(bk)
+				continue
+		var r_px: float = float(bk.get("r", 0.0))
+		if bk.get("t", "") == "obb":
+			var e: Vector2 = bk.get("e", Vector2.ZERO)
+			r_px = maxf(e.x, e.y)
+		for pt in pts:
+			var p: Vector2 = pt
+			if p.x - r_px < pad or p.y - r_px < pad 					or p.x + r_px > mw_px - pad or p.y + r_px > mh_px - pad:
+				near_edge = true
+				break
+		if near_edge:
+			cut += 1
+		else:
+			out.append(bk)
+	if cut > 0:
+		print("[edge] 剔除邊界帶障礙 %d 個（安全帶 %.2fm）" % [cut, EDGE_SAFE_M])
+	return out
 
 # 在實際網格三角形上求 (x,z) 的地表高度（重心座標）。找不到回 -1e18。
 func _tri_surface(grid: Dictionary, verts: PackedVector3Array,
@@ -5256,7 +5305,9 @@ func _solid_bodies() -> void:
 			continue
 		var node = u["node"]
 		var r: float = VEHICLE_R if Unit.is_vehicle_cls(u["cls"]) else BODY_R
-		var fixed: Vector3 = _resolve_solids(node.global_position, r, u)
+		# ★ 用 _settle 不用 _resolve_solids：邊界上的單位要同時滿足夾限與實體，
+		#   只解算實體的話下一幀又被夾限推回障礙裡（ch01/06/13 卡邊界真因）
+		var fixed: Vector3 = _settle(node.global_position, r, u)
 		if fixed.distance_squared_to(node.global_position) > 0.000001:
 			node.global_position = Vector3(fixed.x, node.global_position.y, fixed.z)
 			var p := _live_px(u)
@@ -5443,8 +5494,8 @@ func _tps_control(delta: float) -> void:
 	var before: Vector3 = node.global_position
 	node.move_dir(dir, delta)
 	# 邊界與 AP 上限：走到夾限外就把人推回來（AP 由 _action_tick 依實際位移扣）
-	var clamped: Vector3 = _clamp_to_map(_resolve_solids(node.global_position,
-			VEHICLE_R if Unit.is_vehicle_cls(acting["cls"]) else BODY_R, acting))
+	var clamped: Vector3 = _settle(node.global_position,
+			VEHICLE_R if Unit.is_vehicle_cls(acting["cls"]) else BODY_R, acting)
 	node.global_position = Vector3(clamped.x, node.global_position.y, clamped.z)
 	if before.distance_to(node.global_position) < 0.0001:
 		return
@@ -6435,6 +6486,34 @@ func _vehicle_obb(v) -> Dictionary:
 # ⚠ 2026-07-26 只做了建築牆，結果護欄、拒馬、電線桿、樹、坦克全都能直接穿過去，
 #   在第三人稱裡看起來就是「這些東西是畫上去的」。障礙的真相要跟畫出來的一致。
 # ignore＝要略過的單位（算自己時不能被自己推）。
+# 邊界與實體同時滿足（鐵律0①）。舊寫法 `_clamp_to_map(_resolve_solids(p))` 有順序病：
+# 解算把人推出障礙 → 夾限又把人推回障礙裡 → 每幀來回，人永遠卡在邊界線上
+# （walk ch01/ch06/ch13 的 16 筆 FAIL 座標全部剛好落在離邊界 1m 那條線）。
+# 正解＝交替迭代到同時成立；真的兩邊都不滿足（例如深水圍欄貼著邊界）時，
+# 最後一步一律**往地圖內側推**——寧可站進場內，也不可以卡在牆裡。
+func _settle(pos: Vector3, radius: float, ignore) -> Vector3:
+	var p := pos
+	for _i in 4:
+		var before := p
+		p = _clamp_to_map(_resolve_solids(p, radius, ignore))
+		if before.distance_squared_to(p) < 0.000001:
+			return p
+	# 沒收斂：沿「離最近邊界的內法線」逐步往場內退，退到不再被推為止
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var hx: float = mw * 0.5 * WORLD_SCALE
+	var hz: float = mh * 0.5 * WORLD_SCALE
+	var inward := Vector3(
+			(1.0 if p.x < 0.0 else -1.0) if minf(absf(p.x + hx), absf(p.x - hx)) <= minf(absf(p.z + hz), absf(p.z - hz)) else 0.0,
+			0.0,
+			0.0 if minf(absf(p.x + hx), absf(p.x - hx)) <= minf(absf(p.z + hz), absf(p.z - hz)) else (1.0 if p.z < 0.0 else -1.0))
+	for _k in 12:
+		p += inward * 0.35
+		var chk: Vector3 = _resolve_solids(p, radius, ignore)
+		if Vector2(chk.x - p.x, chk.z - p.z).length() < 0.06:
+			break
+	return _clamp_to_map(p)
+
 # 邊界淨空（鐵律0①）：單位被 _clamp_to_map 夾在「離邊界 1m」的線上，
 # 那條線是**強制站位**——上面有任何實體，人就會被推出去又被夾回來，永遠卡住。
 # walk ch05/ch06 的 11 筆 FAIL 座標全部剛好落在 x=20px 或 y=h-20px 就是這個。
@@ -6456,8 +6535,10 @@ func _drop_edge_blockers() -> void:
 			dropped += 1
 			continue
 		keep.append(bk)
-	if dropped > 0:
-		print("[edgeclr] 邊界帶內丟棄障礙 %d 個（帶寬 %.1fm）" % [dropped, band * WORLD_SCALE])
+	# ⚠ 一律印（含 0）：只在 >0 時印＝「靜默跳過」，看不出這道防線到底有沒有跑
+	#   （本專案踩過三次：撞窗戶那項就是前置條件不成立時安靜 return 而假通過）
+	print("[edgeclr] 邊界帶內丟棄障礙 %d 個（帶寬 %.1fm，深水圍欄不丟）"
+			% [dropped, band * WORLD_SCALE])
 	_blockers = keep
 
 func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
@@ -6906,7 +6987,8 @@ func _build_ground() -> void:
 		var wp: Vector2 = props.wreck_spots[wi]
 		_add_fire(_to3d(wp.x, wp.y) + Vector3(0, 0.5, 0), 0.7)
 	_destructibles = fort.destructibles
-	_blockers = props.blockers + fort.blockers + _water_blk + _bld_blk
+	_blockers = _strip_edge_blockers(props.blockers + fort.blockers + _water_blk + _bld_blk,
+			mw / WORLD_SCALE, mh / WORLD_SCALE)
 	_drop_edge_blockers()
 	_pole_spots = props.pole_spots
 	_low_blk = []
@@ -7866,12 +7948,10 @@ func _scatter_trees(mw: float, mh: float) -> void:
 			_covers.append({"wx": px, "wy": py, "r": (34.0 if kind != "shrub" else 22.0) * sc,
 					"val": 0.30, "type": "bush"})
 			_tree_feet.append(tp)
-			if kind != "shrub" and px > 30.0 and py > 30.0 \
-					and px < gwp - 30.0 and py < ghp - 30.0:
+			if kind != "shrub":
 				# 樹幹擋人也擋彈道（灌木只隱蔽不擋——鐵律 0②看幾何不看標籤）。
-				# ⚠ 邊界 30px（1.5m）內不登記碰撞：_clamp_to_map 把人限制在邊界帶裡，
-				#   帶內有樹＝樹推人出去、clamp 拉人回來，人被永久夾在樹裡
-				#   （walk ch01 在 (1142,980) 抓到）。樹照畫，但視為界外景物。
+				# 邊界帶的排除交給 _strip_edge_blockers 統一處理（原本這裡自己寫死
+				# 30px，但沙包/柵欄/岩石也有同樣問題——一條規則只能有一份）。
 				_blockers.append({"t": "cir", "c": tp, "r": trunk_r / WORLD_SCALE, "h": trunk_h})
 		placed += 1
 	# 2026-07-28 使用者：「樹木、特別是樹木上的葉子」要更真實。
