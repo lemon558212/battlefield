@@ -7,23 +7,27 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 3 簡報 → 出擊
 [walk] 4 對話：連點推進 (st=3)
 [water] 深水圍欄 78 根樁（水深 > 1.05m 的邊界）
-[poles] 桿=4 電線段=12
+[poles] 桿=1 電線段=0
+[look] spawn mg side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
+[look] spawn at side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] at 重定向骨對數=20
+[look] spawn sniper side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
 [diff] 第 1 章：敵步兵 3、敵載具 0、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
 [walk]   對話結束 st=4 (應為 DEPLOY=4)
 [walk] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=1 player_side=1 mp=res://assets/models/chars/hr_w_Swat.fbx
 [rig] sniper 重定向骨對數=20
 [walk]   已部署數=1 OK
 [walk] 6 開始戰鬥
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 130 個取樣點（10 列 × 13 行，間距 5.5m），地圖 70×50 m
 [walk] 起點 px(350,18)（第 3 個點；前面的都在海裡或障礙裡）
-[walk] 走完 129 段，抵達 26 段；共 6679 次取樣檢查
+[walk] 走完 129 段，抵達 26 段；共 6766 次取樣檢查
 [walk][陷進實體(人在障礙裡)] FAIL 2 次，前 6 筆：
-    (1142.204, 980.0)
-    (1142.141, 980.0)
+    (1114.266, 236.8091)
+    (1113.834, 236.6347)
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK
 [walk][卡死(目標是空地卻走不到)] 0 次 OK

@@ -26,6 +26,10 @@ var _grass_zones: Array = []
 var biome: Dictionary = {}
 var _waters: Array = []
 var _no_grass: Array[Rect2] = []      # 建築佔地（室內不長草）
+# 地基墊（鐵律0③：建築不可懸空、不可半埋斜坡——真實工程先整地再蓋）。
+# 每筆 {r:Rect2(px), h:基準高(m)}；height_at 在腳印內把地形收斂到 h，
+# 外圈 PAD_RING 平滑過渡（切土/填土的緩坡）。形狀放進地形＝網格/站位/AI 全自動一致。
+var _pads: Array = []
 var _grass_mat: ShaderMaterial = null
 
 # ---------- 建置 ----------
@@ -57,12 +61,64 @@ func build(map_data: Dictionary, world_scale: float) -> void:
 					"deep": (1.9 if wkey == "deepwaters" else (0.5 if wkey == "shallows" else 1.2))})
 	_group_waters()
 	_build_shores()
+	_build_pads()
 	_build_mesh()
 	# ⚠ 草不在這裡生成：建築的實際佔地要等 Building 建完才知道
 	#   （Building.rect 有「最小 120px」的規則，比 maps.json 的原始尺寸大），
 	#   用原始尺寸當禁草區會漏掉一圈，實拍就是室內地板上長草。
 	#   由 Main 在建好建築後呼叫 build_grass()。
 	_build_backdrop()
+
+# --- 地基墊：收集所有結構物腳印，基準高＝腳印中心與四角的原始地形平均
+# （切土＋填土各半，跟真的整地一樣）。⚠ 必須在 _pads 還是空的時候取樣，
+# 否則 height_at 會吃到自己。
+func _build_pads() -> void:
+	_pads = []
+	var todo: Array = []
+	for s in map.get("solids", []):
+		# Building.gd 有「最小 120px」放大規則，腳印要用放大後的尺寸，否則差一圈
+		var bw: float = maxf(float(s.get("w", 60)), 120.0)
+		var bh: float = maxf(float(s.get("h", 60)), 120.0)
+		var cx: float = float(s.get("x", 0)) + float(s.get("w", 60)) * 0.5
+		var cy: float = float(s.get("y", 0)) + float(s.get("h", 60)) * 0.5
+		todo.append(Rect2(cx - bw * 0.5, cy - bh * 0.5, bw, bh).grow(1.5 / ws))
+	for pb in map.get("pillboxes", []):
+		var half: float = 2.6 * float(pb.get("size", 1.0)) / ws
+		todo.append(Rect2(float(pb.get("x", 0)) - half, float(pb.get("y", 0)) - half,
+				half * 2.0, half * 2.0))
+	for ct in map.get("containers", []):
+		var a: float = deg_to_rad(float(ct.get("rot", 0)))
+		var hx: float = (absf(cos(a)) * 6.4 + absf(sin(a)) * 1.6) / ws
+		var hy: float = (absf(sin(a)) * 6.4 + absf(cos(a)) * 1.6) / ws
+		todo.append(Rect2(float(ct.get("x", 0)) - hx, float(ct.get("y", 0)) - hy,
+				hx * 2.0, hy * 2.0))
+	# 相鄰的墊要併組共用基準高（水域「各自下陷成暗礁」同款教訓）：
+	# A 的腳印落在 B 的過渡圈裡，兩個基準不同就會在腳印內拉出斜面。
+	var ring_px: float = 3.5 / ws
+	var grp: Array = []
+	for i in todo.size():
+		grp.append(i)
+	for i in todo.size():
+		for j in range(i + 1, todo.size()):
+			if (todo[i] as Rect2).grow(ring_px).intersects(todo[j] as Rect2):
+				var gi: int = grp[i]
+				var gj: int = grp[j]
+				for k in grp.size():
+					if grp[k] == gj:
+						grp[k] = gi
+	var gsum := {}
+	var gcnt := {}
+	for i in todo.size():
+		var rr := todo[i] as Rect2
+		var hs: float = height_at(rr.get_center().x, rr.get_center().y)
+		for cnr in [rr.position, rr.end, Vector2(rr.position.x, rr.end.y),
+				Vector2(rr.end.x, rr.position.y)]:
+			hs += height_at(cnr.x, cnr.y)
+		gsum[grp[i]] = float(gsum.get(grp[i], 0.0)) + hs / 5.0
+		gcnt[grp[i]] = int(gcnt.get(grp[i], 0)) + 1
+	for i in todo.size():
+		_pads.append({"r": todo[i],
+				"h": float(gsum[grp[i]]) / float(gcnt[grp[i]])})
 
 # --- 值雜訊（value noise）：正弦疊加會產生規則的斜條紋，遠鏡頭一眼看破（實拍）。
 # 這裡用固定 hash 的雙線性內插雜訊，結果自然且可重現（同一張圖每次都一樣）。
@@ -133,6 +189,16 @@ func height_at(px: float, py: float) -> float:
 		elif d3 < hw * 1.9:
 			var k3: float = 1.0 - (d3 - hw) / (hw * 0.9)
 			h += TRENCH_BERM * k3 * k3                                       # 挖出來的土堆在溝旁
+	# 地基墊最後套用（蓋過丘/彈坑/壕溝——結構物腳印下不該有這些）：
+	# 腳印內完全整平到基準高，外圈 PAD_RING 平滑過渡＝整地的緩坡
+	for pd in _pads:
+		var rp: Rect2 = pd["r"]
+		var inside: float = minf(minf(px - rp.position.x, rp.end.x - px),
+				minf(py - rp.position.y, rp.end.y - py))
+		var ring: float = 3.5 / ws
+		if inside > -ring:
+			var k4: float = clampf(1.0 + inside / ring, 0.0, 1.0)
+			h = lerpf(h, float(pd["h"]), minf(k4, 1.0))
 	return h
 
 # 地圖外圍用粗網格鋪，取樣不到細起伏會在邊界形成一圈假懸崖（實拍發現）。

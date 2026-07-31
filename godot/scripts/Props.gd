@@ -80,6 +80,9 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	# 沒有現成貼圖的（木、金屬、電線、燒黑）維持純色——硬套錯貼圖比純色更假。
 	_mats = {
 		"dirt": BattleMats.pbr("Concrete_Asphalt", 6.0, 0.98, Color(0.95, 0.90, 0.82)),
+		# 土堤/土堆專用：真土貼圖。先前借柏油貼圖，整地後土堤露出來
+		# 全是深色碎塊，使用者截圖裡「碉堡邊的黑色垃圾」就是它。
+		"soil": BattleMats.pbr("Dirt", 2.2, 1.0, Color(1.08, 1.00, 0.88)),
 		"concrete": BattleMats.pbr("Concrete", 2.4, 0.95, Color(1.20, 1.18, 1.12)),
 		"wood": _mat(Color(0.38, 0.28, 0.18), 0.92),
 		"metal": _mat(Color(0.28, 0.29, 0.30), 0.55),
@@ -574,33 +577,34 @@ func _pillboxes(m: Dictionary) -> void:
 				Transform3D(b, _pos(c.x, c.y, h * 0.635) + b * Vector3(0, 0, -d * 0.5 + 0.25 * sz)))
 		_box("concrete", Vector3(w * 1.12, 0.18 * sz, d * 1.12),
 				Transform3D(b, _pos(c.x, c.y, h + 0.09 * sz)))
-		# 與地面的過渡：土堤堆在四周（碉堡不會是「放在草地上的水泥盒」）。
-		# 2026-07-28 使用者：「土堆要更真實」——原本 8 個平放方盒排一圈，像積木。
-		# 改成：每個位置兩塊**斜插交疊**的土塊（俯仰＋滾轉都亂給，彼此咬合），
-		# 數量加密到 14 塊互相搭接成連續土堤，縫隙再灑碎石。斜插的盒子彼此交疊後
-		# 輪廓線是亂的，讀起來就是「堆出來的土」而不是「擺上去的盒子」。
+		# 土堤＝四面「靠牆堆起的連續斜坡裙」（半埋、上緣貼牆），不是散落一圈的碎塊。
+		# 舊版 14 塊斜插土塊在整地後全露出來，黃昏光下讀成一圈黑色垃圾（使用者截圖）。
 		var rng2 := RandomNumberGenerator.new()
 		rng2.seed = int(absf(c.x) * 7.0 + absf(c.y) * 13.0)
-		for k in 14:
-			var a2: float = TAU * float(k) / 14.0 + rng2.randf_range(-0.16, 0.16)
-			var rr: float = (maxf(w, d) * 0.5 + 0.35) * rng2.randf_range(0.88, 1.12)
-			var bx: float = c.x + cos(a2) * rr / _ws
-			var by: float = c.y + sin(a2) * rr / _ws
-			for layer in 2:
-				var msz: float = rng2.randf_range(0.45, 0.95) * sz * (1.0 - 0.25 * float(layer))
-				var tiltb := Basis(Vector3.UP, a2 + rng2.randf_range(-0.5, 0.5)) \
-						* Basis(Vector3(1, 0, 0), rng2.randf_range(-0.30, 0.30)) \
-						* Basis(Vector3(0, 0, 1), rng2.randf_range(-0.22, 0.22))
-				_box("dirt", Vector3(msz, msz * 0.42, msz * 0.75),
-						Transform3D(tiltb, _pos(bx + rng2.randf_range(-3.0, 3.0),
-						by + rng2.randf_range(-3.0, 3.0),
-						msz * (0.10 + 0.16 * float(layer)))))
+		var skirt_h: float = 0.62 * sz
+		for sd in 4:
+			var axis_z: bool = (sd < 2)          # 0/1＝前後（±z），2/3＝左右（±x）
+			var sgn3: float = (1.0 if sd % 2 == 0 else -1.0)
+			var run: float = (w if axis_z else d) * 1.06
+			var lean := Basis(Vector3(1, 0, 0), -sgn3 * 0.62) if axis_z 					else Basis(Vector3(0, 0, 1), sgn3 * 0.62)
+			var off3: Vector3 = b * (Vector3(0, 0, sgn3 * (d * 0.5 + 0.14)) if axis_z 					else Vector3(sgn3 * (w * 0.5 + 0.14), 0, 0))
+			_box("soil", Vector3(run, skirt_h, 0.72 * sz) if axis_z 					else Vector3(0.72 * sz, skirt_h, run),
+					Transform3D(b * lean, _pos(c.x, c.y, skirt_h * 0.26) + off3))
+		# 四角補小土墩收邊＋少量碎石
+		for k in 4:
+			var a2: float = TAU * (float(k) + 0.5) / 4.0
+			var bx: float = c.x + cos(a2) * (w * 0.5 + 0.3) / _ws
+			var by: float = c.y + sin(a2) * (d * 0.5 + 0.3) / _ws
+			var msz: float = rng2.randf_range(0.5, 0.8) * sz
+			_box("soil", Vector3(msz, msz * 0.4, msz * 0.8),
+					Transform3D(b * Basis(Vector3.UP, rng2.randf() * TAU),
+					_pos(bx, by, msz * 0.12)))
 			if rng2.randf() < 0.6:
-				var ssz: float = rng2.randf_range(0.10, 0.22) * sz
+				var ssz: float = rng2.randf_range(0.08, 0.16) * sz
 				_box("rock", Vector3(ssz, ssz * 0.8, ssz),
 						Transform3D(Basis(Vector3.UP, rng2.randf() * TAU),
-						_pos(bx + rng2.randf_range(-5.0, 5.0),
-						by + rng2.randf_range(-5.0, 5.0), ssz * 0.3)))
+						_pos(bx + rng2.randf_range(-4.0, 4.0),
+						by + rng2.randf_range(-4.0, 4.0), ssz * 0.3)))
 		_blk_cir(c, maxf(w, d) * 0.52, h)
 
 # 貨櫃：港口與城區最好用的掩體，也是第 10 章的劇情道具（走私貨櫃）。
