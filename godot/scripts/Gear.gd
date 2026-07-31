@@ -30,6 +30,7 @@ static func build(item: String, main_c: Color, acc_c: Color) -> MeshInstance3D:
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 0.92
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED   # 手繞面不保證朝外，裝具小件雙面保險
 	mi.material_override = mat
 	return mi
 

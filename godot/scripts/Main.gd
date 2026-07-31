@@ -897,6 +897,20 @@ func _artshots() -> void:
 		cam.yaw = 0.9
 		await get_tree().create_timer(1.0).timeout
 		await _snap("res://art_ch%02d_tree.png" % chn)
+	# ②b 建築特寫（使用者 2026-07-31 回報城市圖剖面屋/紅光帶）：
+	# 對第一棟建築拍四個方位——缺牆的那一面只有特定角度看得到
+	var solids: Array = map_data.get("solids", [])
+	if not solids.is_empty():
+		var s0: Dictionary = solids[0]
+		var scx: float = float(s0.get("x", 0)) + float(s0.get("w", 120)) * 0.5
+		var scy: float = float(s0.get("y", 0)) + float(s0.get("h", 120)) * 0.5
+		for qi in 4:
+			cam.focus = _to3d(scx, scy) + Vector3(0, 2.6, 0)
+			cam.dist = 24.0
+			cam.pitch_deg = 18.0
+			cam.yaw = TAU * float(qi) / 4.0 + 0.4
+			await get_tree().create_timer(0.8).timeout
+			await _snap("res://art_ch%02d_bld%d.png" % [chn, qi])
 	# ③ 貨櫃／④ 碉堡（地圖有才拍）
 	var shots := [["containers", "container", 16.0, 14.0], ["pillboxes", "pillbox", 13.0, 16.0]]
 	for sp in shots:
@@ -6813,6 +6827,9 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 	rmat.albedo_color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
 	rmat.vertex_color_use_as_albedo = true
 	rmat.roughness = 0.97
+	# 碎面岩的頂點抖動不保證繞序全朝外：背面剔除下某些角度整塊面消失＝破圖
+	# （使用者 2026-07-31 實玩回報「石頭破圖」）。雙面渲染，石頭不透明沒代價。
+	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var xfs_by: Array = []       # 每個原型自己一份 [Transform3D]
 	var cols_by: Array = []
 	for _p in protos.size():
@@ -7359,9 +7376,19 @@ func _scatter_city(gwp: float, ghp: float) -> void:
 			var ty: float = terrain.height_at(jx, jy) if terrain != null else 0.0
 			var yaw: float = float(rng.randi() % 4) * PI * 0.5 + rng.randf_range(-0.04, 0.04)
 			var sc: float = rng.randf_range(0.85, 1.25)
+			# 基準高＝腳印四角的最低地形（鐵律 0③ 建築不可懸空）：
+			# 取中心點高的話，坡地上角落會懸空、樓底裂縫露出紅磚內面
+			# ＝遠看整圈紅光帶（2026-07-31 使用者實拍；固定嵌深 0.6 仍在陡坡漏）
+			var hxp: float = ab.size.x * 0.5 * sc / WORLD_SCALE
+			var hzp: float = ab.size.z * 0.5 * sc / WORLD_SCALE
+			for cx0 in [-1.0, 1.0]:
+				for cz0 in [-1.0, 1.0]:
+					var rx: float = cx0 * hxp * cos(yaw) - cz0 * hzp * sin(yaw)
+					var rz: float = cx0 * hxp * sin(yaw) + cz0 * hzp * cos(yaw)
+					ty = minf(ty, terrain.height_at(jx + rx, jy + rz))
 			var base := Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * sc),
 					Vector3((jx - gwp * 0.5) * WORLD_SCALE,
-							ty - ab.position.y * sc - 0.15, (jy - ghp * 0.5) * WORLD_SCALE))
+							ty - ab.position.y * sc - 0.25, (jy - ghp * 0.5) * WORLD_SCALE))
 			for part in d2["parts"]:
 				var k = part[0]
 				if not xf_by_mesh.has(k):

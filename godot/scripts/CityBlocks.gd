@@ -49,6 +49,29 @@ static func load_parts(host: Node3D, name: String) -> Dictionary:
 		var m3 := mi as MeshInstance3D
 		if m3.mesh == null:
 			continue
+		# 套件材質整治（2026-07-31 使用者實拍兩個穿幫）：
+		#   ① 基座/簷口飾條材質帶 emission → 白天整圈紅光帶（像一圈熔岩）
+		#   ② 牆面單面（背面剔除）→ 從某些角度整面牆隱形，室內像剖面娃娃屋
+		# 一律關 emission＋雙面渲染。duplicate 後改，不動素材原檔。
+		for si in (m3.mesh as Mesh).get_surface_count():
+			# ⚠ GLTF 匯入的材質可能在三個層：mesh 表面 / MeshInstance 覆寫 / active。
+			#   只改 mesh 表面那層修不到（第一輪實拍紅帶紋絲不動）——用 active 取、
+			#   改完寫回 mesh 表面（MultiMesh 只認 mesh 表面層）。
+			var sm = (m3.mesh as Mesh).surface_get_material(si)
+			if sm == null:
+				sm = m3.get_active_material(si)
+			if sm is BaseMaterial3D:
+				var fixed := (sm as BaseMaterial3D).duplicate() as BaseMaterial3D
+				fixed.emission_enabled = false
+				fixed.cull_mode = BaseMaterial3D.CULL_DISABLED
+				# 亮度壓 0.85＋粗糙度拉滿：紅色貼圖裝飾條在黃昏暖陽下會讀成
+				# 霓虹紅光帶（使用者實拍）；壓一檔就回到「褪色油漆」的質感
+				# 壓紅通道：套件貼圖的裝飾條是高飽和純紅，黃昏暖陽下讀成霓虹紅光帶
+				# （綠色鑑別實驗確認就是這一層）。紅壓多一點、綠藍少一點＝
+				# 紅條變「褪色油漆紅」、紅磚變沉穩暗磚，不動幾何。
+				fixed.albedo_color = fixed.albedo_color * Color(0.62, 0.72, 0.72, 1.0)
+				fixed.roughness = maxf(fixed.roughness, 0.9)
+				(m3.mesh as Mesh).surface_set_material(si, fixed)
 		var xf: Transform3D = inst.global_transform.affine_inverse() * m3.global_transform
 		parts.append([m3.mesh, xf])
 		var b: AABB = xf * (m3.mesh as Mesh).get_aabb()
