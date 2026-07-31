@@ -6208,7 +6208,9 @@ func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 	# ⚠ 要跑兩輪：被 A 推出去之後可能正好推進 B 裡（車體與牆之間、兩道柵欄的夾角）。
 	#   單輪解算的症狀就是「某些角落還是穿得過去」，而且只在特定夾角出現、很難重現。
 	#   第二輪沒有任何改變就提早結束，平時不花成本。
-	for _pass in 2:
+	# 四輪（第 N 輪無變化就提早結束）：兩輪在「三個障礙互夾」時仍可能不收斂
+	# （walk ch11 電線桿×柵欄實測），平時第二輪就 break、不多花成本。
+	for _pass in 4:
 		var p0 := p
 		if not _buildings.is_empty():
 			p = _push_walls_px(p, r_px)

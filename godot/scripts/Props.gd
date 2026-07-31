@@ -24,6 +24,33 @@ var _no_zones: Array[Rect2] = []
 # 有殘骸的位置（Main 拿去點火：燒毀的車輛會一直冒煙，不是乾淨的靜態模型）
 var wreck_spots: Array = []
 
+# 柱狀物放置前的淨空檢查（鐵律0①）：與任何既有障礙的表面淨距小於兩倍身寬
+# 就不能放——柵欄與電線桿都沿路擺，縫隙一旦小於 0.84m，人會被夾在兩者之間
+# 每幀推出 A 又被推進 B（walk ch11 實測 5 筆「陷進實體」全是同一根夾在柵欄旁的桿）。
+func _gap_too_narrow(p: Vector2, self_r_m: float) -> bool:
+	var need: float = (self_r_m + 0.84 + 0.15) / _ws
+	for bk in blockers:
+		var d: float
+		match String(bk.get("t", "")):
+			"cir":
+				d = p.distance_to(bk["c"]) - float(bk["r"])
+			"seg":
+				d = _dist_pt_seg(p, bk["a"], bk["b"]) - float(bk["r"])
+			"obb":
+				# 粗略用外接圓：多退幾根桿沒關係，物理安全優先
+				var e: Vector2 = bk["e"]
+				d = p.distance_to(bk["c"]) - maxf(e.x, e.y)
+			_:
+				continue
+		if d < need:
+			return true
+	return false
+
+static func _dist_pt_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+	return p.distance_to(a + ab * t)
+
 # 建築周邊禁區判定（門口不能被自家柵欄堵死）
 func _off_limits(p: Vector2) -> bool:
 	for z in _no_zones:
@@ -205,7 +232,8 @@ func _poles(m: Dictionary) -> void:
 			for probe in [0.0, 45.0, -45.0, 90.0]:
 				var cand: Vector2 = a + dir * (d + probe) + nrm * float(r.get("w", 40)) * 1.6
 				if not _off_limits(cand) \
-						and not (_terrain != null and _terrain.in_water(cand.x, cand.y)):
+						and not (_terrain != null and _terrain.in_water(cand.x, cand.y)) \
+						and not _gap_too_narrow(cand, 0.32):
 					p = cand
 					break
 			if p == Vector2.INF:
