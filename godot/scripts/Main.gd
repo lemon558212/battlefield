@@ -194,6 +194,8 @@ func _ready() -> void:
 		_artshots()
 	elif "lookshots" in OS.get_cmdline_user_args():
 		_lookshots()
+	elif "slopetest" in OS.get_cmdline_user_args():
+		_slopetest()
 	elif "sinkscan" in OS.get_cmdline_user_args():
 		_sinkscan()
 
@@ -763,6 +765,90 @@ func _tri_surface(grid: Dictionary, verts: PackedVector3Array,
 			continue
 		return a.y * l1 + b.y * l2 + c.y * l3
 	return -1e18
+
+
+# ---------- 斜坡姿態驗收（-- slopetest；2026-07-31 使用者：斜坡上整個人斜著跑）----------
+# 真人在坡上：軀幹垂直、坡度由兩腿不等長吸收。量兩個數字：
+#   ① 軀幹傾角（模型節點 roll/pitch）——應該遠小於坡度角
+#   ② 兩腿膝角差——坡越陡差越大（腿真的在吃坡度）
+func _slopetest() -> void:
+	_test_mode = true
+	await get_tree().create_timer(0.6).timeout
+	ui.root.visible = false
+	map_data = GameData.maps.get("plain", GameData.maps[GameData.maps.keys()[0]])
+	_teardown_world()
+	await get_tree().process_frame
+	_build_ground()
+	if is_instance_valid(_zone_mesh):
+		_zone_mesh.visible = false
+	nation[0] = "usa"
+	nation[1] = "russia"
+	player_side = 0
+	units = []
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	# 找全圖最陡的一塊地（側向坡度最大）
+	var best := Vector2(mwp * 0.5, mhp * 0.5)
+	var best_s := 0.0
+	var gy := 60.0
+	while gy < mhp - 60.0:
+		var gx := 60.0
+		while gx < mwp - 60.0:
+			# ⚠ 要挑「跑得過去的斜坡」不是最陡點：全圖最陡的地方是壕溝護壁
+			# （65 度垂直牆），量它等於在驗攀岩。可行走坡＝12~32 度，
+			# 而且不能在壕溝裡（溝壁不是坡）。
+			var sl: float = terrain.slope_at(gx, gy)
+			if sl > best_s and sl < 0.62 and terrain.water_depth(gx, gy) <= 0.01 					and not terrain.in_trench(gx, gy):
+				best_s = sl
+				best = Vector2(gx, gy)
+			gx += 40.0
+		gy += 40.0
+	var slope_deg: float = rad_to_deg(atan(best_s))
+	print("[slope] 最陡點 px(%.0f,%.0f) 坡度=%.1f 度" % [best.x, best.y, slope_deg])
+	var u = _spawn_unit("rifleman", 0, best.x, best.y, true)
+	u["node"].auto_stance = false
+	await get_tree().create_timer(1.5).timeout
+	var mdl: Node3D = u["node"]._model
+	var roll_deg: float = rad_to_deg(absf(mdl.rotation.z))
+	var pitch_deg: float = rad_to_deg(absf(mdl.rotation.x))
+	var tilt: float = maxf(roll_deg, pitch_deg)
+	# 兩腿：量左右腳踝的世界高度差（腿真的在吃坡度的話會有差）
+	var sks := (mdl as Node3D).find_children("*", "Skeleton3D", true, false)
+	var leg_dh := 0.0
+	if not sks.is_empty():
+		var sk := sks[0] as Skeleton3D
+		var li := sk.find_bone("Foot.L")
+		var ri := sk.find_bone("Foot.R")
+		if li >= 0 and ri >= 0:
+			var lp: Vector3 = sk.global_transform * sk.get_bone_global_pose(li).origin
+			var rp: Vector3 = sk.global_transform * sk.get_bone_global_pose(ri).origin
+			leg_dh = absf(lp.y - rp.y)
+	var fails := 0
+	# 軀幹傾角應遠小於坡度：門檻＝坡度的 45%（趴姿才該完全貼合）
+	var ok_tilt: bool = tilt < slope_deg * 0.45 + 2.0
+	print("[slope] 軀幹傾角=%.1f 度（坡度 %.1f 度的 %.0f%%） %s"
+			% [tilt, slope_deg, 100.0 * tilt / maxf(slope_deg, 0.01),
+			"OK" if ok_tilt else "FAIL(整個人跟著坡面斜)"])
+	if not ok_tilt:
+		fails += 1
+	print("[slope] 兩腳高度差=%.3fm %s" % [leg_dh,
+			"OK(腿在吃坡度)" if leg_dh > 0.02 else "FAIL(兩腿等長＝坡度沒被腿吸收)"])
+	if leg_dh <= 0.02:
+		fails += 1
+	cam.clear_tps()
+	cam.set_follow(null)
+	cam.focus = _to3d(best.x, best.y) + Vector3(0, 1.0, 0)
+	cam.dist = 4.2
+	cam.pitch_deg = 3.0
+	cam.yaw = 0.0
+	await get_tree().create_timer(0.9).timeout
+	await _snap("res://slope_front.png")
+	cam.yaw = PI * 0.5
+	await get_tree().create_timer(0.7).timeout
+	await _snap("res://slope_side.png")
+	print("[slope] FAILS=%d" % fails)
+	print("[slope] DONE")
+	get_tree().quit(1 if fails > 0 else 0)
 
 # ---------- 角色外觀驗收（-- lookshots；GDD/06 外觀 v2）----------
 # 我方九人一排、敵軍九兵種一排。兩件事：
@@ -6346,6 +6432,31 @@ func _vehicle_obb(v) -> Dictionary:
 # ⚠ 2026-07-26 只做了建築牆，結果護欄、拒馬、電線桿、樹、坦克全都能直接穿過去，
 #   在第三人稱裡看起來就是「這些東西是畫上去的」。障礙的真相要跟畫出來的一致。
 # ignore＝要略過的單位（算自己時不能被自己推）。
+# 邊界淨空（鐵律0①）：單位被 _clamp_to_map 夾在「離邊界 1m」的線上，
+# 那條線是**強制站位**——上面有任何實體，人就會被推出去又被夾回來，永遠卡住。
+# walk ch05/ch06 的 11 筆 FAIL 座標全部剛好落在 x=20px 或 y=h-20px 就是這個。
+# 收口在這裡而不是各個擺放函式：物件種類會一直增加，逐個補必漏。
+# ⚠ 深水圍欄不丟：它是防止走進海裡的安全欄，寧可貼邊也不能沒有。
+func _drop_edge_blockers() -> void:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var band: float = (1.0 + BODY_R + 0.15) / WORLD_SCALE     # 夾限線 ± 身寬 ＋ 餘裕
+	var keep: Array = []
+	var dropped := 0
+	for bk in _blockers:
+		if String(bk.get("k", "")) == "deepwater":
+			keep.append(bk)
+			continue
+		var ab: Rect2 = _blk_aabb(bk)
+		if ab.position.x < band or ab.position.y < band \
+				or ab.end.x > mw - band or ab.end.y > mh - band:
+			dropped += 1
+			continue
+		keep.append(bk)
+	if dropped > 0:
+		print("[edgeclr] 邊界帶內丟棄障礙 %d 個（帶寬 %.1fm）" % [dropped, band * WORLD_SCALE])
+	_blockers = keep
+
 func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
@@ -6793,6 +6904,7 @@ func _build_ground() -> void:
 		_add_fire(_to3d(wp.x, wp.y) + Vector3(0, 0.5, 0), 0.7)
 	_destructibles = fort.destructibles
 	_blockers = props.blockers + fort.blockers + _water_blk + _bld_blk
+	_drop_edge_blockers()
 	_pole_spots = props.pole_spots
 	_low_blk = []
 	for bk0 in _blockers:

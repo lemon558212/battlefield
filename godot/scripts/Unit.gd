@@ -1068,10 +1068,21 @@ func _tilt_to_slope(delta: float) -> void:
 	#   趴著身體 1.9m 長用 0.95m，而**載具 6m 長**還用 0.35m 的話，量到的是地形雜訊
 	#   而不是車身真正跨過的那片坡——結果就是車身傾斜角不對、一端插進土裡
 	#   （2026-07-27 我自己的測試截圖拍到坦克埋在土丘裡）。
+	# ★★2026-07-31 使用者：「跑步經過斜的地方整個身體都會斜的跑，這樣很不合理，
+	#   應該是利用腳的彎曲弧度支撐讓身體變成正的跑過去才對」——完全正確。
+	#   把整個模型旋轉去貼合坡面，等於把人當成貼在坡面上的紙片；真人在斜坡上
+	#   **軀幹保持重力垂直**，坡度由兩腿不等長吸收（山側腿屈膝、谷側腿伸長），
+	#   這也是所有 3A 遊戲的做法（foot IK）。
+	#   所以：載具整台跟著坡面（履帶確實貼地，正確）、趴姿整個人貼坡面（正確），
+	#   站/蹲/跑的軀幹只保留一點點傾斜（重心微調），坡度交給 _legs_to_slope。
 	var samp: float = lerpf(0.35, 0.95, clampf(_prone, 0.0, 1.0))
 	if _is_vehicle:
 		samp = VEH_HL * 0.7
 	var n: Vector3 = _ground_normal(samp)
+	if not _is_vehicle:
+		# 步兵：趴姿 100% 貼坡；站/蹲/跑只留 18%（真人在坡上會微微調整重心，
+		# 但絕不會整個人跟坡面同角度）
+		n = Vector3.UP.lerp(n, lerpf(0.18, 1.0, clampf(_prone, 0.0, 1.0))).normalized()
 	# 把坡面法線轉到角色的局部座標，才知道要往前後還是左右傾
 	var fwd: Vector3 = facing_dir()
 	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
@@ -1082,6 +1093,36 @@ func _tilt_to_slope(delta: float) -> void:
 	var k: float = clampf(delta * 8.0, 0.0, 1.0)
 	_model.rotation.x = lerpf(_model.rotation.x, pitch, k)
 	_model.rotation.z = lerpf(_model.rotation.z, -roll, k)
+
+# 斜坡上兩腿不等長（2026-07-31 使用者指正「應該用腳的彎曲弧度支撐讓身體變成正的」）。
+# 真實走坡：軀幹維持垂直，山側的腿屈膝縮短、谷側的腿伸直加長，骨盆因此保持水平。
+# 這裡量左右腳站位各自的地面高度差，把差額換成屈膝角度（低多邊形版的 foot IK）。
+# ⚠ 只作用在站/蹲/跑：趴姿整個人躺在坡上，沒有「腿吃坡度」這回事。
+const HIP_HALF_W := 0.17     # 半個胯寬（公尺）：兩腳站位大約在骨盆左右各 17cm
+const KNEE_PER_M := 46.0     # 每 1m 高度差要屈的膝角（度）——腿長約 0.9m，幾何近似
+func _legs_to_slope() -> void:
+	if _is_vehicle or _dead or _rig == null or not ground_sampler.is_valid():
+		return
+	var w: float = 1.0 - clampf(_prone, 0.0, 1.0)     # 趴著不做
+	if w < 0.02:
+		return
+	var right: Vector3 = global_basis.x.normalized()
+	var gl: float = float(ground_sampler.call(global_position - right * HIP_HALF_W))
+	var gr: float = float(ground_sampler.call(global_position + right * HIP_HALF_W))
+	var dh: float = gl - gr                            # 正＝左腳那側比較高
+	if absf(dh) < 0.02:
+		return
+	# 高的那側屈膝（縮短），低的那側伸直——夾限 32 度，避免陡壁上腿折成 Z 字
+	var ang: float = clampf(absf(dh) * KNEE_PER_M, 0.0, 32.0) * w
+	var hi_side: String = "L" if dh > 0.0 else "R"
+	var lo_side: String = "R" if dh > 0.0 else "L"
+	_rig.bend_bone("UpperLeg." + hi_side, LEG_AXIS, ang * 0.55)
+	_rig.bend_bone("LowerLeg." + hi_side, LEG_AXIS, -ang)
+	# 谷側腿反向微伸（動畫本身多少有屈膝，這裡把它拉直一點）
+	_rig.bend_bone("LowerLeg." + lo_side, LEG_AXIS, ang * 0.22)
+	# 骨盆側傾一點點跟著腿走（真人骨盆不會完全水平，但遠小於坡度）
+	_rig.add_world_rotation("Hips", global_basis.z.normalized(),
+			deg_to_rad(clampf(dh * 12.0, -6.0, 6.0)) * w)
 
 # 腳下坡面法線：用四點取樣（±0.35m）估斜率，不必動到 Terrain 的介面
 func _ground_normal(d := 0.35) -> Vector3:
@@ -1861,6 +1902,7 @@ func _aim_pose() -> void:
 		if ankle != Vector3.ZERO:
 			var drop: float = ankle.y - (global_position.y + ANKLE_H)
 			_model.position.y = clampf(_model.position.y - drop, _model_base_y - 1.0, _model_base_y + 0.1)
+	_legs_to_slope()
 	# 移動中改「低姿預備」而不是放掉槍：原本一移動就還原成掛在手上，
 	# 結果是空手跑步動畫＋一把槍飄在手邊，長槍單手拎著跑非常假（2026-07-25 補齊全動作）。
 	# 真實做法＝上半身覆蓋：雙手仍持槍、槍口略朝下前方，腿部照跑步動畫走。
