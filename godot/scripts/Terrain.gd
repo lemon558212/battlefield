@@ -210,7 +210,41 @@ func _edge_fade(px: float, py: float) -> float:
 	return clampf(1.0 - d / 60.0, 0.0, 1.0)
 
 func height_at_world(pos: Vector3) -> float:
-	return height_at(pos.x / ws + mw * 0.5, pos.z / ws + mh * 0.5)
+	return height_at_mesh(pos.x / ws + mw * 0.5, pos.z / ws + mh * 0.5)
+
+# ★★「人埋進地裡」的真因與唯一真相（2026-07-31 使用者實玩回報，第 15 章建築物底下）：
+#   地表**畫**出來的是 CELL(0.8m) 格點的線性內插三角形，物理**算**的卻是 height_at
+#   的解析值。平地兩者幾乎相同，但地基墊（_pads）邊緣是一道陡階：格點落在階梯兩側時，
+#   三角形是一片斜面，而斜面下方的解析值仍是低的那一邊 → 人站在正確的解析高度，
+#   畫面上卻在地表**底下**。建築周圍正是 pads 邊緣，所以症狀集中在建築物旁。
+#   修法只能是「讓物理吃畫面用的同一個值」＝重現網格的雙線性內插。
+#   ⚠ 不可以改成 max(四角)：那會讓人漂在坑洞與壕溝上方（同一條規則兩種算法的老坑）。
+func height_at_mesh(px: float, py: float) -> float:
+	var x: float = (px - mw * 0.5) * ws
+	var z: float = (py - mh * 0.5) * ws
+	var hx: float = mw * 0.5 * ws
+	var hz: float = mh * 0.5 * ws
+	# 戰場外用粗網格，落在外圍時直接回解析值（那裡沒有 pads，兩者本來就一致）
+	if x < -hx or x > hx or z < -hz or z > hz:
+		return height_at(px, py)
+	# 網格線：從 -half 起每 CELL 一條（_axis 的戰場內段），最後一條收在 +half
+	var gx0: float = -hx + floor((x + hx) / CELL) * CELL
+	var gz0: float = -hz + floor((z + hz) / CELL) * CELL
+	var gx1: float = minf(gx0 + CELL, hx)
+	var gz1: float = minf(gz0 + CELL, hz)
+	var tx: float = 0.0 if gx1 - gx0 < 0.0001 else (x - gx0) / (gx1 - gx0)
+	var tz: float = 0.0 if gz1 - gz0 < 0.0001 else (z - gz0) / (gz1 - gz0)
+	var h00: float = height_at(gx0 / ws + mw * 0.5, gz0 / ws + mh * 0.5)
+	var h10: float = height_at(gx1 / ws + mw * 0.5, gz0 / ws + mh * 0.5)
+	var h01: float = height_at(gx0 / ws + mw * 0.5, gz1 / ws + mh * 0.5)
+	var h11: float = height_at(gx1 / ws + mw * 0.5, gz1 / ws + mh * 0.5)
+	# ⚠ 要用**網格實際的三角剖分**，不是雙線性內插：_build_mesh 的繞序是
+	#   (p00,p11,p01) 與 (p00,p10,p11)，對角線在 p00→p11（即 tx==tz）。
+	#   雙線性在格子中央與三角面差 (h00+h11-h10-h01)/4，地基陡階下仍有 20~25cm，
+	#   人照樣半陷。兩片三角形各自的平面方程如下（角點代入可驗證）。
+	if tz > tx:
+		return h00 + tx * (h11 - h01) + tz * (h01 - h00)
+	return h00 + tx * (h10 - h00) + tz * (h11 - h10)
 
 # 坡度（0＝平地，1＝陡）：上坡移動成本與地表材質分層都要用
 func slope_at(px: float, py: float) -> float:

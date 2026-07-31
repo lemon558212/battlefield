@@ -194,6 +194,8 @@ func _ready() -> void:
 		_artshots()
 	elif "lookshots" in OS.get_cmdline_user_args():
 		_lookshots()
+	elif "sinkscan" in OS.get_cmdline_user_args():
+		_sinkscan()
 
 # ---------- 端對端測試：從主選單開始，全程合成滑鼠點擊走完整真實流程 ----------
 # （治「測試從中間插進去、跳過真實 UI 流程」的驗證盲區——使用者是從頭玩的）
@@ -653,6 +655,114 @@ func _stress() -> void:
 	print("[stress] ch%02d FAILS=%d" % [chn, fails + wtot])
 	print("[stress] DONE")
 	get_tree().quit(0)
+
+# ---------- 沉陷掃描（-- sinkscan chNN）：直接量「人腳 vs 畫面上的地表」 ----------
+# 使用者 2026-07-31：「埋入地下一樣在第 15 章的建築物底下，其他章節一定也有」。
+# 走查台的 air 檢查跟支撐用同一個 height_at，所以那個病它天生看不見（自己驗自己）。
+# 這裡改成：物理支撐(height_at) vs 網格內插(height_at_mesh)——後者才是玩家看到的地表。
+# 差 >0.15m 就是「人會陷進去/浮起來」的點，並且逐建築統計，證明修在哪。
+func _sinkscan() -> void:
+	_test_mode = true
+	await get_tree().create_timer(0.5).timeout
+	ui.root.visible = false
+	var chn := _test_chapter()
+	map_data = GameData.maps[String(GameData.story[chn - 1].get("map", "tutorial"))]
+	_teardown_world()
+	await get_tree().process_frame
+	_build_ground()
+	var mwp: float = map_data.get("w", 960)
+	var mhp: float = map_data.get("h", 600)
+	# 「畫面上的地表」＝**真的送進 GPU 的那份三角形**。從 TerrainMesh 的頂點陣列
+	# 重建三角形做空間雜湊，再逐點求交。拿 height_at_mesh 去比 height_at_mesh
+	# 等於沒驗（自我循環）；讀實際幾何才是獨立驗證。
+	var tri_grid := {}
+	var tmi := terrain.find_child("TerrainMesh", true, false) as MeshInstance3D
+	if tmi == null or tmi.mesh == null:
+		print("[sink] FAIL 找不到 TerrainMesh")
+		get_tree().quit(1)
+		return
+	var arrs: Array = (tmi.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrs[Mesh.ARRAY_VERTEX]
+	var GCELL := 4.0            # 雜湊格（公尺）
+	var ti := 0
+	while ti + 2 < verts.size():
+		var a: Vector3 = verts[ti]
+		var b: Vector3 = verts[ti + 1]
+		var c: Vector3 = verts[ti + 2]
+		var x0: int = int(floor(minf(minf(a.x, b.x), c.x) / GCELL))
+		var x1: int = int(floor(maxf(maxf(a.x, b.x), c.x) / GCELL))
+		var z0: int = int(floor(minf(minf(a.z, b.z), c.z) / GCELL))
+		var z1: int = int(floor(maxf(maxf(a.z, b.z), c.z) / GCELL))
+		for gxi in range(x0, x1 + 1):
+			for gzi in range(z0, z1 + 1):
+				var key := Vector2i(gxi, gzi)
+				if not tri_grid.has(key):
+					tri_grid[key] = []
+				tri_grid[key].append(ti)
+		ti += 3
+	print("[sink] 三角形雜湊：%d 個三角形、%d 格" % [verts.size() / 3, tri_grid.size()])
+	var worst := 0.0
+	var worst_at := Vector2.ZERO
+	var bad := 0
+	var n := 0
+	var near_bld := 0
+	var old_bad := 0            # 舊算法（height_at）會沉的點數，用來對照修了多少
+	var old_worst := 0.0
+	var step := 6.0             # px＝0.3m，比 CELL(0.8m) 細才抓得到格內落差
+	var py := 20.0
+	while py < mhp - 20.0:
+		var px := 20.0
+		while px < mwp - 20.0:
+			var foot: float = terrain.height_at_mesh(px, py)     # 人腳實際落點
+			var w3: Vector3 = _to3d(px, py)
+			var surf: float = _tri_surface(tri_grid, verts, w3.x, w3.z, GCELL)
+			if surf == -1e18:                                   # 該點沒有地表三角形
+				px += step
+				continue
+			n += 1
+			var d: float = foot - surf                          # 負＝人在地表下（埋進去）
+			var d_old: float = terrain.height_at(px, py) - surf
+			if absf(d_old) > 0.15:
+				old_bad += 1
+				if absf(d_old) > absf(old_worst):
+					old_worst = d_old
+			if absf(d) > 0.15:
+				bad += 1
+				for bd in _buildings:
+					if bd.rect.grow(6.0 / WORLD_SCALE).has_point(Vector2(px, py)):
+						near_bld += 1
+						break
+				if absf(d) > absf(worst):
+					worst = d
+					worst_at = Vector2(px, py)
+			px += step
+		py += step
+	print("[sink] ch%02d 取樣=%d｜新算法沉陷>0.15m=%d（建築6m內=%d）最大=%+.2fm @px(%.0f,%.0f)"
+			% [chn, n, bad, near_bld, worst, worst_at.x, worst_at.y])
+	print("[sink] ch%02d 對照：舊算法(height_at)沉陷=%d 最大=%+.2fm"
+			% [chn, old_bad, old_worst])
+	print("[sink] ch%02d FAILS=%d" % [chn, bad])
+	print("[sink] DONE")
+	get_tree().quit(0)
+
+# 在實際網格三角形上求 (x,z) 的地表高度（重心座標）。找不到回 -1e18。
+func _tri_surface(grid: Dictionary, verts: PackedVector3Array,
+		x: float, z: float, gcell: float) -> float:
+	var lst: Array = grid.get(Vector2i(int(floor(x / gcell)), int(floor(z / gcell))), [])
+	for i in lst:
+		var a: Vector3 = verts[i]
+		var b: Vector3 = verts[i + 1]
+		var c: Vector3 = verts[i + 2]
+		var d: float = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z)
+		if absf(d) < 0.000001:
+			continue
+		var l1: float = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / d
+		var l2: float = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / d
+		var l3: float = 1.0 - l1 - l2
+		if l1 < -0.0001 or l2 < -0.0001 or l3 < -0.0001:
+			continue
+		return a.y * l1 + b.y * l2 + c.y * l3
+	return -1e18
 
 # ---------- 角色外觀驗收（-- lookshots；GDD/06 外觀 v2）----------
 # 我方九人一排、敵軍九兵種一排。兩件事：
@@ -4125,7 +4235,7 @@ func _to3d(wx: float, wy: float) -> Vector3:
 	var mh: float = map_data.get("h", 600)
 	var y := 0.0
 	if terrain != null:
-		y = terrain.height_at(wx, wy)
+		y = terrain.height_at_mesh(wx, wy)
 	return Vector3((wx - mw * 0.5) * WORLD_SCALE, y, (wy - mh * 0.5) * WORLD_SCALE)
 
 func _count_side(s: int) -> int:
@@ -5632,7 +5742,7 @@ func _pos_indoors_loose(p: Vector3) -> bool:
 func _ray_over(a: Vector3, b: Vector3, t: float, h: float, hx: float, hy: float) -> bool:
 	if h >= 6.0:
 		return false
-	var gy: float = terrain.height_at(hx, hy) if terrain != null else 0.0
+	var gy: float = terrain.height_at_mesh(hx, hy) if terrain != null else 0.0
 	return a.y + (b.y - a.y) * t > gy + h + 0.08
 
 func _wall_ray(a: Vector3, b: Vector3) -> float:
@@ -5895,7 +6005,10 @@ func _ground_height(p: Vector3) -> float:
 	for bk in cell:
 		if not _blk_inside(bk, q):
 			continue
-		var top: float = (terrain.height_at(px, py) if terrain != null else 0.0) + float(bk.get("h", 0.2))
+		# 矮障礙頂面也要用「畫面上的地表」當基準（height_at_mesh），
+		# 否則沙包頂與腳下地面各用一套算法，人會站在沙包裡（同 pads 那條）
+		var top: float = (terrain.height_at_mesh(px, py) if terrain != null else 0.0) \
+				+ float(bk.get("h", 0.2))
 		if top > g:
 			g = top
 	return g
@@ -6585,7 +6698,7 @@ func _build_ground() -> void:
 			var cy: float = float(sdef.get("y", 0)) + float(sdef.get("h", 60)) * 0.5
 			var gy := 0.0
 			if terrain != null:
-				gy = terrain.height_at(cx, cy)
+				gy = terrain.height_at_mesh(cx, cy)
 			# 樓層改讀資料（鐵律 3）：先前寫死 `2 if i % 2 == 0 else 1`，
 			# 於是「鐘樓」跟旁邊的營舍一樣高，劇情說「狙擊組上鐘樓」卻沒有樓可上。
 			bd.build(sdef, WORLD_SCALE, map_data.get("w", 960), map_data.get("h", 600),
@@ -6860,7 +6973,7 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 		if too_close:
 			continue
 		var sc: float = rng.randf_range(0.28, 1.35)   # 上限 1.9 的巨石比人還高兩倍，太搶戲
-		var ty: float = terrain.height_at(px, py)
+		var ty: float = terrain.height_at_mesh(px, py)
 		# ⚠ 縮放係數要留下來：碰撞半徑與高度必須跟**畫出來的那顆石頭**一致，
 		#   不能用 sc 亂猜（先前 r 寫 sc*0.9、h 寫 sc*1.0，兩個都不是實際尺寸）。
 		var rx: float = rng.randf_range(0.8, 1.4)
@@ -7373,7 +7486,7 @@ func _scatter_city(gwp: float, ghp: float) -> void:
 			# 貼著街廓邊緣（沿街面），不是擺在格子正中央
 			var jx: float = gx + rng.randf_range(-0.10, 0.10) * cell
 			var jy: float = gy + rng.randf_range(-0.10, 0.10) * cell
-			var ty: float = terrain.height_at(jx, jy) if terrain != null else 0.0
+			var ty: float = terrain.height_at_mesh(jx, jy) if terrain != null else 0.0
 			var yaw: float = float(rng.randi() % 4) * PI * 0.5 + rng.randf_range(-0.04, 0.04)
 			var sc: float = rng.randf_range(0.85, 1.25)
 			# 基準高＝腳印四角的最低地形（鐵律 0③ 建築不可懸空）：
@@ -7385,7 +7498,7 @@ func _scatter_city(gwp: float, ghp: float) -> void:
 				for cz0 in [-1.0, 1.0]:
 					var rx: float = cx0 * hxp * cos(yaw) - cz0 * hzp * sin(yaw)
 					var rz: float = cx0 * hxp * sin(yaw) + cz0 * hzp * cos(yaw)
-					ty = minf(ty, terrain.height_at(jx + rx, jy + rz))
+					ty = minf(ty, terrain.height_at_mesh(jx + rx, jy + rz))
 			var base := Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * sc),
 					Vector3((jx - gwp * 0.5) * WORLD_SCALE,
 							ty - ab.position.y * sc - 0.25, (jy - ghp * 0.5) * WORLD_SCALE))
@@ -7424,7 +7537,7 @@ func _scatter_city(gwp: float, ghp: float) -> void:
 				if terrain.in_water(q.x, q.y):
 					continue
 				var yaw2: float = atan2(dirv.y, dirv.x)
-				var ty2: float = terrain.height_at(q.x, q.y)
+				var ty2: float = terrain.height_at_mesh(q.x, q.y)
 				var xf2 := Transform3D(Basis(Vector3.UP, -yaw2),
 						Vector3((q.x - gwp * 0.5) * WORLD_SCALE, ty2 + 0.02,
 								(q.y - ghp * 0.5) * WORLD_SCALE))
@@ -7548,7 +7661,7 @@ func _scatter_trees(mw: float, mh: float) -> void:
 		var sc: float = rng.randf_range(0.62, 1.20)
 		if outside:
 			sc *= rng.randf_range(0.88, 1.18)
-		var ty: float = terrain.height_at(px, py) if terrain != null else 0.0
+		var ty: float = terrain.height_at_mesh(px, py) if terrain != null else 0.0
 		var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.055, 0.055)) * Basis(Vector3(0, 0, 1), rng.randf_range(-0.055, 0.055))
 		var base := Transform3D(
 				(Basis(Vector3.UP, rng.randf() * TAU) * lean).scaled(Vector3.ONE * sc),
