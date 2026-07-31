@@ -994,6 +994,25 @@ func _artshots() -> void:
 			cam.pitch_deg = 6.0
 			await get_tree().create_timer(0.8).timeout
 			await _snap("res://art_ch%02d_water2.png" % chn)
+	# ①b 岩石特寫（使用者 2026-07-31：「這類似的石頭太假了」）：
+	# 找最大的一顆石頭（_covers 裡 type=sandbag 且是石頭登記的那批），人眼高度平視
+	var rock_at := Vector2(-1, -1)
+	var rock_r := 0.0
+	for bk in _blockers:
+		if bk.get("t", "") != "cir" or float(bk.get("h", 0.0)) < 0.5:
+			continue
+		if String(bk.get("k", "")) != "":
+			continue                        # 有 k 的是深水樁/沙包等，不是石頭
+		if float(bk["r"]) > rock_r:
+			rock_r = float(bk["r"])
+			rock_at = bk["c"]
+	if rock_at.x >= 0.0:
+		cam.focus = _to3d(rock_at.x, rock_at.y) + Vector3(0, 0.8, 0)
+		cam.dist = 6.0
+		cam.pitch_deg = 6.0
+		cam.yaw = 0.9
+		await get_tree().create_timer(0.8).timeout
+		await _snap("res://art_ch%02d_rock.png" % chn)
 	# ② 樹叢：拿 _tree_feet 裡最靠中央的一棵
 	if not _tree_feet.is_empty():
 		var ctr := Vector2(mwp * 0.5, mhp * 0.5)
@@ -6936,13 +6955,43 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 	#   的蛋。改用 Trees.build_rock_protos 的碎面原型：稜角、逐面色差、頂白底髒都烘在
 	#   頂點色裡；per-instance 色偏照舊由 MultiMesh instance color 乘上去。
 	var protos: Array = TREES.build_rock_protos()
-	var rmat := StandardMaterial3D.new()
-	rmat.albedo_color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
-	rmat.vertex_color_use_as_albedo = true
-	rmat.roughness = 0.97
+	# ★岩石材質（2026-07-31 使用者：「這類似的石頭太假了」）。三個病一起治：
+	#   ① 沒有任何貼圖，只有純色＋頂點明暗 → 近看是一塊塑膠
+	#   ② 顏色直接取 biome.rock，沙漠圖那是**沙黃色**＝石頭跟地面同色，讀不出是石頭
+	#   ③ 岩石沒有 UV → 一般貼圖會被拉扯，必須用三平面投影
+	var rock_c: Color = terrain.biome.get("rock", Color(0.5, 0.46, 0.36))
+	# 去飽和 55% 並壓暗：岩石是灰褐的礦物，與沙／草的暖色拉開對比才看得出是石頭
+	var gray: float = rock_c.get_luminance()
+	# 去飽和後要**提亮**回來：Concrete 貼圖本身是中灰(~0.5)，再乘暗色調＋頂點明暗
+	# ＝黑剪影（實拍）。tint 用 1.45 讓貼圖細節看得見，對比靠法線圖而不是壓暗。
+	# ⚠ 去飽和要夠徹底：0.55 之後仍保留 45% 的沙黃，配上暖陽讀成紫褐（實拍）。
+	# 岩石＝礦物灰白，0.82 幾乎全灰、只留一絲地域色偏。
+	# ⚠ 不可以用 Color * float：那會把 alpha 也乘上去（實測 alpha=1.45），
+	# 明確指定 alpha=1。
+	# 去飽和 0.5＋提亮 1.25，再補一點暖偏：Concrete 貼圖本身是冷灰，
+	# 全中性 tint 會讓石頭在暖沙上讀成藍紫色（實拍）。暖灰＝沙岩，
+	# 與地面同溫但更亮更低飽和，看得出是石頭又不突兀。
+	var kb: float = 1.25
+	var warm := Color(1.06, 1.0, 0.92)
+	rock_c = Color(clampf(lerpf(rock_c.r, gray, 0.5) * kb * warm.r, 0.0, 1.0),
+			clampf(lerpf(rock_c.g, gray, 0.5) * kb * warm.g, 0.0, 1.0),
+			clampf(lerpf(rock_c.b, gray, 0.5) * kb * warm.b, 0.0, 1.0), 1.0)
+	var rmat: BaseMaterial3D = BattleMats.pbr("Concrete", 0.9, 0.98, rock_c)
+	rmat = rmat.duplicate() as BaseMaterial3D
+	rmat.uv1_triplanar = true          # 岩石無 UV：三平面投影才不會把貼圖拉成條紋
+	# ⚠ tile 尺寸要比石頭小很多才看得到顆粒：0.55 等於 1.8m 一格，一顆石頭上
+	# 只有一格＝完全看不出貼圖（實拍還是一塊光滑純色）。3.2 ＝ 31cm 一格。
+	rmat.uv1_scale = Vector3(3.2, 3.2, 3.2)
+	rmat.vertex_color_use_as_albedo = true    # 頂點色只做面的明暗層次
+	rmat.normal_enabled = true
+	rmat.normal_scale = 1.6            # 法線加重：低多邊形靠它做出岩面的粗糙顆粒
 	# 碎面岩的頂點抖動不保證繞序全朝外：背面剔除下某些角度整塊面消失＝破圖
 	# （使用者 2026-07-31 實玩回報「石頭破圖」）。雙面渲染，石頭不透明沒代價。
 	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	print("[rockmat] 型別=%s albedo_tex=%s normal_tex=%s triplanar=%s tint=%s" % [
+			rmat.get_class(), str(rmat.albedo_texture != null),
+			str(rmat.normal_texture != null), str(rmat.uv1_triplanar),
+			str(rmat.albedo_color)])
 	var xfs_by: Array = []       # 每個原型自己一份 [Transform3D]
 	var cols_by: Array = []
 	for _p in protos.size():
@@ -6985,6 +7034,27 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 		var pi2: int = rng.randi() % protos.size()
 		xfs_by[pi2].append(Transform3D(b, Vector3(mypos.x, ty + sc * 0.28, mypos.y)))
 		placed_pos.append(mypos)
+		# 與地面的過渡（GDD/06 美術四原則第 4 條）：大石底部堆一圈崩落的碎石。
+		# 沒有這一圈，石頭就是「擺在沙上的模型」——輪廓與地面硬切，一眼就假
+		# （2026-07-31 沙漠圖實拍）。碎石不登記碰撞（跨得過去）。
+		if sc > 0.6:
+			for _dbi in range(rng.randi_range(2, 4)):
+				var da: float = rng.randf() * TAU
+				var dr: float = sc * rng.randf_range(0.85, 1.35)
+				var dsc: float = sc * rng.randf_range(0.10, 0.22)
+				var dwx: float = mypos.x + cos(da) * dr
+				var dwz: float = mypos.y + sin(da) * dr
+				var dty: float = terrain.height_at_mesh(
+						dwx / WORLD_SCALE + gwp * 0.5, dwz / WORLD_SCALE + ghp * 0.5)
+				# ⚠ 碎石要**壓扁＋半埋**：等比例的小石在切割面下看起來就是一顆方糖，
+				# 實拍是一地白盒子。壓到 0.35 高、埋掉一半，才像崩落堆積的碎屑。
+				var db := (Basis(Vector3.UP, rng.randf() * TAU)
+						* Basis(Vector3(1, 0, 0), rng.randf_range(-0.25, 0.25))).scaled(
+						Vector3(dsc * rng.randf_range(1.1, 1.8), dsc * 0.35, dsc * rng.randf_range(0.9, 1.4)))
+				var dpi: int = rng.randi() % protos.size()
+				xfs_by[dpi].append(Transform3D(db, Vector3(dwx, dty - dsc * 0.12, dwz)))
+				cols_by[dpi].append(Color(rng.randf_range(0.78, 1.05),
+						rng.randf_range(0.78, 1.02), rng.randf_range(0.76, 1.0)))
 		# ★2026-07-27：門檻原本是 sc > 0.7，於是**半徑近 1m 的石頭完全沒有碰撞**——
 		#   人直接走過去。石頭是石頭，不管大小都不能穿過（鐵律 0①）。
 		#   矮的（≤ STEP_UP）由 _ground_height 給頂面支撐＝踩上去，不是繞過去。

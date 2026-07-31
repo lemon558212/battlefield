@@ -189,34 +189,68 @@ static func _dead(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 # 舊做法＝共用 SphereMesh 壓扁（平滑法線）＝一窩光滑的蛋。
 # 岩石的「真」來自：稜角（大位移＋平面法線）、逐面色差、頂面曬白/底部沾土。
 # 跟樹一樣建置期產原型、MultiMesh 鋪場，每顆只是變換與色偏不同。
-static func build_rock_protos(variants := 5, seed_v := 20260729) -> Array:
+static func build_rock_protos(variants := 5, seed_v := 20260731) -> Array:
 	var out: Array = []
 	var rng := RandomNumberGenerator.new()
 	for v in variants:
 		rng.seed = seed_v + v * 131
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		var rows := 4
-		var cols := 6
+		# ★★2026-07-31 三修（使用者：「這類似的石頭太假了」，沙漠圖實拍像一顆黃糖果）。
+		# 前兩版都在球面上加噪聲——不管幅度多大，那是「有疙瘩的球」，不是石頭。
+		# 真實岩石的形狀來自**斷裂**：幾個平面把石塊削掉幾角，於是有大片平坦的斷面、
+		# 銳利的稜線、以及面與面之間明確的明暗差。這一版改用「切割面」生成：
+		#   ① 先做一顆略帶噪聲的橢球 ② 用 5~7 個隨機平面切它（面外的頂點壓回平面上）
+		#   ③ 逐面法線（頂點不共用）＋依面朝向烘明暗：朝上曬白、朝下沾土
+		var rows := 5
+		var cols := 8
 		var pts: Array = []
 		for iy in range(rows + 1):
 			var row: Array = []
 			var phi: float = PI * float(iy) / float(rows)
 			for ix in cols:
-				var th: float = TAU * (float(ix) + rng.randf_range(-0.22, 0.22)) / float(cols)
-				# 位移大到 −28%~+30%：這是「稜」的來源；壓扁讓它像臥在地上的岩塊
-				var j: float = rng.randf_range(0.72, 1.30)
-				row.append(Vector3(sin(phi) * cos(th) * j,
-						cos(phi) * 0.62 * j, sin(phi) * sin(th) * j))
+				var th: float = TAU * float(ix) / float(cols)
+				var j: float = rng.randf_range(0.90, 1.10)
+				row.append(Vector3(sin(phi) * cos(th) * j * rng.randf_range(0.85, 1.15),
+						cos(phi) * rng.randf_range(0.55, 0.72) * j,
+						sin(phi) * sin(th) * j * rng.randf_range(0.85, 1.15)))
 			pts.append(row)
+		# 切割面：法線隨機、距原點 0.42~0.78。面外的頂點沿法線壓回平面＝一片平坦斷面
+		var planes: Array = []
+		# 切多一點、切深一點：5~7 面且距原點 0.42~0.78 只削掉一點皮，
+		# 輪廓仍是鵝卵石（實拍）。8~11 面、0.30~0.62 才會出現大片斷面與銳稜。
+		for _p in rng.randi_range(8, 11):
+			var n := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.6, 1),
+					rng.randf_range(-1, 1)).normalized()
+			planes.append([n, rng.randf_range(0.30, 0.62)])
+		for iy in range(rows + 1):
+			for ix in cols:
+				var p: Vector3 = pts[iy][ix]
+				for pl in planes:
+					var nn: Vector3 = pl[0]
+					var dd: float = pl[1]
+					var over: float = p.dot(nn) - dd
+					if over > 0.0:
+						p -= nn * over
+				pts[iy][ix] = p
 		for iy in rows:
-			# 頂面曬白 1.18 → 底部沾土 0.55（半埋的石頭底緣永遠是髒的）
-			var sh: float = lerpf(1.18, 0.55, (float(iy) + 0.5) / float(rows))
 			for ix in cols:
 				var nx: int = (ix + 1) % cols
-				var fc := Color(sh, sh, sh) * rng.randf_range(0.88, 1.12)
-				_quad(st, pts[iy][ix], pts[iy][nx], pts[iy + 1][nx], pts[iy + 1][ix], fc)
+				var a: Vector3 = pts[iy][ix]
+				var b: Vector3 = pts[iy][nx]
+				var c: Vector3 = pts[iy + 1][nx]
+				var d: Vector3 = pts[iy + 1][ix]
+				# 明暗依**面的實際朝向**烘進頂點色（不是依緯度）：切割後同一緯度的面
+				# 朝向可能完全不同，用緯度上色會讓斷面看起來像貼了漸層紙。
+				var fn: Vector3 = (b - a).cross(c - a).normalized()
+				var up: float = clampf(fn.y, -1.0, 1.0)
+				# ⚠ 明暗範圍不能開太大：頂點色會與「貼圖 × 色調」相乘，三重壓下去
+				# 石頭變成黑色剪影（2026-07-31 實拍）。0.80~1.18 層次夠、不壓死。
+				var sh: float = lerpf(0.80, 1.18, (up + 1.0) * 0.5)
+				var fc := Color(sh, sh, sh) * rng.randf_range(0.93, 1.07)
+				_quad(st, a, b, c, d, fc)
 		st.generate_normals()
+		st.generate_tangents()
 		out.append(st.commit())
 	return out
 
