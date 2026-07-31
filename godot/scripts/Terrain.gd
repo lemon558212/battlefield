@@ -13,7 +13,13 @@ const TRENCH_DEPTH := 1.4         # 壕溝深（GDD/14 §1）
 const TRENCH_BERM := 0.45         # 溝口外緣的土堤高
 const CRATER_DEPTH := 1.1
 const OUTER := 90.0               # 戰場外再鋪多遠（公尺）：不鋪遠一點，遠鏡頭會看到地圖是塊浮空積木
-const OUTER_CELL := 7.5           # 外圍用粗網格，省三角形
+const OUTER_CELL := 7.5
+# 坡度移動成本（GDD/14 §3-4）。SLOPE_UP_K 2.0＝19 度坡吃 1.7 倍、31 度吃 2.2 倍
+# （舊門檻制在 19 度是 1.5 倍且以下完全不耗）。真實登山的 Naismith 法則換算
+# 約 8 倍，遊戲尺度取 2.0——比原本重一點點，符合使用者要的手感。
+const SLOPE_UP_K := 2.0
+const SLOPE_BRAKE_AT := 0.25    # 下坡超過這個坡度開始要煞車
+const SLOPE_BRAKE_K := 0.8           # 外圍用粗網格，省三角形
 
 var map: Dictionary = {}
 var ws := 0.05                    # WORLD_SCALE：遊戲 px → 公尺
@@ -258,7 +264,7 @@ func slope_at(px: float, py: float) -> float:
 # ⚠ 2026-07-27：`data/terrain_mobility.json` 早就寫好每種機動型別的地形倍率
 #   （shallow 1.55、wire 1.8、bush 0.85…），但**全專案沒有一行讀它**，
 #   這裡自己寫死 1.5／2.0（違反鐵律 3，而且偵察兵跟重裝兵過壕溝一樣快）。
-func move_cost(px: float, py: float, mob := "foot") -> float:
+func move_cost(px: float, py: float, mob := "foot", dir := Vector2.ZERO) -> float:
 	var tab: Dictionary = GameData.terrain_mobility.get(mob, {})
 	var c: float = float(tab.get("ground", 1.0))
 	if in_water(px, py):
@@ -272,9 +278,33 @@ func move_cost(px: float, py: float, mob := "foot") -> float:
 			c = maxf(c, float(tab.get("crater", 1.15)))
 	if in_trench(px, py):
 		c = maxf(c, float(tab.get("trench", 1.25)))
-	if slope_at(px, py) > 0.35:
-		c = maxf(c, float(tab.get("hill", 1.15)) * 1.3)
+	# ★坡度成本（2026-07-31 使用者：「爬坡消耗會要快一點點」）。
+	# 舊寫法有兩個物理錯誤：
+	#   ① **門檻突跳**：坡度 0.34 完全不耗、0.36 突然 ×1.5。真實是連續的——
+	#      每一分坡度都要多做一分功。
+	#   ② **上下坡同價**：爬坡是對抗重力做功，下坡則是重力幫忙（只有陡降要煞車）。
+	# 改成：上坡 cost ×(1 + 坡度×2.0×兵種係數)、緩降略省力、陡降(>0.25)加煞車成本。
+	# 坡度成本與地表類型是**相乘**不是取大：在淺水裡爬坡兩件事都要付出。
+	var up: float = slope_signed(px, py, dir)
+	var hill_k: float = float(tab.get("hill", 1.15))
+	if up > 0.0:
+		c *= 1.0 + up * SLOPE_UP_K * hill_k
+	elif up < -SLOPE_BRAKE_AT:
+		c *= 1.0 + (-up - SLOPE_BRAKE_AT) * SLOPE_BRAKE_K    # 陡降煞車也費力
+	else:
+		c *= 1.0 + up * 0.20                                  # 緩降省一點力（up 為負）
 	return c
+
+# 有向坡度：正＝上坡、負＝下坡（每公尺水平的高度變化）。
+# dir 為零向量時回傳絕對坡度（不知道往哪走就當上坡算，保守）。
+func slope_signed(px: float, py: float, dir: Vector2) -> float:
+	var d := 12.0
+	var hx: float = height_at(px + d, py) - height_at(px - d, py)
+	var hz: float = height_at(px, py + d) - height_at(px, py - d)
+	var grad := Vector2(hx, hz) / (2.0 * d * ws)      # 高度梯度（無因次）
+	if dir.length_squared() < 0.000001:
+		return grad.length()
+	return grad.dot(dir.normalized())
 
 # 這個點是不是在彈坑裡（GDD/01 §4b：全向低輪廓＋濺射遮蔽；彈坑不在 _covers）
 func in_crater(px: float, py: float) -> bool:

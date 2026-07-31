@@ -3955,7 +3955,8 @@ func _ap_reach_dir(u, dir: Vector3, max_steps := 90) -> float:
 		var py: float = pos.z / WORLD_SCALE + mh * 0.5
 		if px < 1.0 or py < 1.0 or px > mw - 1.0 or py > mh - 1.0:
 			break
-		var cost: float = terrain.move_cost(px, py, mob) * wmul
+		# 方向要傳進去才分得出上下坡（同一個點往上走與往下走不同價）
+		var cost: float = terrain.move_cost(px, py, mob, Vector2(d.x, d.z)) * wmul
 		var spend: float = step * cost
 		if spend > budget:
 			gone += step * (budget / maxf(spend, 0.0001))
@@ -5492,7 +5493,8 @@ func _action_tick(_delta: float) -> void:
 	#   被擋住時人會在碰撞邊界來回抖動，每幀都有一點位移，加總起來 AP 就被扣光了——
 	#   玩家看到的是「原地跑步，AP 一直掉」（使用者 2026-07-27 實測）。
 	#   低於門檻的抖動一律不算。
-	var moved: float = Vector2(pos.x - _act_last.x, pos.z - _act_last.z).length()
+	var mdelta := Vector2(pos.x - _act_last.x, pos.z - _act_last.z)
+	var moved: float = mdelta.length()
 	if moved < 0.004:
 		moved = 0.0
 	_act_last = pos
@@ -5501,7 +5503,8 @@ func _action_tick(_delta: float) -> void:
 		var tcost := 1.0
 		if terrain != null:
 			tcost = terrain.move_cost(float(acting["wx"]), float(acting["wy"]),
-					String(GameData.class_base.get(acting["cls"], {}).get("mobility", "foot"))) 					* weather_move_mul()
+					String(GameData.class_base.get(acting["cls"], {}).get("mobility", "foot")),
+					mdelta) * weather_move_mul()
 		acting["ap"] = maxf(0.0, float(acting["ap"]) - moved / (PX_PER_AP * WORLD_SCALE) * tcost)
 		var p := _live_px(acting)
 		acting["wx"] = p.x
