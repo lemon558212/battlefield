@@ -34,6 +34,7 @@ var inside_probe: Callable = Callable()
 var inside_loose_probe: Callable = Callable()
 
 var _tps_snap := false
+var _narrow_lift := 0.0   # 窄處鏡頭抬升角（度）：平滑過渡避免臨界點跳動
 func set_tps(n: Node3D) -> void:
 	# 切到很遠的另一個單位時要用「剪接」不是「平移」：平滑飛越會讓鏡頭
 	# 穿過沿路每一棟建築（ch02 壓測 22 次鏡頭穿牆的主因，玩家切兵也看得到）。
@@ -139,6 +140,25 @@ func _apply_tps(delta: float) -> void:
 	# 右肩優先：只有明顯比較差才換過去，否則鏡頭會在兩肩之間來回搖
 	var side_want: float = 1.0 if k_r >= k_l - 0.18 else -1.0
 	_shoulder = move_toward(_shoulder, side_want, delta * 3.0)
+	# ★窄巷抬鏡頭（2026-07-31 使用者實拍：巷子裡整個畫面被牆填滿）。
+	# 兩肩都被堵死時，收距離只是把鏡頭壓到臉上，視野裡仍然只有牆。
+	# 真正的解法是**往上抬**——巷子上方是開的，俯視就能看到人與前路。
+	# 逐級試 0/16/32/48 度，取第一個「可用距離明顯變好」的；用 move_toward
+	# 平滑過渡並要求 +0.10 的明顯改善才換，避免在臨界點來回跳（抖動的老坑）。
+	if wall_probe.is_valid():
+		var k_base: float = float(wall_probe.call(head,
+				_tps_want(head, fwd, right, pr, _shoulder)))
+		var want_lift := 0.0
+		if k_base < 0.62:                 # 距離被砍到六成以下才算「窄」
+			var best_k: float = k_base
+			for lift_deg in [16.0, 32.0, 48.0]:
+				var k2: float = float(wall_probe.call(head, _tps_want(head, fwd, right,
+						pr + deg_to_rad(lift_deg), _shoulder)))
+				if k2 > best_k + 0.10:
+					best_k = k2
+					want_lift = lift_deg
+		_narrow_lift = move_toward(_narrow_lift, want_lift, delta * 70.0)
+		pr += deg_to_rad(_narrow_lift)
 	var want: Vector3 = _tps_want(head, fwd, right, pr, _shoulder)
 	# 鏡頭碰撞：牆擋住就把鏡頭拉近。不做這個，第三人稱一貼牆就會看穿牆壁，臨場感全毀。
 	# 下限 0.06 太近＝鏡頭黏在後腦杓上，畫面被牆佔滿；換肩之後這裡只需要輕微修正。
