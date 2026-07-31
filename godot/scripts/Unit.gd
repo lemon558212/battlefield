@@ -99,6 +99,9 @@ const PRONE_KNEE_MAX := 48.0
 #   ⚠ 教訓：這種「白名單式的狀態回歸」只要漏一個狀態就會卡住，
 #     而且卡住的是「玩家最常看到的那個狀態」。清單要含全部移動狀態。
 const IDLE_BACK := ["", "shoot", "hit", "crouch", "run", "walk", "sprint", "crouch_walk", "aim"]
+# 「正在移動」的動作狀態（判斷持槍姿勢用）。單獨列出來是因為 IDLE_BACK 含 "shoot"/"aim"
+# 等靜止狀態，不能拿來當移動判準。
+const MOVE_STATES := ["run", "walk", "sprint", "crouch_walk", "run_shoot"]
 
 # 會循環播放的動作（其餘播一次就回 idle）
 const LOOP_KEYS := ["idle", "idle_relaxed", "walk", "run", "sprint", "aim", "crouch", "crouch_walk", "fix"]
@@ -736,6 +739,41 @@ var _is_vehicle := false
 var _turret: Node3D = null
 var _barrel_len := 3.6
 
+# 履帶節的封閉路徑（t: 0~1）：下緣貼地直線 → 前惰輪半圓 → 上緣走托帶輪 → 後主動輪半圓。
+# 用參數化路徑而不是「排一圈方塊」，才能讓每一節都貼著輪子的外緣走。
+func _track_path(t: float, sgn: float) -> Vector3:
+	var x: float = sgn * 1.62
+	var z_f := 2.6         # 前惰輪 z
+	var z_r := -2.72       # 後主動輪 z
+	var y_lo := 0.45       # 下緣（負重輪軸高）
+	var y_hi := 1.02       # 上緣（托帶輪高）
+	var r_f := 0.30
+	var r_r := 0.34
+	var run: float = z_f - z_r
+	var arc: float = PI * (r_f + r_r) * 0.5
+	var total: float = run * 2.0 + arc * 2.0
+	var d: float = t * total
+	if d < run:                                  # 下緣：後→前
+		return Vector3(x, y_lo - 0.34, z_r + d)
+	d -= run
+	# 前端半圓：由下繞到上
+	if d < arc:
+		var a: float = PI * (d / arc)
+		return Vector3(x, (y_lo + y_hi) * 0.5 - cos(a) * ((y_hi - y_lo) * 0.5 + r_f * 0.6),
+				z_f + sin(a) * r_f)
+	d -= arc
+	if d < run:                                  # 上緣：前→後
+		return Vector3(x, y_hi + 0.16, z_f - d)
+	d -= run
+	var a2: float = PI * (d / arc)               # 後端半圓：由上繞回下
+	return Vector3(x, (y_lo + y_hi) * 0.5 + cos(a2) * ((y_hi - y_lo) * 0.5 + r_r * 0.6),
+			z_r - sin(a2) * r_r)
+
+# 載具碰撞半長/半寬（公尺）。⚠ 必須跟畫出來的幾何一致——先前全部寫死坦克的
+# 3.0×1.75，而驅逐艦畫成 18m 長，等於船身大半沒有實體（同「坦克圓形碰撞」那條教訓）。
+var veh_hl := 3.00
+var veh_hw := 1.75
+
 func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	_is_vehicle = true
 	var root := Node3D.new()
@@ -743,6 +781,17 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	add_child(root)
 	_model = root
 	_model_base_y = 0.0
+	# ⚠⚠ 先前這裡沒有任何分支：驅逐艦、潛艇、戰鬥機**全部都被畫成坦克**。
+	#   海空單位有自己的剪影，走各自的建造函式（鐵律 0：現實怎樣就怎樣）。
+	var mob: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
+	if mob == "naval":
+		_build_ship(root, p_cls, is_player)
+		return
+	if mob == "air":
+		_build_aircraft(root, p_cls, is_player)
+		return
+	veh_hl = 3.00
+	veh_hw = 1.75
 	var body := _mat(Color(0.36, 0.40, 0.30), 0.25, 0.72) if is_player else _mat(Color(0.42, 0.30, 0.26), 0.25, 0.72)
 	var dark := _mat(Color(0.10, 0.10, 0.11), 0.4, 0.6)
 	var steel := _mat(Color(0.22, 0.24, 0.22), 0.6, 0.45)
@@ -766,6 +815,36 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 		idler.rotation_degrees.z = 90
 		idler.position = Vector3(sgn * 1.62, 0.86, 2.6)
 		root.add_child(idler)
+		# 主動輪（後方，帶齒）＋托帶輪（上方，撐住回程履帶）——沒有這兩個，
+		# 履帶上緣是一條平板，一看就是貼上去的黑帶子
+		var sprocket := _cyl(0.30, 0.68, steel)
+		sprocket.rotation_degrees.z = 90
+		sprocket.position = Vector3(sgn * 1.62, 0.86, -2.72)
+		root.add_child(sprocket)
+		for ti in 8:                                   # 齒
+			var ang: float = TAU * float(ti) / 8.0
+			var tooth := _box(0.10, 0.14, 0.14, dark)
+			tooth.position = Vector3(sgn * 1.62, 0.86 + cos(ang) * 0.30, -2.72 + sin(ang) * 0.30)
+			root.add_child(tooth)
+		for ri in 3:
+			var roller := _cyl(0.13, 0.50, steel)
+			roller.rotation_degrees.z = 90
+			roller.position = Vector3(sgn * 1.62, 1.02, -1.5 + ri * 1.35)
+			root.add_child(roller)
+		# 履帶節：一節一節的板，繞著「下緣貼地、上緣走托帶輪」的封閉路徑鋪。
+		# 真實履帶的辨識訊號就是這些節與節之間的接縫（沒有它就是一條黑板）。
+		var link_n := 46
+		for li in link_n:
+			var t: float = float(li) / float(link_n)
+			var lp: Vector3 = _track_path(t, sgn)
+			var nxt: Vector3 = _track_path(fmod(t + 1.0 / float(link_n), 1.0), sgn)
+			var seg: Vector3 = nxt - lp
+			if seg.length() < 0.001:
+				continue
+			var link := _box(0.56, 0.10, maxf(seg.length() * 1.06, 0.16), dark)
+			link.position = (lp + nxt) * 0.5
+			link.rotation_degrees.x = rad_to_deg(atan2(seg.y, seg.z))
+			root.add_child(link)
 	# 砲塔（獨立節點，可轉向）
 	_turret = Node3D.new()
 	_turret.name = "Turret"
@@ -785,7 +864,48 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	_turret.add_child(brake)
 	# 車長機槍（GDD/01 §3：坦克靠車載機槍警戒）
 	var cmg := _box(0.12, 0.12, 0.7, dark); cmg.position = Vector3(0.75, 0.72, 0.9); _turret.add_child(cmg)
-	var hatch := _cyl(0.34, 0.16, steel); hatch.position = Vector3(0.75, 0.66, 0.3); _turret.add_child(hatch)
+	# 車長塔（凸出的圓塔）＋艙蓋＋周視鏡：坦克頂面全平的話從空中看就是一塊板
+	var cupola := _cyl(0.42, 0.22, body); cupola.position = Vector3(0.75, 0.72, 0.3)
+	_turret.add_child(cupola)
+	var hatch := _cyl(0.36, 0.10, steel); hatch.position = Vector3(0.75, 0.86, 0.3)
+	_turret.add_child(hatch)
+	var hatch_hinge := _box(0.30, 0.06, 0.10, dark)
+	hatch_hinge.position = Vector3(0.75, 0.88, -0.06); _turret.add_child(hatch_hinge)
+	for pi2 in 5:                                   # 車長塔周視潛望鏡
+		var pang: float = TAU * float(pi2) / 5.0
+		var peri := _box(0.10, 0.09, 0.06, dark)
+		peri.position = Vector3(0.75 + cos(pang) * 0.40, 0.74, 0.3 + sin(pang) * 0.40)
+		peri.rotation_degrees.y = -rad_to_deg(pang)
+		_turret.add_child(peri)
+	# 裝填手艙蓋（另一側）
+	var hatch2 := _cyl(0.30, 0.09, steel); hatch2.position = Vector3(-0.72, 0.64, 0.15)
+	_turret.add_child(hatch2)
+	# 砲手瞄準鏡
+	var sight_box := _box(0.26, 0.18, 0.20, steel)
+	sight_box.position = Vector3(-0.45, 0.68, 1.25); _turret.add_child(sight_box)
+	# 天線兩根（使用者點名）：細長桿微微後傾，尖端再收細
+	for ai in 2:
+		var mast := _cyl(0.022, 1.5, dark)
+		mast.position = Vector3(-0.85 + float(ai) * 0.26, 0.62 + 0.75, -1.05)
+		mast.rotation_degrees.x = 7.0 + float(ai) * 4.0
+		_turret.add_child(mast)
+		var mast_tip := _cyl(0.010, 0.7, dark)
+		mast_tip.position = Vector3(-0.85 + float(ai) * 0.26, 0.62 + 1.72, -1.18)
+		mast_tip.rotation_degrees.x = 7.0 + float(ai) * 4.0
+		_turret.add_child(mast_tip)
+	# 砲塔尾艙置物籃＋捆紮的帆布捲：真車尾艙一定堆滿雜物，光禿禿的最假
+	var basket := _box(1.9, 0.42, 0.9, steel)
+	basket.position = Vector3(0, 0.50, -1.55); _turret.add_child(basket)
+	var roll := _cyl(0.20, 1.4, _mat(Color(0.34, 0.33, 0.26), 0.0, 0.95))
+	roll.rotation_degrees.z = 90
+	roll.position = Vector3(0, 0.74, -1.55); _turret.add_child(roll)
+	# 煙幕彈發射器（砲塔兩側各 4 管）
+	for sgn3 in [-1.0, 1.0]:
+		for gi in 4:
+			var smoke := _cyl(0.055, 0.26, dark)
+			smoke.rotation_degrees = Vector3(-70.0, 0.0, sgn3 * 22.0)
+			smoke.position = Vector3(sgn3 * 1.02, 0.52, 0.55 - float(gi) * 0.22)
+			_turret.add_child(smoke)
 	# 側裙板與排氣（剪影辨識度）
 	for sgn2 in [-1.0, 1.0]:
 		var skirt := _box(0.1, 0.5, 4.6, steel)
@@ -793,6 +913,221 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 		root.add_child(skirt)
 	var exhaust := _cyl(0.18, 0.5, dark); exhaust.rotation_degrees.z = 90
 	exhaust.position = Vector3(-1.2, 1.35, -2.6); root.add_child(exhaust)
+	# 引擎散熱柵格（後甲板）：一條條百葉，車尾才不是一塊素板
+	for gi2 in 7:
+		var louvre := _box(2.2, 0.05, 0.12, dark)
+		louvre.position = Vector3(0, 1.57, -1.55 - float(gi2) * 0.19)
+		louvre.rotation_degrees.x = -22.0
+		root.add_child(louvre)
+	# 前擋泥板與備用履帶塊（掛在首上裝甲，真車的標準配置）
+	for sgn4 in [-1.0, 1.0]:
+		var fender := _box(0.44, 0.06, 1.0, steel)
+		fender.position = Vector3(sgn4 * 1.62, 1.28, 2.35)
+		fender.rotation_degrees.x = -10.0
+		root.add_child(fender)
+		for si2 in 3:
+			var spare := _box(0.42, 0.10, 0.16, dark)
+			spare.position = Vector3(sgn4 * 0.85, 1.30 + float(si2) * 0.11, 2.05)
+			spare.rotation_degrees.x = -18.0
+			root.add_child(spare)
+	# 車頭燈與拖曳鉤
+	for sgn5 in [-1.0, 1.0]:
+		var lamp := _cyl(0.11, 0.12, steel)
+		lamp.rotation_degrees.x = 90
+		lamp.position = Vector3(sgn5 * 1.05, 1.62, 2.28)
+		root.add_child(lamp)
+		var hook := _box(0.16, 0.14, 0.10, steel)
+		hook.position = Vector3(sgn5 * 0.62, 1.02, 2.72)
+		root.add_child(hook)
+	if not is_player:
+		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+
+# ---------- 艦艇（naval）----------
+# ⚠ 尺度：真驅逐艦約 130m，放在 90m 的戰場上不可能。故沿用本專案既有的
+#   壓縮尺度慣例（射程 10.5m／視野 10m 是經核定的設計例外，GDD/00），
+#   艦艇壓到 18m 級。這是**明文記錄的例外**，不是忘了照現實做。
+func _build_ship(root: Node3D, p_cls: String, is_player: bool) -> void:
+	var body := _mat(Color(0.38, 0.42, 0.45), 0.30, 0.60) if is_player \
+			else _mat(Color(0.45, 0.33, 0.31), 0.30, 0.60)
+	var dark := _mat(Color(0.12, 0.13, 0.15), 0.45, 0.55)
+	var steel := _mat(Color(0.26, 0.28, 0.30), 0.60, 0.45)
+	var deck_m := _mat(Color(0.30, 0.31, 0.29), 0.15, 0.85)
+	var L: float = {"destroyer": 18.0, "missileboat": 10.0, "lst": 14.0,
+			"submarine": 15.0}.get(p_cls, 14.0)
+	var W: float = {"destroyer": 3.2, "missileboat": 2.8, "lst": 4.0,
+			"submarine": 2.4}.get(p_cls, 3.0)
+	veh_hl = L * 0.5
+	veh_hw = W * 0.5
+	if p_cls == "submarine":
+		# 潛艦：圓柱耐壓殼＋帆罩＋艉舵，水線很低
+		var pressure := _cyl(W * 0.5, L * 0.86, body)
+		pressure.rotation_degrees.x = 90
+		pressure.position = Vector3(0, 0.55, 0)
+		root.add_child(pressure)
+		var bow := _conemesh(W * 0.5, 0.15, L * 0.16, body)
+		bow.rotation_degrees.x = 90
+		bow.position = Vector3(0, 0.55, L * 0.50)
+		root.add_child(bow)
+		var sail := _box(0.9, 1.9, 3.2, body); sail.position = Vector3(0, 1.55, 1.0)
+		root.add_child(sail)
+		var scope := _cyl(0.07, 1.6, dark); scope.position = Vector3(0.18, 3.1, 0.6)
+		root.add_child(scope)
+		for sgn in [-1.0, 1.0]:                       # 帆罩水平舵
+			var plane := _box(2.0, 0.10, 0.6, steel)
+			plane.position = Vector3(sgn * 1.2, 1.5, 1.2)
+			root.add_child(plane)
+		var rudder := _box(0.12, 2.0, 1.2, steel)
+		rudder.position = Vector3(0, 0.9, -L * 0.46); root.add_child(rudder)
+		if not is_player:
+			_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+		return
+	# 水面艦：艦身（艏部收尖）＋甲板＋上層建築＋桅桿＋煙囪＋主砲
+	var hull := _box(W, 1.5, L * 0.82, body); hull.position.y = 0.75
+	root.add_child(hull)
+	var bow2 := _conemesh(W * 0.5, 0.12, L * 0.24, body)
+	bow2.rotation_degrees.x = 90
+	bow2.position = Vector3(0, 0.75, L * 0.46); root.add_child(bow2)
+	var deck := _box(W * 0.96, 0.18, L * 0.86, deck_m)
+	deck.position = Vector3(0, 1.52, 0); root.add_child(deck)
+	# 舷牆（甲板邊緣的立面）：沒有它甲板像一塊漂浮的板子
+	for sgn2 in [-1.0, 1.0]:
+		var bul := _box(0.12, 0.55, L * 0.8, body)
+		bul.position = Vector3(sgn2 * W * 0.48, 1.80, 0); root.add_child(bul)
+	# 上層建築：兩層階梯狀後退
+	var sup1 := _box(W * 0.72, 1.5, L * 0.30, body)
+	sup1.position = Vector3(0, 2.35, L * 0.04); root.add_child(sup1)
+	var sup2 := _box(W * 0.52, 1.2, L * 0.16, body)
+	sup2.position = Vector3(0, 3.65, L * 0.06); root.add_child(sup2)
+	var bridge := _box(W * 0.56, 0.7, 1.3, dark)     # 艦橋窗
+	bridge.position = Vector3(0, 3.5, L * 0.13); root.add_child(bridge)
+	# 桅桿＋雷達（旋轉平面天線是軍艦最強的剪影訊號）
+	var mast := _cyl(0.10, 3.2, steel); mast.position = Vector3(0, 5.8, L * 0.02)
+	root.add_child(mast)
+	var radar := _box(1.9, 0.5, 0.10, steel); radar.position = Vector3(0, 6.9, L * 0.02)
+	radar.rotation_degrees.z = 12.0; root.add_child(radar)
+	for yi in 2:                                      # 桅桿橫桁
+		var yard := _box(2.2, 0.07, 0.07, steel)
+		yard.position = Vector3(0, 5.0 + float(yi) * 0.9, L * 0.02)
+		root.add_child(yard)
+	# 煙囪（含頂部黑口）
+	var funnel := _box(W * 0.34, 1.5, 1.1, body)
+	funnel.position = Vector3(0, 3.0, -L * 0.10); root.add_child(funnel)
+	var fcap := _box(W * 0.30, 0.14, 0.95, dark)
+	fcap.position = Vector3(0, 3.78, -L * 0.10); root.add_child(fcap)
+	# 主砲塔（可轉向，接 _aim_turret）
+	_turret = Node3D.new(); _turret.name = "Turret"
+	_turret.position = Vector3(0, 1.70, L * 0.30); root.add_child(_turret)
+	var gun_house := _box(1.7, 1.0, 2.0, body); gun_house.position.y = 0.5
+	_turret.add_child(gun_house)
+	_barrel_len = 3.0
+	var gun_barrel := _cyl(0.10, _barrel_len, dark)
+	gun_barrel.rotation_degrees.x = 90
+	gun_barrel.position = Vector3(0, 0.66, 1.0 + _barrel_len * 0.5)
+	_turret.add_child(gun_barrel)
+	if p_cls == "missileboat":                        # 飛彈艇：後甲板箱型發射器
+		for mi in 4:
+			var cell := _box(0.55, 0.55, 1.9, steel)
+			cell.position = Vector3((float(mi % 2) - 0.5) * 0.7, 2.05,
+					-L * 0.26 - float(mi / 2) * 0.7)
+			cell.rotation_degrees.x = -14.0
+			root.add_child(cell)
+	elif p_cls == "lst":                              # 登陸艦：艏門＋跳板
+		var ramp := _box(W * 0.7, 0.16, 3.0, steel)
+		ramp.position = Vector3(0, 1.05, L * 0.50)
+		ramp.rotation_degrees.x = 16.0; root.add_child(ramp)
+	else:                                             # 驅逐艦：垂直發射井格
+		for ci in 8:
+			var vls := _box(0.42, 0.10, 0.42, dark)
+			vls.position = Vector3((float(ci % 4) - 1.5) * 0.5, 1.66,
+					-L * 0.20 - float(ci / 4) * 0.5)
+			root.add_child(vls)
+	if not is_player:
+		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+
+# ---------- 航空（air）----------
+# 同樣走壓縮尺度：戰機翼展壓到 8m 級。gunship＝旋翼機，剪影完全不同。
+func _build_aircraft(root: Node3D, p_cls: String, is_player: bool) -> void:
+	var body := _mat(Color(0.40, 0.44, 0.47), 0.35, 0.45) if is_player \
+			else _mat(Color(0.47, 0.34, 0.32), 0.35, 0.45)
+	var dark := _mat(Color(0.12, 0.13, 0.15), 0.45, 0.5)
+	var steel := _mat(Color(0.26, 0.28, 0.30), 0.6, 0.4)
+	var glass := _mat(Color(0.20, 0.34, 0.42), 0.25, 0.12)
+	if p_cls == "gunship":
+		veh_hl = 4.6
+		veh_hw = 1.3
+		# 機身：細長艙＋尾樑
+		var cab := _box(1.7, 1.8, 4.2, body); cab.position = Vector3(0, 2.2, 0.8)
+		root.add_child(cab)
+		var nose := _conemesh(0.85, 0.18, 1.6, body)
+		nose.rotation_degrees.x = 90
+		nose.position = Vector3(0, 2.1, 3.5); root.add_child(nose)
+		var canopy := _box(1.5, 0.9, 1.8, glass); canopy.position = Vector3(0, 2.75, 2.2)
+		root.add_child(canopy)
+		var boom := _box(0.55, 0.55, 4.0, body); boom.position = Vector3(0, 2.4, -2.6)
+		root.add_child(boom)
+		var tail_fin := _box(0.12, 1.5, 1.0, body); tail_fin.position = Vector3(0, 3.2, -4.3)
+		root.add_child(tail_fin)
+		# 主旋翼（四片）＋尾旋翼
+		var rotor_mast := _cyl(0.12, 0.6, steel); rotor_mast.position = Vector3(0, 3.4, 0.8)
+		root.add_child(rotor_mast)
+		for bi in 4:
+			var blade := _box(0.32, 0.07, 5.4, dark)
+			blade.position = Vector3(0, 3.7, 0.8)
+			blade.rotation_degrees.y = float(bi) * 45.0
+			root.add_child(blade)
+		for tbi in 2:
+			var tblade := _box(0.10, 1.8, 0.05, dark)
+			tblade.position = Vector3(0.22, 3.3, -4.3)
+			tblade.rotation_degrees.x = float(tbi) * 90.0
+			root.add_child(tblade)
+		# 短翼掛架＋火箭巢＋起落橇
+		for sgn in [-1.0, 1.0]:
+			var stub := _box(2.0, 0.16, 0.9, body); stub.position = Vector3(sgn * 1.2, 2.1, 0.9)
+			root.add_child(stub)
+			var pod := _cyl(0.30, 1.3, steel); pod.rotation_degrees.x = 90
+			pod.position = Vector3(sgn * 1.9, 1.85, 1.0); root.add_child(pod)
+			var skid := _box(0.10, 0.10, 3.0, steel)
+			skid.position = Vector3(sgn * 1.0, 1.15, 0.9); root.add_child(skid)
+			var strut := _box(0.09, 0.5, 0.09, steel)
+			strut.position = Vector3(sgn * 1.0, 1.45, 1.6); root.add_child(strut)
+		if not is_player:
+			_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+		return
+	# 固定翼：機身＋主翼（後掠）＋平尾＋垂尾＋座艙＋進氣口
+	veh_hl = 4.4
+	veh_hw = 3.4
+	var fus := _cyl(0.62, 7.4, body); fus.rotation_degrees.x = 90
+	fus.position = Vector3(0, 2.2, 0); root.add_child(fus)
+	var nose2 := _conemesh(0.62, 0.10, 1.8, body); nose2.rotation_degrees.x = 90
+	nose2.position = Vector3(0, 2.2, 4.5); root.add_child(nose2)
+	var canopy2 := _box(0.95, 0.62, 2.2, glass); canopy2.position = Vector3(0, 2.72, 1.9)
+	root.add_child(canopy2)
+	for sgn2 in [-1.0, 1.0]:
+		var wing := _box(3.4, 0.16, 2.0, body)
+		wing.position = Vector3(sgn2 * 2.0, 2.05, -0.3)
+		wing.rotation_degrees.y = sgn2 * -22.0            # 後掠角
+		root.add_child(wing)
+		var tip := _box(0.10, 0.5, 0.9, body)             # 翼端掛架
+		tip.position = Vector3(sgn2 * 3.5, 2.12, -0.3); root.add_child(tip)
+		var pylon := _cyl(0.14, 1.8, steel); pylon.rotation_degrees.x = 90
+		pylon.position = Vector3(sgn2 * 1.8, 1.82, 0.1); root.add_child(pylon)
+		var htail := _box(1.5, 0.12, 1.0, body)
+		htail.position = Vector3(sgn2 * 1.0, 2.15, -3.1)
+		htail.rotation_degrees.y = sgn2 * -18.0; root.add_child(htail)
+		var intake := _box(0.5, 0.7, 1.4, dark)
+		intake.position = Vector3(sgn2 * 0.85, 2.05, 1.2); root.add_child(intake)
+	var vtail := _box(0.14, 1.7, 1.6, body); vtail.position = Vector3(0, 3.05, -3.0)
+	root.add_child(vtail)
+	var nozzle := _cyl(0.55, 0.9, steel); nozzle.rotation_degrees.x = 90
+	nozzle.position = Vector3(0, 2.2, -3.9); root.add_child(nozzle)
+	var flame_ring := _cyl(0.44, 0.2, dark); flame_ring.rotation_degrees.x = 90
+	flame_ring.position = Vector3(0, 2.2, -4.3); root.add_child(flame_ring)
+	if p_cls == "attacker":                               # 攻擊機：機腹掛炸彈
+		for bi2 in 4:
+			var bomb := _cyl(0.22, 1.2, steel); bomb.rotation_degrees.x = 90
+			bomb.position = Vector3((float(bi2 % 2) - 0.5) * 1.0, 1.62,
+					-0.2 - float(bi2 / 2) * 1.0)
+			root.add_child(bomb)
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 
@@ -1916,12 +2251,31 @@ func _aim_pose() -> void:
 	var si := sk.find_bone("Shoulder.R")
 	if si < 0:
 		return
-	var moving: bool = _move_target != null or (_state in LEFTHAND_FREE)
+	# ⚠⚠ `_move_target` 只有「點擊移動／AI 下令」會設；**玩家鍵盤跑步走 move_dir()，
+	#   從來不設 _move_target** → 舊判斷認為「沒在移動」，就掉進 aim_point 分支去瞄
+	#   身後的舊目標，雙手與武器被 IK 拉到背後（使用者 2026-07-31 實拍）。
+	#   這跟當年「原地跑步」是同一類坑：鍵盤路徑繞過了其他邏輯依賴的狀態，
+	#   所以判斷一律看**實際動作狀態**，不看某一條下令路徑的私有欄位。
+	var moving: bool = _move_target != null or (_state in LEFTHAND_FREE) \
+			or (_state in MOVE_STATES)
 	var tgt: Vector3 = global_position + facing_dir() * 8.0 + Vector3.UP * 1.2
 	if moving:
 		tgt = global_position + facing_dir() * 5.0 + Vector3.UP * 0.35   # 低姿預備：槍口略朝下
 	elif aim_point != null:
 		tgt = aim_point
+	# 人體軀幹相對髖部最多扭約 75 度（鐵律 0：現實怎樣就怎樣）。目標超出這個錐體時
+	# 不可能「手還握著槍指過去」——真人會先轉身。超出就把瞄準方向夾回錐體邊緣，
+	# 這樣任何下令路徑（含 AI、警戒射擊）都不會再出現手臂扭到背後。
+	var _fwd: Vector3 = facing_dir()
+	var _to: Vector3 = tgt - (global_position + Vector3.UP * 1.2)
+	var _flat := Vector3(_to.x, 0.0, _to.z)
+	if _flat.length() > 0.01:
+		var _ang: float = _fwd.signed_angle_to(_flat.normalized(), Vector3.UP)
+		var _lim: float = deg_to_rad(75.0)
+		if absf(_ang) > _lim:
+			var _clamped: Vector3 = _fwd.rotated(Vector3.UP, clampf(_ang, -_lim, _lim))
+			tgt = global_position + Vector3.UP * 1.2 + _clamped * _flat.length() \
+					+ Vector3.UP * (_to.y)
 	var right := global_basis.x.normalized()
 	# 0) 蹲姿是真人「低姿潛行」動作：上身前傾 35°、頭朝地面——戰鬥中看不到前方也架不了槍。
 	#    故沿上半身骨鏈逐節扳回（腰保留一點前傾才自然），頭是子骨會跟著一起抬起來。

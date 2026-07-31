@@ -6479,7 +6479,11 @@ func _vehicle_obb(v) -> Dictionary:
 			"c": Vector2(node.global_position.x / WORLD_SCALE + mw * 0.5,
 					node.global_position.z / WORLD_SCALE + mh * 0.5),
 			"ax": fwd.normalized(),
-			"e": Vector2(VEHICLE_HL, VEHICLE_HW) / WORLD_SCALE,
+			# ⚠ 半長/半寬向載具本體要（Unit.veh_hl/veh_hw），不可再用坦克的常數：
+			#   驅逐艦畫 18m 長卻用 6m 的碰撞盒＝船身大半沒有實體，
+			#   跟當年「坦克用圓形碰撞、車頭車尾能穿過去」是同一個錯。
+			"e": Vector2(node.veh_hl if "veh_hl" in node else VEHICLE_HL,
+					node.veh_hw if "veh_hw" in node else VEHICLE_HW) / WORLD_SCALE,
 			"r": 0.0, "h": 2.4}
 
 # 完整實體解算＝建築牆 ＋ 中景物件／樹（Props.blockers）＋ 載具本身。
