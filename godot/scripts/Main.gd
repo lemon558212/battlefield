@@ -6824,6 +6824,9 @@ func _build_ground() -> void:
 	# ⚠ 先前只問地形，站在二樓的人高度照一樓地面算＝整個人陷進樓板裡。
 	Unit.ground_sampler = _ground_height
 	Unit.water_sampler = func(p: Vector3) -> float: return terrain.water_depth_world(p)
+	# 艦艇浮力用的水面高度：與 Terrain 畫水面用同一個常數，兩邊不可各寫各的
+	# （否則船會浮在「畫出來的水面」以外的高度）
+	Unit.sea_level_sampler = func(_p: Vector3) -> float: return BattleTerrain.WATER_SURFACE_Y
 	# 聲音遮蔽：音源到鏡頭之間有牆就變悶（Audio.sfx3d 用）
 	Audio.los_check = func(p: Vector3) -> bool:
 		if cam == null:

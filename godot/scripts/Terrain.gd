@@ -264,20 +264,40 @@ func slope_at(px: float, py: float) -> float:
 # ⚠ 2026-07-27：`data/terrain_mobility.json` 早就寫好每種機動型別的地形倍率
 #   （shallow 1.55、wire 1.8、bush 0.85…），但**全專案沒有一行讀它**，
 #   這裡自己寫死 1.5／2.0（違反鐵律 3，而且偵察兵跟重裝兵過壕溝一樣快）。
+# 不可通行的成本值（有限大，讓沿線累加的 AP 計算不會變成 inf/NaN）
+const IMPASSABLE := 999.0
+
+# 讀 terrain_mobility 的一欄：`null` ＝不可通行（不是 0！），缺欄才用預設值。
+func _mob_cost(tab: Dictionary, key: String, dflt: float) -> float:
+	if not tab.has(key):
+		return dflt
+	var v = tab[key]
+	return IMPASSABLE if v == null else float(v)
+
 func move_cost(px: float, py: float, mob := "foot", dir := Vector2.ZERO) -> float:
 	var tab: Dictionary = GameData.terrain_mobility.get(mob, {})
-	var c: float = float(tab.get("ground", 1.0))
+	# ⚠⚠ 資料裡的 `null` 語意是**不可通行**，不是 0。舊寫法 `float(tab.get("ground"))`
+	#   把 naval 的 `ground: null` 換成 0.0 ＝**軍艦可以零成本開上陸地**（鐵律 0①）。
+	#   同一個坑也讓步兵的 `deepwater: null` 被寫死成 4.0，資料等於沒被讀。
+	# 先決定「站在哪一種地形上」，再查那一欄的成本——不可用 maxf 疊，
+	# 否則艦艇的陸地(不可通行) 會蓋掉水域(可通行)，船變成哪裡都不能去。
+	var c: float
 	if in_water(px, py):
-		var d: float = water_depth(px, py)
-		var k = tab.get("shallow", 1.55)
-		c = maxf(c, float(k) if k != null else 3.0)
-		if d > 1.35:
-			c = maxf(c, 4.0)          # 深及胸：形同不可通行
+		if water_depth(px, py) > WADE_MAX:
+			c = _mob_cost(tab, "deepwater", IMPASSABLE)
+			if c >= IMPASSABLE:
+				c = _mob_cost(tab, "water", IMPASSABLE)   # 有些型別只填 water 欄
+		else:
+			c = _mob_cost(tab, "shallow", 3.0)
+	else:
+		c = _mob_cost(tab, "ground", 1.0)
 	for cr in _craters:
 		if Vector2(px - float(cr.get("x", 0)), py - float(cr.get("y", 0))).length() < float(cr.get("r", 36)):
-			c = maxf(c, float(tab.get("crater", 1.15)))
+			c = maxf(c, _mob_cost(tab, "crater", 1.15))
 	if in_trench(px, py):
-		c = maxf(c, float(tab.get("trench", 1.25)))
+		c = maxf(c, _mob_cost(tab, "trench", 1.25))
+	if c >= IMPASSABLE:
+		return IMPASSABLE      # 不可通行就到此為止，坡度倍率沒有意義
 	# ★坡度成本（2026-07-31 使用者：「爬坡消耗會要快一點點」）。
 	# 舊寫法有兩個物理錯誤：
 	#   ① **門檻突跳**：坡度 0.34 完全不耗、0.36 突然 ×1.5。真實是連續的——
@@ -286,7 +306,9 @@ func move_cost(px: float, py: float, mob := "foot", dir := Vector2.ZERO) -> floa
 	# 改成：上坡 cost ×(1 + 坡度×2.0×兵種係數)、緩降略省力、陡降(>0.25)加煞車成本。
 	# 坡度成本與地表類型是**相乘**不是取大：在淺水裡爬坡兩件事都要付出。
 	var up: float = slope_signed(px, py, dir)
-	var hill_k: float = float(tab.get("hill", 1.15))
+	var hill_k: float = _mob_cost(tab, "hill", 1.15)
+	if hill_k >= IMPASSABLE:
+		hill_k = 0.0        # hill=null（艦艇/航空）＝坡度對它沒有意義，不是不可通行
 	if up > 0.0:
 		c *= 1.0 + up * SLOPE_UP_K * hill_k
 	elif up < -SLOPE_BRAKE_AT:

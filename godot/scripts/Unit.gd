@@ -773,6 +773,14 @@ func _track_path(t: float, sgn: float) -> Vector3:
 # 3.0×1.75，而驅逐艦畫成 18m 長，等於船身大半沒有實體（同「坦克圓形碰撞」那條教訓）。
 var veh_hl := 3.00
 var veh_hw := 1.75
+# 艦艇：浮在水面而不是踩海床。_draft＝吃水深度（水面到船底），
+# sea_level_sampler 由 Main 注入（回傳該點的水面世界高度）。
+var _is_naval := false
+var _draft := 0.9
+static var sea_level_sampler: Callable = Callable()
+# 航空：在巡航高度飛。直升機低、固定翼高（壓縮尺度，與射程 10.5m 同一套設計例外）。
+var _is_air := false
+var _fly_alt := 12.0
 
 func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	_is_vehicle = true
@@ -785,9 +793,15 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	#   海空單位有自己的剪影，走各自的建造函式（鐵律 0：現實怎樣就怎樣）。
 	var mob: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
 	if mob == "naval":
+		_is_naval = true
+		# 吃水：大艦深、小艇淺、潛艦最深（半潛航狀態）
+		_draft = {"destroyer": 1.1, "missileboat": 0.6, "lst": 0.8,
+				"submarine": 1.5}.get(p_cls, 0.9)
 		_build_ship(root, p_cls, is_player)
 		return
 	if mob == "air":
+		_is_air = true
+		_fly_alt = 6.0 if p_cls == "gunship" else 14.0   # 直升機低空、固定翼高空
 		_build_aircraft(root, p_cls, is_player)
 		return
 	veh_hl = 3.00
@@ -984,9 +998,24 @@ func _build_ship(root: Node3D, p_cls: String, is_player: bool) -> void:
 	# 水面艦：艦身（艏部收尖）＋甲板＋上層建築＋桅桿＋煙囪＋主砲
 	var hull := _box(W, 1.5, L * 0.82, body); hull.position.y = 0.75
 	root.add_child(hull)
-	var bow2 := _conemesh(W * 0.5, 0.12, L * 0.24, body)
-	bow2.rotation_degrees.x = 90
-	bow2.position = Vector3(0, 0.75, L * 0.46); root.add_child(bow2)
+	# 艦艏：⚠ 圓錐接在方形艦體上會讀成「甲板上躺了一顆飛彈」（實拍抓到）。
+	#   真船艏是**平面收窄的楔形**，而且艏柱前傾。用 5 段逐級收窄的箱體做，
+	#   與方形艦體同高、同一種面，銜接才連續。
+	# ⚠ 甲板線（上緣）必須保持水平，往上收的是**船底**（艏部吃水變淺）。
+	#   讓上緣跟著降就變成一排往下掉的階梯（實拍抓到）。分 9 段才夠平順。
+	var bow_len: float = L * 0.24
+	var deck_top: float = 0.75 + 0.75                      # 艦體上緣的世界高度
+	for bi in 9:
+		var k: float = float(bi) / 8.0                     # 0=接艦體、1=艏尖
+		var seg_w: float = W * lerpf(1.0, 0.14, k * k)     # 平方＝前段收得快，像真船的水線
+		var seg_h: float = 1.5 * lerpf(1.0, 0.55, k)
+		var seg := _box(seg_w, seg_h, bow_len / 9.0 + 0.05, body)
+		seg.position = Vector3(0, deck_top - seg_h * 0.5,
+				L * 0.41 + bow_len * k * 0.98)
+		root.add_child(seg)
+	var stem := _box(0.22, 1.8, 0.9, body)                 # 前傾艏柱
+	stem.rotation_degrees.x = -24.0
+	stem.position = Vector3(0, 1.05, L * 0.63); root.add_child(stem)
 	var deck := _box(W * 0.96, 0.18, L * 0.86, deck_m)
 	deck.position = Vector3(0, 1.52, 0); root.add_child(deck)
 	# 舷牆（甲板邊緣的立面）：沒有它甲板像一塊漂浮的板子
@@ -1093,41 +1122,71 @@ func _build_aircraft(root: Node3D, p_cls: String, is_player: bool) -> void:
 		if not is_player:
 			_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 		return
-	# 固定翼：機身＋主翼（後掠）＋平尾＋垂尾＋座艙＋進氣口
+	# 固定翼。⚠ 攻擊機不是「戰鬥機加掛炸彈」——兩者的設計目的不同，外形也不同：
+	#   戰鬥機＝追求速度，後掠翼、單發、尖機鼻；
+	#   攻擊機＝低速滯空對地，平直長翼（升力大、盤旋穩）、雙發動機艙、鈍頭機砲。
+	#   舊版兩者共用同一副機體，VehicleProbe 的「剪影不可雷同」斷言當場抓到。
+	var is_atk: bool = (p_cls == "attacker")
+	var sweep: float = -8.0 if is_atk else -22.0       # 攻擊機幾乎平直翼
+	var span: float = 4.4 if is_atk else 3.4           # 翼展更大
 	veh_hl = 4.4
-	veh_hw = 3.4
-	var fus := _cyl(0.62, 7.4, body); fus.rotation_degrees.x = 90
+	veh_hw = span + 1.5
+	var fus := _cyl(0.70 if is_atk else 0.62, 6.6 if is_atk else 7.4, body)
+	fus.rotation_degrees.x = 90
 	fus.position = Vector3(0, 2.2, 0); root.add_child(fus)
-	var nose2 := _conemesh(0.62, 0.10, 1.8, body); nose2.rotation_degrees.x = 90
-	nose2.position = Vector3(0, 2.2, 4.5); root.add_child(nose2)
-	var canopy2 := _box(0.95, 0.62, 2.2, glass); canopy2.position = Vector3(0, 2.72, 1.9)
+	if is_atk:
+		# 鈍頭＋機鼻機砲（攻擊機的招牌）
+		var snout := _cyl(0.70, 1.2, body); snout.rotation_degrees.x = 90
+		snout.position = Vector3(0, 2.2, 3.9); root.add_child(snout)
+		var cannon := _cyl(0.13, 2.2, dark); cannon.rotation_degrees.x = 90
+		cannon.position = Vector3(0, 2.05, 5.2); root.add_child(cannon)
+	else:
+		var nose2 := _conemesh(0.62, 0.10, 1.8, body); nose2.rotation_degrees.x = 90
+		nose2.position = Vector3(0, 2.2, 4.5); root.add_child(nose2)
+	# 座艙：攻擊機用高視野氣泡罩（對地要看得到地面）
+	var canopy2 := _box(1.15 if is_atk else 0.95, 0.80 if is_atk else 0.62,
+			1.8 if is_atk else 2.2, glass)
+	canopy2.position = Vector3(0, 2.85 if is_atk else 2.72, 2.2 if is_atk else 1.9)
 	root.add_child(canopy2)
 	for sgn2 in [-1.0, 1.0]:
-		var wing := _box(3.4, 0.16, 2.0, body)
-		wing.position = Vector3(sgn2 * 2.0, 2.05, -0.3)
-		wing.rotation_degrees.y = sgn2 * -22.0            # 後掠角
+		var wing := _box(span, 0.16, 2.4 if is_atk else 2.0, body)
+		wing.position = Vector3(sgn2 * span * 0.58, 2.05, -0.3)
+		wing.rotation_degrees.y = sgn2 * sweep
 		root.add_child(wing)
 		var tip := _box(0.10, 0.5, 0.9, body)             # 翼端掛架
-		tip.position = Vector3(sgn2 * 3.5, 2.12, -0.3); root.add_child(tip)
-		var pylon := _cyl(0.14, 1.8, steel); pylon.rotation_degrees.x = 90
-		pylon.position = Vector3(sgn2 * 1.8, 1.82, 0.1); root.add_child(pylon)
+		tip.position = Vector3(sgn2 * (span + 0.1), 2.12, -0.3); root.add_child(tip)
 		var htail := _box(1.5, 0.12, 1.0, body)
 		htail.position = Vector3(sgn2 * 1.0, 2.15, -3.1)
-		htail.rotation_degrees.y = sgn2 * -18.0; root.add_child(htail)
-		var intake := _box(0.5, 0.7, 1.4, dark)
-		intake.position = Vector3(sgn2 * 0.85, 2.05, 1.2); root.add_child(intake)
-	var vtail := _box(0.14, 1.7, 1.6, body); vtail.position = Vector3(0, 3.05, -3.0)
-	root.add_child(vtail)
-	var nozzle := _cyl(0.55, 0.9, steel); nozzle.rotation_degrees.x = 90
-	nozzle.position = Vector3(0, 2.2, -3.9); root.add_child(nozzle)
-	var flame_ring := _cyl(0.44, 0.2, dark); flame_ring.rotation_degrees.x = 90
-	flame_ring.position = Vector3(0, 2.2, -4.3); root.add_child(flame_ring)
-	if p_cls == "attacker":                               # 攻擊機：機腹掛炸彈
-		for bi2 in 4:
-			var bomb := _cyl(0.22, 1.2, steel); bomb.rotation_degrees.x = 90
-			bomb.position = Vector3((float(bi2 % 2) - 0.5) * 1.0, 1.62,
-					-0.2 - float(bi2 / 2) * 1.0)
-			root.add_child(bomb)
+		htail.rotation_degrees.y = sgn2 * (-6.0 if is_atk else -18.0); root.add_child(htail)
+		if is_atk:
+			# 雙發動機艙掛在機身兩側後段（攻擊機最強的剪影訊號）
+			var nac := _cyl(0.52, 2.2, steel); nac.rotation_degrees.x = 90
+			nac.position = Vector3(sgn2 * 1.15, 2.55, -2.1); root.add_child(nac)
+			var nac_in := _cyl(0.40, 0.25, dark); nac_in.rotation_degrees.x = 90
+			nac_in.position = Vector3(sgn2 * 1.15, 2.55, -1.0); root.add_child(nac_in)
+			var nac_out := _cyl(0.40, 0.25, dark); nac_out.rotation_degrees.x = 90
+			nac_out.position = Vector3(sgn2 * 1.15, 2.55, -3.2); root.add_child(nac_out)
+			for pi3 in 3:                                  # 翼下多掛架（對地彈藥）
+				var pyl := _cyl(0.13, 1.4, steel); pyl.rotation_degrees.x = 90
+				pyl.position = Vector3(sgn2 * (1.3 + float(pi3) * 1.1), 1.80, -0.1)
+				root.add_child(pyl)
+		else:
+			var pylon := _cyl(0.14, 1.8, steel); pylon.rotation_degrees.x = 90
+			pylon.position = Vector3(sgn2 * 1.8, 1.82, 0.1); root.add_child(pylon)
+			var intake := _box(0.5, 0.7, 1.4, dark)
+			intake.position = Vector3(sgn2 * 0.85, 2.05, 1.2); root.add_child(intake)
+	if is_atk:
+		# 雙垂尾（H 型尾翼，攻擊機常見）
+		for sgn6 in [-1.0, 1.0]:
+			var vt2 := _box(0.12, 1.4, 1.3, body)
+			vt2.position = Vector3(sgn6 * 1.55, 2.85, -3.2); root.add_child(vt2)
+	else:
+		var vtail := _box(0.14, 1.7, 1.6, body); vtail.position = Vector3(0, 3.05, -3.0)
+		root.add_child(vtail)
+		var nozzle := _cyl(0.55, 0.9, steel); nozzle.rotation_degrees.x = 90
+		nozzle.position = Vector3(0, 2.2, -3.9); root.add_child(nozzle)
+		var flame_ring := _cyl(0.44, 0.2, dark); flame_ring.rotation_degrees.x = 90
+		flame_ring.position = Vector3(0, 2.2, -4.3); root.add_child(flame_ring)
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 
@@ -1346,6 +1405,18 @@ const VEH_HW := 1.75
 #   凸丘（車跨在峰上）→ 平均較低，仍然踩在峰頂，兩端懸空＝現實就是這樣
 func _support_height() -> float:
 	var gy: float = float(ground_sampler.call(global_position))
+	# ⚠ 艦艇浮在水面，不是踩在海床上（鐵律 0：現實怎樣就怎樣）。
+	#   先前所有載具一律取地形高度 → 驅逐艦沉到海床，深水區整艘泡在水面下。
+	#   吃水線＝水面往下 _draft 公尺；水太淺（不足吃水）就擱淺在海床上，
+	#   這正是真實的「擱淺」，不需要另外寫規則。
+	if _is_naval:
+		var surf: float = float(sea_level_sampler.call(global_position)) \
+				if sea_level_sampler.is_valid() else 0.0
+		return maxf(gy + _draft, surf - _draft)
+	# 航空單位在巡航高度飛，不是貼著地面爬（先前戰機沿地形起伏「開」過戰場）。
+	# 高度隨地形抬升，才不會撞山。
+	if _is_air:
+		return gy + _fly_alt
 	if not _is_vehicle:
 		# ⚠ 2026-07-30 撤銷「腳掌面積 ±0.18m 取最高」：物理上就是錯的——
 		#   重心出了支撐面就該倒/掉，max 取樣讓人永久墊高在任何低物邊緣，
