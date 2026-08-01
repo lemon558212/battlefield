@@ -792,8 +792,9 @@ func _strip_edge_blockers(list: Array, mw_px: float, mh_px: float) -> Array:
 			cut += 1
 		else:
 			out.append(bk)
-	if cut > 0:
-		print("[edge] 剔除邊界帶障礙 %d 個（安全帶 %.2fm）" % [cut, EDGE_SAFE_M])
+	# ⚠ 一律印（含 0）：只在 >0 時印＝靜默跳過，看不出這道防線到底有沒有跑。
+	#   本專案踩過三次，最貴的一次是撞窗戶那項在前置條件不成立時安靜 return 而假通過。
+	print("[edge] 剔除邊界帶障礙 %d 個（安全帶 %.2fm，深水圍欄不剔）" % [cut, EDGE_SAFE_M])
 	return out
 
 # 在實際網格三角形上求 (x,z) 的地表高度（重心座標）。找不到回 -1e18。
@@ -6502,48 +6503,42 @@ func _settle(pos: Vector3, radius: float, ignore) -> Vector3:
 		p = _clamp_to_map(_resolve_solids(p, radius, ignore))
 		if before.distance_squared_to(p) < 0.000001:
 			return p
-	# 沒收斂：沿「離最近邊界的內法線」逐步往場內退，退到不再被推為止
+	# 沒收斂＝被夾在邊界與障礙之間。最後手段是往場內退一點點，但有三道限制：
+	# ⚠⚠ 2026-08-01 回歸教訓：第一版無限制地「往場內推 12 步（最多 4.2m）」，
+	#   在第 7 章把人推**穿過深水圍欄、直接推進河裡**（walk ch07 一次 3357 筆
+	#   「走進深水」）。逃生用的位移不可以把人送進另一種不合法狀態——
+	#   逃生只能逃到「合法的地方」，否則就是用一個 bug 換另一個更糟的 bug。
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
 	var hx: float = mw * 0.5 * WORLD_SCALE
 	var hz: float = mh * 0.5 * WORLD_SCALE
-	var inward := Vector3(
-			(1.0 if p.x < 0.0 else -1.0) if minf(absf(p.x + hx), absf(p.x - hx)) <= minf(absf(p.z + hz), absf(p.z - hz)) else 0.0,
-			0.0,
-			0.0 if minf(absf(p.x + hx), absf(p.x - hx)) <= minf(absf(p.z + hz), absf(p.z - hz)) else (1.0 if p.z < 0.0 else -1.0))
-	for _k in 12:
-		p += inward * 0.35
+	# 限制①：只有真的貼在邊界帶上才啟動（原始症狀就只發生在那條線）
+	var near_x: float = minf(absf(p.x + hx), absf(p.x - hx))
+	var near_z: float = minf(absf(p.z + hz), absf(p.z - hz))
+	if minf(near_x, near_z) > 1.6:
+		return p
+	var inward := Vector3((1.0 if p.x < 0.0 else -1.0) if near_x <= near_z else 0.0, 0.0,
+			0.0 if near_x <= near_z else (1.0 if p.z < 0.0 else -1.0))
+	var best := p
+	for _k in 6:                      # 限制②：最多退 6 步（2.1m），不是 4.2m
+		var np: Vector3 = p + inward * 0.35
+		# 限制③：不可退進深水——那是另一條不變量，逃生不能違反它
+		if terrain != null:
+			var npx: float = np.x / WORLD_SCALE + mw * 0.5
+			var npy: float = np.z / WORLD_SCALE + mh * 0.5
+			if terrain.water_depth(npx, npy) > BattleTerrain.WADE_MAX:
+				break
+		p = np
+		best = p
 		var chk: Vector3 = _resolve_solids(p, radius, ignore)
 		if Vector2(chk.x - p.x, chk.z - p.z).length() < 0.06:
 			break
-	return _clamp_to_map(p)
+	return _clamp_to_map(best)
 
-# 邊界淨空（鐵律0①）：單位被 _clamp_to_map 夾在「離邊界 1m」的線上，
-# 那條線是**強制站位**——上面有任何實體，人就會被推出去又被夾回來，永遠卡住。
-# walk ch05/ch06 的 11 筆 FAIL 座標全部剛好落在 x=20px 或 y=h-20px 就是這個。
-# 收口在這裡而不是各個擺放函式：物件種類會一直增加，逐個補必漏。
-# ⚠ 深水圍欄不丟：它是防止走進海裡的安全欄，寧可貼邊也不能沒有。
-func _drop_edge_blockers() -> void:
-	var mw: float = map_data.get("w", 960)
-	var mh: float = map_data.get("h", 600)
-	var band: float = (1.0 + BODY_R + 0.15) / WORLD_SCALE     # 夾限線 ± 身寬 ＋ 餘裕
-	var keep: Array = []
-	var dropped := 0
-	for bk in _blockers:
-		if String(bk.get("k", "")) == "deepwater":
-			keep.append(bk)
-			continue
-		var ab: Rect2 = _blk_aabb(bk)
-		if ab.position.x < band or ab.position.y < band \
-				or ab.end.x > mw - band or ab.end.y > mh - band:
-			dropped += 1
-			continue
-		keep.append(bk)
-	# ⚠ 一律印（含 0）：只在 >0 時印＝「靜默跳過」，看不出這道防線到底有沒有跑
-	#   （本專案踩過三次：撞窗戶那項就是前置條件不成立時安靜 return 而假通過）
-	print("[edgeclr] 邊界帶內丟棄障礙 %d 個（帶寬 %.1fm，深水圍欄不丟）"
-			% [dropped, band * WORLD_SCALE])
-	_blockers = keep
+# ⚠ 這裡原本還有一支 _drop_edge_blockers()：把「離邊界 1.6m 內」的障礙整個丟掉。
+#   2026-08-01 移除，因為它是**同一條規則的第二份實作**（本專案反覆踩的坑）：
+#   邊界卡人的真因是上面 _settle 講的順序病，實測 ch01 重驗時它丟棄 0 個障礙
+#   卻已經 0 FAIL——它沒在解決問題，卻會默默刪掉地圖邊緣的樹與道具（改動關卡設計）。
 
 func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 	var mw: float = map_data.get("w", 960)
@@ -6996,7 +6991,6 @@ func _build_ground() -> void:
 	_destructibles = fort.destructibles
 	_blockers = _strip_edge_blockers(props.blockers + fort.blockers + _water_blk + _bld_blk,
 			mw / WORLD_SCALE, mh / WORLD_SCALE)
-	_drop_edge_blockers()
 	_pole_spots = props.pole_spots
 	_low_blk = []
 	for bk0 in _blockers:
