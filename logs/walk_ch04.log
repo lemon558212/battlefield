@@ -8,7 +8,8 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 4 對話：連點推進 (st=3)
 [diff] 地形加碼（×0.15）：彈坑 +1、工事 +1
 [poles] 桿=0 電線段=0
-[edgeclr] 邊界帶內丟棄障礙 5 個（帶寬 1.6m）
+[edge] 剔除邊界帶障礙 5 個（安全帶 1.62m）
+[edgeclr] 邊界帶內丟棄障礙 0 個（帶寬 1.6m，深水圍欄不丟）
 [city] 街廓建築 68 棟、網格 3 種
 [look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
@@ -30,12 +31,3 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 176 個取樣點（11 列 × 16 行，間距 5.5m），地圖 85×60 m
 [walk] 起點 px(18,18)（第 0 個點；前面的都在海裡或障礙裡）
-[walk] 走完 175 段，抵達 80 段；共 7488 次取樣檢查
-[walk][陷進實體(人在障礙裡)] 0 次 OK
-[walk][浮空或陷地(>0.3m)] 0 次 OK
-[walk][走進深水(>1.35m)] 0 次 OK
-[walk][卡死(目標是空地卻走不到)] 0 次 OK
-[walk][鏡頭穿牆] 0 次 OK
-[walk][走出地圖] 0 次 OK
-[walk] ch04 FAILS=0（拍了 0 張現場照）
-[walk] DONE

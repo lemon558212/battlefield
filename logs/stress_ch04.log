@@ -8,7 +8,8 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 4 對話：連點推進 (st=3)
 [diff] 地形加碼（×0.15）：彈坑 +1、工事 +1
 [poles] 桿=0 電線段=0
-[edgeclr] 邊界帶內丟棄障礙 5 個（帶寬 1.6m）
+[edge] 剔除邊界帶障礙 5 個（安全帶 1.62m）
+[edgeclr] 邊界帶內丟棄障礙 0 個（帶寬 1.6m，深水圍欄不丟）
 [city] 街廓建築 68 棟、網格 3 種
 [look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
@@ -33,11 +34,20 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.03 elev=-0.04m crater=false
-[stress] 回合1 我方開火累計0 我方HP300 敵方HP540 最近敵距9.3m
-[stress] 回合2 我方開火累計3 我方HP73 敵方HP346 最近敵距1.5m
-[stress] 回合3 我方開火累計5 我方HP73 敵方HP263 最近敵距0.7m
-[stress] 回合4 我方開火累計7 我方HP66 敵方HP58 最近敵距3.5m
-[stress] ch04 回合=5 我方存活=2 敵方存活=0 取樣=142 最差幀=70ms 結局=打完
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP540 最近敵距5.8m
+[stress] 回合2 我方開火累計3 我方HP269 敵方HP530 最近敵距0.7m
+[stress] 回合3 我方開火累計6 我方HP234 敵方HP510 最近敵距0.7m
+[stress] 回合4 我方開火累計9 我方HP196 敵方HP498 最近敵距0.7m
+[stress] 回合5 我方開火累計12 我方HP177 敵方HP486 最近敵距0.7m
+[stress] 回合6 我方開火累計15 我方HP157 敵方HP402 最近敵距5.0m
+[stress] 回合7 我方開火累計17 我方HP143 敵方HP386 最近敵距0.7m
+[stress] 回合8 我方開火累計19 我方HP136 敵方HP364 最近敵距0.7m
+[stress] 回合9 我方開火累計21 我方HP129 敵方HP357 最近敵距0.7m
+[stress] 回合10 我方開火累計23 我方HP129 敵方HP357 最近敵距0.7m
+[stress] 回合11 我方開火累計25 我方HP129 敵方HP342 最近敵距0.7m
+[weather] 回合 13 10:00 → 雨
+[stress] 回合12 我方開火累計27 我方HP129 敵方HP335 最近敵距0.7m
+[stress] ch04 回合=12 我方存活=2 敵方存活=4 取樣=94 最差幀=1191197ms 結局=回合上限
 [selftest] saved res://qa/stress_ch04_end.png
 [stress] ch04 FAILS=0
 [stress] DONE

@@ -1,0 +1,162 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=25 story=15
+[play] 1 主選單 → 劇情戰役
+[play] 2 章節 01
+[play] 3 簡報 → 出擊
+[play] 4 對話：連點推進 (st=3)
+[water] 深水圍欄 74 根樁（水深 > 1.05m 的邊界）
+[poles] 桿=1 電線段=0
+[edge] 剔除邊界帶障礙 8 個（安全帶 1.62m）
+[edgeclr] 邊界帶內丟棄障礙 0 個（帶寬 1.6m，深水圍欄不丟）
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
+ERROR: UVs are required to generate tangents.
+   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
+   GDScript backtrace (most recent call first):
+       [0] build_rock_protos (res://scripts/Trees.gd:253)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
+       [6] _dlg_step (res://scripts/UI.gd:461)
+       [7] _input (res://scripts/UI.gd:580)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
+[rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
+[look] spawn mg side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn at side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] at 重定向骨對數=20
+[look] spawn sniper side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sniper 重定向骨對數=20
+[diff] 第 1 章：敵步兵 3、敵載具 0、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
+[play]   對話結束 st=4 (應為 DEPLOY=4)
+[play] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=1 player_side=1 mp=res://assets/models/chars/hr_w_Swat.fbx
+[rig] sniper 重定向骨對數=20
+[play]   已部署數=1 OK
+[play] 6 開始戰鬥
+[play]   st=5 (應為 CMD=5)
+[play][切換單位] 按 Tab 後 selected=sniper OK
+[selftest] saved res://qa/play_cycle.png
+[play][下令] 第三人稱 OK
+[play][停下不自動蹲] want_cover=true 靜置 1.6s 後 _crouch=0.00 OK
+[selftest] saved res://qa/play_stand.png
+[selftest] saved res://qa/play_key_c.png
+[selftest] saved res://qa/play_key_z.png
+[selftest] saved res://qa/play_key_space.png
+[play][姿勢鍵] C→_crouch=1.00 動畫=crouch OK ／ Z→_prone=1.00 OK ／ Space→最大姿勢值=0.00 OK
+[play][停下不原地跑步] 放開 W 一秒後動畫=idle 移動中=false OK
+[selftest] saved res://qa/play_stop_idle.png
+[play][鏡頭不抖] 角色靜止 1.5 秒，鏡頭每幀最大位移=0.0000m OK
+[play][手在身體前面] 鏡頭轉 180 度後：持槍手在胸口前方 0.319m、身體與鏡頭夾角 0 度 OK
+[selftest] saved res://qa/play_arm_front.png
+[play][走路] 還差 24.8m　AP=9999　px=(1280,544)
+[play][走路] 還差 21.9m　AP=9975　px=(1228,573)
+[play][走路] 還差 19.1m　AP=9954　px=(1180,602)
+[play][走路] 還差 18.5m　AP=9944　px=(1180,628)
+[play][走路] 還差 18.0m　AP=9934　px=(1180,651)
+[play][走路] 還差 17.2m　AP=9920　px=(1171,675)
+[play][走路] 還差 14.4m　AP=9898　px=(1119,693)
+[play][走路] 還差 12.6m　AP=9883　px=(1088,714)
+[play][走路] 還差 10.1m　AP=9866　px=(1041,730)
+[play][走路] 還差 10.0m　AP=9862　px=(1041,743)
+[play][走路] 還差 10.1m　AP=9853　px=(1041,734)
+[play][走路] 還差 9.7m　AP=9840　px=(1039,766)
+[play][走路] 還差 7.4m　AP=9824　px=(993,775)
+[play][走路] 還差 5.0m　AP=9809　px=(946,778)
+[play][走路] 還差 2.6m　AP=9793　px=(899,782)
+[play][走路] 還差 2.6m　AP=9780　px=(861,785)
+[play][走路] 還差 0.9m　AP=9768　px=(849,752)
+[play][走路] 還差 5.4m　AP=9767　px=(849,749)
+[play][走路] 還差 3.4m　AP=9754　px=(865,714)
+[play][走路] 還差 1.3m　AP=9740　px=(884,675)
+[play][進屋] 走進去=OK（人在 px(886,671)、門在 px(846,760)、屋框 [P: (760.0, 545.0), S: (270.0, 215.0)]）
+[selftest] saved res://qa/play_indoor.png
+[play][鏡頭穿牆] 頭→鏡頭的牆體命中比例=1.00（1.00＝沒穿牆）OK
+[play][室內留屋頂] 鏡頭在屋裡時屋頂 alpha=1.00 OK(室內是室內)
+[play][俯瞰淡屋頂] 鏡頭在屋外時屋頂 alpha=0.00 OK(看得到屋裡的人)
+[play][屋內點兵] selected=sniper OK
+[selftest] saved res://qa/play_indoor_pick.png
+[selftest] saved res://qa/play_in_look0.png
+[selftest] saved res://qa/play_in_look1.png
+[selftest] saved res://qa/play_in_look2.png
+[selftest] saved res://qa/play_in_look3.png
+[play][屋內環顧] 已拍四個方向 play_in_look0~3.png
+[selftest] saved res://qa/play_hero0.png
+[selftest] saved res://qa/play_hero1.png
+[selftest] saved res://qa/play_hero2.png
+[selftest] saved res://qa/play_hero3.png
+[play][英雄骨頭] cls=sniper 模型骨數=62 UpperArm.L=有 LowerArm.L=有 Hand.L=有 UpperArm.R=有 LowerArm.R=有 Hand.R=有
+[play][英雄近拍] play_hero0~3.png（手臂與武器要在畫面上）
+[play][撞牆] 對外牆走 5 秒：進到室內=false OK(牆擋住了)
+[selftest] saved res://qa/play_wall.png
+[play][撞窗戶] 對著窗戶走 5 秒：進到室內=false OK(窗台下是實心牆)
+[selftest] saved res://qa/play_window.png
+[play][撞室內家具] 對家具走 4 秒：離家具中心 1.00m（家具半徑 0.55m）OK(擋住了)
+[selftest] saved res://qa/play_furniture.png
+[look] spawn tank side=0 player_side=1 mp=res://assets/models/chars/soldier.glb
+[play][撞戰車] 場上沒有載具，生成一台 tank 來撞
+[play][撞戰車] 從車尾走 6 秒：離車體表面 0.42m｜車體座標 沿車軸 3.42m(半長3.00)／沿車寬 0.42m(半寬1.75) OK(被車擋住)
+[selftest] saved res://qa/play_tank_1.png
+[play][撞戰車] 從車頭走 6 秒：離車體表面 0.56m｜車體座標 沿車軸 3.56m(半長3.00)／沿車寬 0.00m(半寬1.75) OK(被車擋住)
+[selftest] saved res://qa/play_tank_2.png
+[play][撞戰車] 從左側走 6 秒：離車體表面 0.42m｜車體座標 沿車軸 0.00m(半長3.00)／沿車寬 2.17m(半寬1.75) OK(被車擋住)
+[selftest] saved res://qa/play_tank_3.png
+[play][撞戰車] 從右側走 6 秒：離車體表面 0.42m｜車體座標 沿車軸 0.48m(半長3.00)／沿車寬 2.17m(半寬1.75) OK(被車擋住)
+[selftest] saved res://qa/play_tank_4.png
+[play] FAILS=0
+[play] DONE

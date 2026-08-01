@@ -8,72 +8,73 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 4 對話：連點推進 (st=3)
 [water] 深水圍欄 74 根樁（水深 > 1.05m 的邊界）
 [poles] 桿=1 電線段=0
-[edgeclr] 邊界帶內丟棄障礙 8 個（帶寬 1.6m）
+[edge] 剔除邊界帶障礙 8 個（安全帶 1.62m）
+[edgeclr] 邊界帶內丟棄障礙 0 個（帶寬 1.6m，深水圍欄不丟）
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7161)
+       [2] _scatter_trees (res://scripts/Main.gd:7865)
+       [3] _build_ground (res://scripts/Main.gd:7007)
+       [4] _open_deploy (res://scripts/Main.gd:3824)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3814)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2001)
+       [9] _boot_to_battle (res://scripts/Main.gd:1826)
 [rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
 [look] spawn mg side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
@@ -94,21 +95,21 @@ ERROR: UVs are required to generate tangents.
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.13 elev=0.13m crater=false
-[stress] 回合1 我方開火累計0 我方HP270 敵方HP310 最近敵距30.5m
-[stress] 回合2 我方開火累計0 我方HP270 敵方HP310 最近敵距26.0m
-[stress] 回合3 我方開火累計0 我方HP270 敵方HP310 最近敵距25.4m
-[stress] 回合4 我方開火累計0 我方HP270 敵方HP310 最近敵距17.8m
-[stress] 回合5 我方開火累計0 我方HP270 敵方HP310 最近敵距10.2m
-[stress] 回合6 我方開火累計0 我方HP270 敵方HP310 最近敵距2.8m
-[stress] 回合7 我方開火累計1 我方HP180 敵方HP301 最近敵距25.7m
-[stress] 回合8 我方開火累計1 我方HP180 敵方HP301 最近敵距25.4m
-[stress] 回合9 我方開火累計1 我方HP180 敵方HP301 最近敵距25.4m
-[weather] 回合 11 06:00 → 濃霧
-[stress] 回合10 我方開火累計1 我方HP180 敵方HP301 最近敵距25.4m
-[stress] 回合11 我方開火累計1 我方HP180 敵方HP301 最近敵距25.4m
-[weather] 回合 13 08:00 → 晴
-[stress] 回合12 我方開火累計1 我方HP180 敵方HP301 最近敵距25.4m
-[stress] ch01 回合=12 我方存活=2 敵方存活=3 取樣=484 最差幀=55ms 結局=回合上限
+[stress] 回合1 我方開火累計0 我方HP270 敵方HP310 最近敵距30.6m
+[weather] 回合 3 06:00 → 濃霧
+[stress] 回合2 我方開火累計0 我方HP270 敵方HP310 最近敵距26.7m
+[stress] 回合3 我方開火累計0 我方HP270 敵方HP310 最近敵距10.8m
+[weather] 回合 5 08:00 → 晴
+[stress] 回合4 我方開火累計0 我方HP270 敵方HP310 最近敵距3.2m
+[stress] 回合5 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合6 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合7 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合8 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合9 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合10 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合11 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] 回合12 我方開火累計0 我方HP180 敵方HP310 最近敵距5.9m
+[stress] ch01 回合=12 我方存活=2 敵方存活=3 取樣=502 最差幀=95ms 結局=回合上限
 [selftest] saved res://qa/stress_ch01_end.png
 [stress] ch01 FAILS=0
 [stress] DONE

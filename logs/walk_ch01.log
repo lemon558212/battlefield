@@ -1,3 +1,4 @@
+BATCH-20260801-203122
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
@@ -8,72 +9,72 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 4 對話：連點推進 (st=3)
 [water] 深水圍欄 74 根樁（水深 > 1.05m 的邊界）
 [poles] 桿=1 電線段=0
-[edgeclr] 邊界帶內丟棄障礙 8 個（帶寬 1.6m）
+[edge] 剔除邊界帶障礙 8 個（安全帶 1.62m，深水圍欄不剔）
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7155)
+       [2] _scatter_trees (res://scripts/Main.gd:7859)
+       [3] _build_ground (res://scripts/Main.gd:7001)
+       [4] _open_deploy (res://scripts/Main.gd:3825)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2002)
+       [9] _boot_to_battle (res://scripts/Main.gd:1827)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7155)
+       [2] _scatter_trees (res://scripts/Main.gd:7859)
+       [3] _build_ground (res://scripts/Main.gd:7001)
+       [4] _open_deploy (res://scripts/Main.gd:3825)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2002)
+       [9] _boot_to_battle (res://scripts/Main.gd:1827)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7155)
+       [2] _scatter_trees (res://scripts/Main.gd:7859)
+       [3] _build_ground (res://scripts/Main.gd:7001)
+       [4] _open_deploy (res://scripts/Main.gd:3825)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2002)
+       [9] _boot_to_battle (res://scripts/Main.gd:1827)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7155)
+       [2] _scatter_trees (res://scripts/Main.gd:7859)
+       [3] _build_ground (res://scripts/Main.gd:7001)
+       [4] _open_deploy (res://scripts/Main.gd:3825)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2002)
+       [9] _boot_to_battle (res://scripts/Main.gd:1827)
 ERROR: UVs are required to generate tangents.
    at: generate_tangents (scene/resources/surface_tool.cpp:1157)
    GDScript backtrace (most recent call first):
        [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7069)
-       [2] _scatter_trees (res://scripts/Main.gd:7773)
-       [3] _build_ground (res://scripts/Main.gd:6915)
-       [4] _open_deploy (res://scripts/Main.gd:3775)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3765)
+       [1] _scatter_rocks (res://scripts/Main.gd:7155)
+       [2] _scatter_trees (res://scripts/Main.gd:7859)
+       [3] _build_ground (res://scripts/Main.gd:7001)
+       [4] _open_deploy (res://scripts/Main.gd:3825)
+       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
        [6] _dlg_step (res://scripts/UI.gd:461)
        [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:1952)
-       [9] _boot_to_battle (res://scripts/Main.gd:1777)
+       [8] _send_click (res://scripts/Main.gd:2002)
+       [9] _boot_to_battle (res://scripts/Main.gd:1827)
 [rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
 [look] spawn mg side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
@@ -91,19 +92,12 @@ ERROR: UVs are required to generate tangents.
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 130 個取樣點（10 列 × 13 行，間距 5.5m），地圖 70×50 m
 [walk] 起點 px(350,18)（第 3 個點；前面的都在海裡或障礙裡）
-[walk] 走完 129 段，抵達 20 段；共 6270 次取樣檢查
-[walk][陷進實體(人在障礙裡)] FAIL 6 次，前 6 筆：
-    (354.4315, 20.0)
-    (361.8661, 20.0)
-    (354.892, 20.0)
-    (354.9189, 20.0)
-    (355.8917, 20.0)
-    (359.354, 20.0)
+[walk] 走完 129 段，抵達 38 段；共 6714 次取樣檢查
+[walk][陷進實體(人在障礙裡)] 0 次 OK
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK
 [walk][卡死(目標是空地卻走不到)] 0 次 OK
 [walk][鏡頭穿牆] 0 次 OK
 [walk][走出地圖] 0 次 OK
-[selftest] saved res://qa/walk_ch01_bad_solid.png
-[walk] ch01 FAILS=6（拍了 1 張現場照）
+[walk] ch01 FAILS=0（拍了 0 張現場照）
 [walk] DONE

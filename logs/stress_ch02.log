@@ -1,3 +1,4 @@
+BATCH-20260801-202601
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
@@ -8,6 +9,7 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 4 對話：連點推進 (st=3)
 [water] 這張圖沒有深過 1.05m 的水，不需要深水圍欄
 [poles] 桿=2 電線段=0
+[edgeclr] 邊界帶內丟棄障礙 0 個（帶寬 1.6m，深水圍欄不丟）
 [look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
 [look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
@@ -27,18 +29,15 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.11 elev=0.02m crater=false
-[weather] 回合 2 10:00 → 雨
-[stress] 回合1 我方開火累計0 我方HP300 敵方HP310 最近敵距43.4m
-[stress] 回合2 我方開火累計0 我方HP300 敵方HP310 最近敵距20.0m
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP310 最近敵距45.6m
+[stress] 回合2 我方開火累計0 我方HP300 敵方HP310 最近敵距20.6m
 [stress] 回合3 我方開火累計1 我方HP221 敵方HP232 最近敵距17.2m
-[stress] 回合4 我方開火累計2 我方HP221 敵方HP152 最近敵距24.9m
-[stress] 回合5 我方開火累計3 我方HP221 敵方HP152 最近敵距19.7m
-[stress] 回合6 我方開火累計4 我方HP221 敵方HP152 最近敵距14.6m
-[stress] 回合7 我方開火累計5 我方HP221 敵方HP120 最近敵距9.9m
-[weather] 回合 9 17:00 → 晴
-[stress] 回合8 我方開火累計7 我方HP148 敵方HP76 最近敵距8.0m
-[stress] 回合9 我方開火累計9 我方HP97 敵方HP0 最近敵距50000000000000000.0m
-[stress] ch02 回合=9 我方存活=2 敵方存活=0 取樣=461 最差幀=31ms 結局=打完
+[stress] 回合4 我方開火累計2 我方HP221 敵方HP152 最近敵距19.3m
+[stress] 回合5 我方開火累計3 我方HP221 敵方HP120 最近敵距24.5m
+[stress] 回合6 我方開火累計3 我方HP221 敵方HP120 最近敵距17.0m
+[stress] 回合7 我方開火累計3 我方HP221 敵方HP120 最近敵距9.9m
+[stress] 回合8 我方開火累計5 我方HP134 敵方HP0 最近敵距50000000000000000.0m
+[stress] ch02 回合=8 我方存活=2 敵方存活=0 取樣=432 最差幀=15ms 結局=打完
 [selftest] saved res://qa/stress_ch02_end.png
 [stress] ch02 FAILS=0
 [stress] DONE
