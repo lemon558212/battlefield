@@ -789,6 +789,12 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	add_child(root)
 	_model = root
 	_model_base_y = 0.0
+	# ★立繪生成模型優先（modly/Hunyuan3D）：使用者「載具太陽春，也要用 modly 做」。
+	#   有生成模型就用，沒有才退回下面的程式生成幾何——退回時要**大聲喊**，
+	#   靜默退回會讓「我以為換好了、其實還是舊模型」（本專案踩過三次）。
+	var vl: Dictionary = GameData.vehicle_look.get(p_cls, {})
+	if _try_build_from_art(root, p_cls, vl, is_player):
+		return
 	# ⚠⚠ 先前這裡沒有任何分支：驅逐艦、潛艇、戰鬥機**全部都被畫成坦克**。
 	#   海空單位有自己的剪影，走各自的建造函式（鐵律 0：現實怎樣就怎樣）。
 	var mob: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
@@ -955,6 +961,55 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 		root.add_child(hook)
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+
+# 立繪生成的載具模型（modly）：車體固定、砲塔掛在 _turret 底下才轉得動。
+# 回傳 false＝沒有可用的生成模型，呼叫端退回程式生成幾何。
+func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player: bool) -> bool:
+	var hull_p := "res://assets/models/vehicles/%s_hull.glb" % p_cls
+	var tur_p := "res://assets/models/vehicles/%s_turret.glb" % p_cls
+	var whole_p := "res://assets/models/vehicles/%s.glb" % p_cls
+	var has_split: bool = ResourceLoader.exists(hull_p) and ResourceLoader.exists(tur_p)
+	if not has_split and not ResourceLoader.exists(whole_p):
+		return false
+	# 尺度：生成模型一律被正規化成約 2m，依真實車長縮回去
+	var want_len: float = float(vl.get("length_m", 6.2))
+	if has_split:
+		var hull: Node3D = load(hull_p).instantiate()
+		root.add_child(hull)
+		_turret = Node3D.new()
+		_turret.name = "Turret"
+		root.add_child(_turret)
+		var tur: Node3D = load(tur_p).instantiate()
+		_turret.add_child(tur)
+		# 砲塔要繞自己的座圈中心轉，不是繞車體原點——否則一轉就飛出車外
+		var tb: AABB = _merged_aabb(tur)
+		var pivot: Vector3 = Vector3(tb.get_center().x, tb.position.y, tb.get_center().z)
+		tur.position = -pivot
+		_turret.position = pivot
+	else:
+		var whole: Node3D = load(whole_p).instantiate()
+		root.add_child(whole)
+	var box: AABB = _merged_aabb(root)
+	var raw_len: float = maxf(box.size.z, 0.001)
+	var k: float = want_len / raw_len
+	root.scale = Vector3.ONE * k
+	root.position.y = -box.position.y * k
+	_model_base_y = root.position.y
+	veh_hl = float(vl.get("collide_hl", box.size.z * 0.5 * k))
+	veh_hw = float(vl.get("collide_hw", box.size.x * 0.5 * k))
+	var mob2: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
+	if mob2 == "naval":
+		_is_naval = true
+		_draft = {"destroyer": 1.1, "missileboat": 0.6, "lst": 0.8,
+				"submarine": 1.5}.get(p_cls, 0.9)
+	elif mob2 == "air":
+		_is_air = true
+		_fly_alt = 6.0 if p_cls == "gunship" else 14.0
+	if not is_player:
+		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
+	print("[vehart] %s 用立繪生成模型（%s，車長 %.1fm，縮放 %.3f）"
+			% [p_cls, "車體+砲塔" if has_split else "整件", want_len, k])
+	return true
 
 # ---------- 艦艇（naval）----------
 # ⚠ 尺度：真驅逐艦約 130m，放在 90m 的戰場上不可能。故沿用本專案既有的

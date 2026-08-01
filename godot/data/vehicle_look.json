@@ -1,0 +1,60 @@
+{
+ "_doc": "載具外觀表（2026-08-01）。使用者：『載具太陽春了，這些也有立繪，要用 modly 做 3D 模型』。base_hull/base_turret＝立繪生成的模型（modly/Hunyuan3D，見 tools/pipeline_vehicle.bat）；沒有這兩欄就退回 Unit 的程式生成幾何。length_m＝真實車長，載入後依此把模型縮到正確尺度（生成出來的模型一律被正規化成約 2m）。turret_y＝砲塔座圈高度佔全高的比例，給 tools/split_turret.py 用。",
+ "tank": {
+  "name": "主戰坦克",
+  "length_m": 6.2,
+  "turret_y": 0.46,
+  "collide_hl": 3.0,
+  "collide_hw": 1.75
+ },
+ "destroyer": {
+  "name": "驅逐艦",
+  "length_m": 18.0,
+  "turret_y": 0.62,
+  "collide_hl": 9.0,
+  "collide_hw": 1.6
+ },
+ "missileboat": {
+  "name": "飛彈快艇",
+  "length_m": 10.0,
+  "turret_y": 0.6,
+  "collide_hl": 5.0,
+  "collide_hw": 1.4
+ },
+ "lst": {
+  "name": "戰車登陸艦",
+  "length_m": 14.0,
+  "turret_y": 0.66,
+  "collide_hl": 7.0,
+  "collide_hw": 2.0
+ },
+ "submarine": {
+  "name": "潛艦",
+  "length_m": 15.0,
+  "turret_y": 0.99,
+  "collide_hl": 7.5,
+  "collide_hw": 1.2
+ },
+ "fighter": {
+  "name": "戰鬥機",
+  "length_m": 9.8,
+  "turret_y": 0.99,
+  "collide_hl": 4.4,
+  "collide_hw": 4.9
+ },
+ "attacker": {
+  "name": "攻擊機",
+  "length_m": 10.1,
+  "turret_y": 0.99,
+  "collide_hl": 4.4,
+  "collide_hw": 5.9
+ },
+ "gunship": {
+  "name": "武裝直升機",
+  "length_m": 9.5,
+  "turret_y": 0.99,
+  "collide_hl": 4.6,
+  "collide_hw": 1.3
+ },
+ "_doc2": "turret_y=0.99 ＝這個載具沒有可轉砲塔（潛艦/航空），整台當一件。"
+}
