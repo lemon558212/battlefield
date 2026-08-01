@@ -26,14 +26,28 @@ def main():
     cut = lo[1] + (hi[1] - lo[1]) * ty
     tri_c = mesh.triangles.mean(axis=1)          # 每個三角形的重心
     up = tri_c[:, 1] > cut
+    # ⚠ 兩片各自封口但不重疊的話，切面處會露出一條縫（實拍：砲塔與車體之間有黑洞）。
+    #   車體多保留一段重疊帶，把縫塞住；重疊在模型內部，看不到也不會 z-fighting。
+    overlap = (hi[1] - lo[1]) * 0.06
+    keep_low = tri_c[:, 1] < cut + overlap
 
     if up.sum() == 0 or up.sum() == len(up):
         print(f"[split] FAIL 切面 y={cut:.3f} 把全部三角形分到同一邊"
               f"（上方 {up.sum()}／共 {len(up)}）——turret_y 給錯了")
         return 1
 
-    for mask, path, tag in ((~up, out_hull, "車體"), (up, out_tur, "砲塔")):
+    for mask, path, tag in ((keep_low, out_hull, "車體"), (up, out_tur, "砲塔")):
         sub = mesh.submesh([np.where(mask)[0]], append=True)
+        # ⚠ 生成模型是**薄殼**：水平切開後兩半都缺封口，遊戲裡會從切縫看穿到內部
+        #   （實拍：砲塔與車體之間空一個洞、側面一大片白＝殼的內側）。
+        #   切完一定要補洞，這不是美化、是「固體不可看穿」的基本要求。
+        before = len(sub.faces)
+        try:
+            sub.fill_holes()
+        except Exception as e:
+            print(f"[split] ⚠ {tag} 補洞失敗：{e}")
+        added = len(sub.faces) - before
+        print(f"[split] {tag} 補洞 +{added} 面")
         sub.export(path)
         b = sub.bounds
         print(f"[split] {tag}: 面數 {len(sub.faces):6d}  尺寸 "
