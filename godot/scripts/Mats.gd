@@ -19,6 +19,14 @@ const TEX_DIR := "res://assets/textures/"
 
 static var _cache := {}
 
+# 退出前主動釋放材質快取（2026-08-02）。
+# 為什麼需要：`static var` 持有的 Resource 會活到**程式結束**，比引擎關閉資源系統
+# 還晚，於是每次退出都印「1 resources still in use at exit」，在這台機器上還伴隨
+# 退出時 Segmentation fault（不影響測試判定，但每章都出現一次就不該放著）。
+# 快取全部是 lazy init，清掉之後若還有人要用會自動重建，所以清空是安全的。
+static func clear_cache() -> void:
+	_cache.clear()
+
 # name＝貼圖組名（T_<name>_BaseColor.png 等）；uv_m＝一次貼圖循環代表幾公尺；
 # tint＝疊在貼圖上的色調（純色時代的顏色可以保留一點，維持既有配色感）。
 # use_albedo=false＝只吃法線與粗糙度，顏色留給頂點色。地表要的是這個：

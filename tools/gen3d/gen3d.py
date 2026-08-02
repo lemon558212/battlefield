@@ -49,12 +49,24 @@ PROFILES = [
 
 
 def vram_gb() -> float:
+    """偵測本機 VRAM（GB）。偵測不到回 0.0，但**必須讓人知道**——見下方警告。
+
+    ⚠⚠ 2026-08-02 教訓：這裡原本 `except: return 0.0` 完全不吭聲，
+    於是 VRAM 偵測失敗時整批悄悄降級成 low 檔位（hunyuan-mini／1024 貼圖），
+    跑完 17 件、看起來一切正常，實際上是最低品質。使用者因此以為手上那批是
+    TRELLIS.2 ultra，直到從貼圖只有 1024×1024 才反推出來。
+    「靜默回退」在這個專案已經造成多次假成功，一律要喊。
+    """
     try:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
             text=True, timeout=20)
         return float(out.strip().splitlines()[0]) / 1024.0
-    except Exception:
+    except Exception as e:
+        print("[gen3d] ⚠⚠ 偵測不到 VRAM（nvidia-smi 失敗：%s）" % e)
+        print("[gen3d]    → 會被當成 0GB 而選最低檔位 low（hunyuan-mini／1024 貼圖）。")
+        print("[gen3d]    → 若這台其實是大顯卡，請先修好 nvidia-smi，或用")
+        print("[gen3d]      --profile ultra 明確指定，否則會白跑一整批低品質模型。")
         return 0.0
 
 
@@ -68,6 +80,14 @@ def pick_profile(force: str = "") -> dict:
             continue
         return {"vram": v, "name": name, "model": model, "res": res,
                 "faces": faces, "tex": tex}
+    # 走到這裡＝沒有任何檔位符合（force 打錯字，或 VRAM 偵測回 0）。
+    # ⚠ 不可以安靜地回 low：那正是「跑完才發現是最低品質」的成因。
+    if force:
+        print("[gen3d] ⚠⚠ 指定的檔位「%s」不存在（可用：ultra/high/medium/low），"
+              "已回退 low" % force)
+    else:
+        print("[gen3d] ⚠⚠ VRAM %.0fGB 不符合任何檔位門檻，回退 low"
+              "（hunyuan-mini／1024 貼圖＝最低品質）" % v)
     return {"vram": v, "name": "low", "model": "hunyuan-mini", "res": 512,
             "faces": 100000, "tex": 1024}
 

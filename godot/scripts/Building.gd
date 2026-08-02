@@ -588,6 +588,11 @@ func _decorate(half: Vector2, top: float) -> void:
 
 static var _deco_mesh := {}      # 路徑 → Mesh（全場共用，一個模型只讀一次）
 
+# 退出前釋放靜態快取（理由同 BattleMats.clear_cache）
+static func clear_cache() -> void:
+	_shared_mats.clear()
+	_deco_mesh.clear()
+
 func _deco_mm(key: String, xfs: Array) -> void:
 	if xfs.is_empty():
 		return

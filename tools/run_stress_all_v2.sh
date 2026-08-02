@@ -44,18 +44,28 @@ for i in $(seq "$FROM" "$TO"); do
   else
     echo "$line"
   fi
+  # 引擎紅字也算不合格（CLAUDE.md 驗收標準：console 無紅字）
+  bash tools/check_errors.sh "logs/${MODE}_${ch}.log"
 done
 
 echo "=== 總表（$MODE ch$FROM..ch$TO，只認 $BATCH_ID）==="
-ok=0; bad=0; miss=0
+ok=0; bad=0; miss=0; errch=0
 for i in $(seq "$FROM" "$TO"); do
   ch=$(printf "ch%02d" "$i")
   f="logs/${MODE}_${ch}.log"
   head -1 "$f" | grep -q "$BATCH_ID" || { echo "$ch 不屬於本批次(檔案被外部覆寫)"; miss=$((miss+1)); continue; }
   line=$(grep -E "\[(stress|walk)\] ch[0-9]+ FAILS=" "$f")
-  if [ -z "$line" ]; then echo "$ch 未完成"; miss=$((miss+1));
-  elif echo "$line" | grep -qE "FAILS=[1-9]"; then echo "$line"; bad=$((bad+1));
-  else echo "$line"; ok=$((ok+1)); fi
+  # 紅字獨立計一欄：一章可以同時 FAILS=0 又噴紅字（先前 90 次就是這樣被漏掉的）
+  err=""
+  bash tools/check_errors.sh "$f" > /dev/null 2>&1 || err="＋紅字"
+  [ -n "$err" ] && errch=$((errch+1))
+  if [ -z "$line" ]; then echo "$ch 未完成 $err"; miss=$((miss+1));
+  elif echo "$line" | grep -qE "FAILS=[1-9]"; then echo "$line $err"; bad=$((bad+1));
+  else echo "$line $err"; ok=$((ok+1)); fi
 done
-echo "本批次：$ok 章 0 FAIL／$bad 章有 FAIL／$miss 章未完成"
-[ "$bad" -eq 0 ] && [ "$miss" -eq 0 ]
+echo "本批次：$ok 章 FAILS=0／$bad 章有 FAIL／$miss 章未完成／$errch 章有引擎紅字"
+if [ "$errch" -gt 0 ]; then
+  echo "⚠ 有紅字的章節不算通過——逐章紅字明細用：bash tools/check_errors.sh logs/${MODE}_chNN.log"
+fi
+# 通過條件三個都要成立：無 FAIL、無未完成、無紅字
+[ "$bad" -eq 0 ] && [ "$miss" -eq 0 ] && [ "$errch" -eq 0 ]

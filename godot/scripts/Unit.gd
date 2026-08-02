@@ -133,6 +133,9 @@ var _rig = null                # IK / 俯仰 / 握拳工具（綁在本模型骨
 var _anim_src: Node3D = null   # UAL 動作來源（模型自身沒有動畫時用它 + 重定向）
 var _retarget := false         # true＝動作來自 UAL 重定向
 var _gun_armed := false        # 有真實武器模型才做程式化持槍姿
+var _diag_pose_said := ""      # 持槍姿勢沒套用的原因（同一個原因只喊一次，不洗版）
+var _diag_pose_frames := 0     # 連續被擋幾幀（過渡幀不算異常，見 _aim_pose）
+var _diag_freehand_said := false   # 「移動中卻是雙手自由狀態」只喊一次
 var _gun_len_scale := 1.0      # 網格 → 真實槍長的縮放
 var _gun_len := 1.0            # 槍全長（公尺）：貼牆抬槍要用
 var _muzzle_block := 0.0       # 目前抬槍角度（度）：貼牆時槍口朝天，平滑過渡
@@ -150,6 +153,16 @@ const UAL_ANIMS := "res://assets/models/anims/ual_standard.glb"
 const USE_RETARGET_CROUCH := false
 static var _crouch_pose := {}   # 全體共用：蹲姿只需算一次，不必每個單位都揹一份動畫來源
 static var _crouch_busy := false
+
+# 退出前釋放靜態快取（理由同 BattleMats.clear_cache）。
+# Unit 這邊持有的是 ShaderMaterial 與三張 GradientTexture2D ——都是 Resource，
+# 靜態持有到程式結束就會變成「still in use at exit」。
+static func clear_cache() -> void:
+	_outline_mat = null
+	_drop_tex = null
+	_ring_texture = null
+	_crouch_pose.clear()
+	_crouch_busy = false
 const CROUCH_DEPTH := 0.14   # 蹲下時髖部下沉
 const CROUCH_BACK := 0.05    # 髖部同時後移（少了這個會變成坐椅子）
 const STANCE_W := 0.16       # 雙腳站距（半寬）   # 蹲下時身體下沉高度
@@ -647,7 +660,20 @@ const WEAPON_MODEL := {
 	"assault": ["res://assets/models/weapons/Shotgun_1.obj", 0.95],
 	"engineer": ["res://assets/models/weapons/Pistol_1.obj", 0.22],
 }
-const HAND_BONES := ["Wrist.R", "Hand.R", "hand_r"]
+# 右手骨的命名慣例白名單（依序嘗試，找到就用）。
+# ⚠⚠ 2026-08-02：這裡原本只有前三個（Quaternius／hr_ 系），**漏掉 tripo 系的
+#   `R_Hand`**，於是立繪本人模型一接進來就掛不上武器：_attach_weapon 找不到手骨
+#   → 靜默 return → _gun_armed 保持 false → _aim_pose 整段跳過 → **雙手不套 IK
+#   ＝自然垂直向下、槍看起來在背後**（使用者 2026-08-02 回報的正是這個畫面）。
+#   本專案已建立「用骨名判斷模型慣例、不可用檔名」的做法（見 _forward_fix），
+#   那支照做了、武器掛點卻沒跟上——同一條原則一處做了一處沒做。
+#   Godot 的 find_bone 大小寫敏感，`hand.r`（kk 系）與 `hand_r` 是不同字串，都要列。
+const HAND_BONES := ["Wrist.R", "Hand.R", "hand_r", "R_Hand",
+		"mixamorig:RightHand", "RightHand", "hand.r", "Hand_R"]
+# 左手同理：先前是「有 Hand.L 就用，否則一律當 Wrist.L」，
+# 對 tripo 的 `L_Hand` 一樣認不出來，左手 IK 會抓到不存在的骨。
+const HAND_BONES_L := ["Wrist.L", "Hand.L", "hand_l", "L_Hand",
+		"mixamorig:LeftHand", "LeftHand", "hand.l", "Hand_L"]
 # 程式生成武器（無真實模型的兵種）的三個持槍關鍵點：槍托／右手握把／左手前護木。
 # 座標＝_make_gun 的慣例：local +Z＝槍口、原點在握把附近。
 # 迫砲不是肩射武器（砲管本身已含 60° 仰角），故錨點下移到腰際、雙手扶砲管與握把。
@@ -670,6 +696,9 @@ var _hand_l := "Wrist.L"
 func _attach_weapon(model: Node, p_cls: String) -> void:
 	var sks := model.find_children("*", "Skeleton3D", true, false)
 	if sks.is_empty():
+		# ⚠ 不可靜默：沒有骨架就掛不上武器，而症狀（手垂在身側）看起來像動畫問題，
+		#   會把人往完全錯誤的方向查（2026-08-02 就繞了一大圈）。
+		push_error("[weapon] %s 的模型沒有 Skeleton3D，武器無法掛載（雙手會垂下）" % p_cls)
 		return
 	var sk := sks[0] as Skeleton3D
 	var bone := ""
@@ -678,9 +707,29 @@ func _attach_weapon(model: Node, p_cls: String) -> void:
 			bone = b
 			break
 	if bone == "":
+		# ⚠⚠ 這條是「跑步手垂直向下」的真正出口（2026-08-02）。原本靜默 return，
+		#   於是骨名不合慣例的模型接進來就是「動作正常、手垂著、武器不見」，
+		#   完全看不出是掛點失敗。要喊，而且要把實際骨名印出來以便補白名單。
+		var names: Array = []
+		for i in mini(sk.get_bone_count(), 60):
+			var n: String = sk.get_bone_name(i)
+			if "and" in n or "rist" in n:
+				names.append(n)
+		push_error("[weapon] %s 找不到右手骨（白名單=%s），武器沒掛上、雙手會垂下。"
+				% [p_cls, str(HAND_BONES)]
+				+ "　這個模型的手部骨名是：%s ← 把它補進 HAND_BONES" % str(names))
 		return
 	_hand_r = bone
-	_hand_l = ("Hand.L" if sk.find_bone("Hand.L") >= 0 else "Wrist.L")
+	# 左手也走白名單（先前寫死「有 Hand.L 就用、否則 Wrist.L」，
+	# 對 tripo 的 L_Hand 認不出來，左手 IK 會指向不存在的骨）
+	_hand_l = ""
+	for b in HAND_BONES_L:
+		if sk.find_bone(b) >= 0:
+			_hand_l = b
+			break
+	if _hand_l == "":
+		push_error("[weapon] %s 找不到左手骨（白名單=%s），前護木握持會失效" % [p_cls, str(HAND_BONES_L)])
+		_hand_l = "Wrist.L"      # 退回舊值，但已經喊過了，不是靜默
 	var mount := BoneAttachment3D.new()
 	mount.name = "WeaponMount"
 	mount.bone_name = bone
@@ -973,9 +1022,24 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 		return false
 	# 尺度：生成模型一律被正規化成約 2m，依真實車長縮回去
 	var want_len: float = float(vl.get("length_m", 6.2))
+	# ⚠⚠ 2026-08-02 修（play「從車頭走 6 秒沒撞到」抓到）：
+	#   底下的 raw_len／veh_hl 原本取 **root 的合併 AABB**，那顆盒子含砲塔與**砲管**。
+	#   砲管沿車軸凸出車頭約 2.6m，於是同一個錯誤造成兩件事：
+	#     ① 尺寸：k = want_len / 含砲管全長 → 「車長 6.2m」其實是「含砲管 6.2m」，
+	#        車體只剩約 4.4m，整台坦克被縮小三成（違反鐵律 0⑤真實量級：
+	#        主戰坦克車體 6.2m、含砲管全長約 9m）。
+	#     ② 碰撞：veh_hl 把砲管算成車體，人在車頭 2.5m 外就撞上一面看不見的牆。
+	#        砲管在 2m 高，人（1.75m）本來就該走得到砲管**下方**（鐵律 0②
+	#        遮蔽看幾何與高度，不是看標籤）。
+	#   一顆 AABB 被同時當成「模型多大」與「實體多大」兩種用途＝這個 bug 的根。
+	#   分件模型（hull+turret）有現成的解：兩者都以 **hull** 為基準。
+	var hull_box := AABB()
+	var has_hull_box := false
 	if has_split:
 		var hull: Node3D = load(hull_p).instantiate()
 		root.add_child(hull)
+		hull_box = _merged_aabb(hull)      # 縮放前的車體局部尺寸（不含砲塔砲管）
+		has_hull_box = true
 		_turret = Node3D.new()
 		_turret.name = "Turret"
 		root.add_child(_turret)
@@ -990,13 +1054,19 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 		var whole: Node3D = load(whole_p).instantiate()
 		root.add_child(whole)
 	var box: AABB = _merged_aabb(root)
-	var raw_len: float = maxf(box.size.z, 0.001)
+	# 車體基準盒：分件時用 hull，整件模型無法分離砲管、只能退回整體（並說明）
+	var hull_ref: AABB = hull_box if has_hull_box else box
+	var raw_len: float = maxf(hull_ref.size.z, 0.001)
 	var k: float = want_len / raw_len
 	root.scale = Vector3.ONE * k
+	# 貼地仍用整體盒的底面：履帶在車體底部，含砲塔的整體底面與車體底面同高，
+	# 但整件模型若有下垂零件，用整體才不會把車埋進地裡。
 	root.position.y = -box.position.y * k
 	_model_base_y = root.position.y
-	veh_hl = float(vl.get("collide_hl", box.size.z * 0.5 * k))
-	veh_hw = float(vl.get("collide_hw", box.size.x * 0.5 * k))
+	veh_hl = float(vl.get("collide_hl", hull_ref.size.z * 0.5 * k))
+	veh_hw = float(vl.get("collide_hw", hull_ref.size.x * 0.5 * k))
+	if not has_hull_box:
+		print("[vehart] %s 只有整件模型，碰撞盒含砲塔（無法分離砲管）" % p_cls)
 	var mob2: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
 	if mob2 == "naval":
 		_is_naval = true
@@ -2260,9 +2330,50 @@ func _fade(k: float) -> void:
 #   ⚠ 通則：任何「每幀累加/收斂」的狀態都不可以寫在一幀可能被呼叫多次的回呼裡。
 var _pose_frame := -1
 
+# 為什麼持槍姿勢整段沒套用（回傳空字串＝沒問題）。
+# 2026-08-02 新增：使用者回報「跑步時手自然垂直向下」，症狀不是瞄準方向算錯，
+# 而是**持槍 IK 根本沒套用**，手臂回到動畫的自然下垂。_aim_pose 開頭那五個前提
+# 原本是**靜默** return——本專案已因「靜默跳過」造成三次假通過，這裡補上診斷。
+func _pose_blocked_why() -> String:
+	if not _gun_armed:
+		return "_gun_armed=false（武器沒掛上：_attach_weapon 找不到骨架或右手骨而提早 return？）"
+	if _rig == null:
+		return "_rig=null（IK 工具沒建起來）"
+	if _gun_node == null:
+		return "_gun_node=null（沒有武器節點）"
+	if not _gun_fixed:
+		return "_gun_fixed=false（_fix_gun_scale 沒完成：mount 不在場景樹？）"
+	if _model == null:
+		return "_model=null"
+	return ""
+
 func _aim_pose() -> void:
-	if not _gun_armed or _rig == null or _gun_node == null or not _gun_fixed or _model == null:
+	# ★★2026-08-02：這一整支（IK 瞄準、抵肩、蹲/趴手寫姿勢）的 pole vector 與
+	#   角度全是照 **Quaternius 骨架** 的 rest 調出來的。套到別系骨架
+	#   （立繪本人模型走 tripo 系：Hip / L_Upperarm / L_Clavicle）會把身體扭成一團
+	#   ——實拍證實，而且骨名對上 20/20、日誌完全乾淨，只有畫面是壞的。
+	#   在 IK 真正支援多骨架系之前，非 Quaternius 骨架**只掛武器、不套姿勢**：
+	#   動作交給動畫（UAL 重定向或模型自帶）。寧可少了瞄準微調，也不要扭曲的人。
+	#   ⚠ 這是暫行界線，不是修好了。要真正修，得讓 IK 與 rest pose 無關。
+	if _rig != null and _rig.rig_kind() != "quaternius":
 		return
+	if not _gun_armed or _rig == null or _gun_node == null or not _gun_fixed or _model == null:
+		# ⚠ 這裡先前是靜默 return，而它正是「手臂完全不套 IK＝自然垂下」的主要出口。
+		#   啟動期前 6 幀 _gun_fixed 本來就是 false（_fix_gun_scale 要等姿勢上骨骼），
+		#   那不算異常；過了啟動期還進來就是真問題，大聲喊出來讓走查/壓測抓到。
+		# ⚠ 不可用 `_gun_fix_wait >= 6` 當「啟動期已過」的判準（2026-08-02 第一版就錯在這）：
+		#   wait 累加到 6 之後就不再變動，所以它只能表示「曾經開始等」，
+		#   而「wait==6 且還沒校正」是**正常的單幀過渡**——那一幀誤報成異常，
+		#   九個兵種各噴一行，看起來像九個 bug，其實一個都不是。
+		#   改用獨立計數：真的連續被擋超過半秒（30 幀）才是卡住。
+		_diag_pose_frames += 1
+		var why: String = _pose_blocked_why()
+		if _diag_pose_frames > 30 and why != _diag_pose_said:
+			_diag_pose_said = why
+			push_error("[pose] %s 持槍姿勢連續 %d 幀沒套用（雙手會自然垂下）：%s"
+					% [cls, _diag_pose_frames, why])
+		return
+	_diag_pose_frames = 0      # 有套用到就歸零：只抓「持續」卡住，不抓過渡
 	var fresh: bool = int(Engine.get_process_frames()) != _pose_frame
 	_pose_frame = int(Engine.get_process_frames())
 	var sks := _model.find_children("*", "Skeleton3D", true, false)
@@ -2372,6 +2483,15 @@ func _aim_pose() -> void:
 		if _dead:
 			_drop_gun()      # ★陣亡＝槍掉在地上，不是「斜背在背上」（見 _drop_gun）
 			return
+		# ⚠⚠ 2026-08-02 使用者：「跑步時手自然垂直向下，武器看起來在後面」。
+		#   這條路徑正好同時產生那兩個現象：槍被斜背到背上（＝看起來在後面）、
+		#   雙手不套 IK（＝自然垂下）。移動中本來就不該進來——真人跑步時
+		#   仍是雙手持槍、手肘微彎的低姿預備（使用者原話），不是把槍收到背上空手跑。
+		#   FREEHAND_STATES = fix/capture/idle_relaxed/death，四者都不該與移動並存。
+		if is_moving() and not _diag_freehand_said:
+			_diag_freehand_said = true
+			push_error("[pose] %s 移動中卻是「雙手自由」狀態＝跑步時手垂下、槍背在後面：_state=%s"
+					% [cls, _state])
 		_stow_gun(sk)        # 雙手要做別的事：把槍斜背到背上（不然長槍會插進地面）
 		return
 	var si := sk.find_bone("Shoulder.R")

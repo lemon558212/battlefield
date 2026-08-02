@@ -18,10 +18,81 @@ const MAP := {
 	"thigh_r": "UpperLeg.R", "calf_r": "LowerLeg.R", "foot_r": "Foot.R",
 }
 
-# 同一套 Quaternius 骨架在不同包裡手骨名不同（Hand.R / Wrist.R），找不到就試替代名
-const ALT := {"Hand.L": "Wrist.L", "Hand.R": "Wrist.R"}
+# 目標骨名的替代慣例。呼叫端（Unit.gd 等）一律用 **Quaternius 名**，
+# 由 _bone() 負責翻譯成該骨架實際的名字——呼叫端不必知道模型是哪一系。
+#
+# ⚠⚠ 2026-08-02：這裡原本只有兩個替代名（Hand.L/Hand.R），所以立繪本人模型
+#   （tripo 系，骨名是 Hip / L_Upperarm / L_Clavicle 這種前綴式）接進來時，
+#   20 對骨只對上 `Head` **1 對**——動作幾乎完全沒被驅動。而且它不會報錯，
+#   看起來就只是「動作怪怪的」，非常難查。
+#   三系慣例對照（tripo 骨名由 tripo_han.glb 實際列出的 41 骨確認）：
+#     Quaternius(hr_/kk_)  tripo(立繪本人)   Mixamo
+#     Hips                 Hip               mixamorig:Hips
+#     Abdomen              Waist             mixamorig:Spine
+#     UpperArm.L           L_Upperarm        mixamorig:LeftArm
+const ALT := {
+	"Hips": ["Hip", "mixamorig:Hips"],
+	"Abdomen": ["Waist", "mixamorig:Spine"],
+	"Torso": ["Spine01", "mixamorig:Spine1"],
+	"Chest": ["Spine02", "mixamorig:Spine2"],
+	"Neck": ["NeckTwist01", "NeckTwist02", "mixamorig:Neck"],
+	"Head": ["mixamorig:Head"],
+	"Shoulder.L": ["L_Clavicle", "mixamorig:LeftShoulder"],
+	"UpperArm.L": ["L_Upperarm", "mixamorig:LeftArm"],
+	"LowerArm.L": ["L_Forearm", "mixamorig:LeftForeArm"],
+	"Hand.L": ["Wrist.L", "L_Hand", "mixamorig:LeftHand"],
+	"Shoulder.R": ["R_Clavicle", "mixamorig:RightShoulder"],
+	"UpperArm.R": ["R_Upperarm", "mixamorig:RightArm"],
+	"LowerArm.R": ["R_Forearm", "mixamorig:RightForeArm"],
+	"Hand.R": ["Wrist.R", "R_Hand", "mixamorig:RightHand"],
+	"UpperLeg.L": ["L_Thigh", "mixamorig:LeftUpLeg"],
+	"LowerLeg.L": ["L_Calf", "mixamorig:LeftLeg"],
+	"Foot.L": ["L_Foot", "mixamorig:LeftFoot"],
+	"UpperLeg.R": ["R_Thigh", "mixamorig:RightUpLeg"],
+	"LowerLeg.R": ["R_Calf", "mixamorig:RightLeg"],
+	"Foot.R": ["R_Foot", "mixamorig:RightFoot"],
+}
+
+# 骨名解析：先照原名找，找不到再試該名的替代慣例。
+# 所有對外 API 都走這支，這樣「模型用哪一系骨名」只需要在 ALT 維護一處。
+func _bone(bname: String) -> int:
+	if _dst == null:
+		return -1
+	var i := _dst.find_bone(bname)
+	if i >= 0:
+		return i
+	for alt in ALT.get(bname, []):
+		i = _dst.find_bone(String(alt))
+		if i >= 0:
+			return i
+	return -1
 
 static var DBG := OS.get_cmdline_user_args().has("ikdbg")
+
+# 每根骨屬於哪一段身體（診斷用：可以只轉印其中一段，二分定位哪一段轉印會壞）
+const GROUP := {
+	"pelvis": "torso", "spine_01": "torso", "spine_02": "torso",
+	"spine_03": "torso", "neck_01": "torso", "Head": "torso",
+	"clavicle_l": "arms", "upperarm_l": "arms", "lowerarm_l": "arms", "hand_l": "arms",
+	"clavicle_r": "arms", "upperarm_r": "arms", "lowerarm_r": "arms", "hand_r": "arms",
+	"thigh_l": "legs", "calf_l": "legs", "foot_l": "legs",
+	"thigh_r": "legs", "calf_r": "legs", "foot_r": "legs",
+}
+# 只有這幾根骨的「方向」能可靠反映 **rest 姿勢**（T-pose 還是垂手）。
+# ⚠ clavicle（肩骨走向）、foot（腳掌朝向）、hand（手掌朝向）在不同骨架之間
+#   本來就差 45~60°，那是骨架設計差異、不是姿勢差異——拿它們當判準會誤判，
+#   把正常運作的 hr_ 骨架也「修」一遍（實測會誤判 2~3 對）。
+const ALIGN_BONES := ["upperarm_l", "lowerarm_l", "upperarm_r", "lowerarm_r",
+		"thigh_l", "calf_l", "thigh_r", "calf_r"]
+
+# 診斷開關：`-- lookshots rigpart=torso` ＝只轉印軀幹，其餘骨頭留在 rest。
+# 空字串＝全部轉印（正常行為）。這是為了定位「哪一段的轉印把身體弄壞」。
+static var PART := _arg_part()
+static func _arg_part() -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("rigpart="):
+			return a.substr(8)
+	return ""
 
 var _src: Skeleton3D
 var _dst: Skeleton3D
@@ -30,6 +101,10 @@ var _detached: Array = []   # [src_idx, dst_idx]：目標骨掛在 Root（不跟
 var _hips: Array = [-1, -1]
 var _height_ratio := 1.0
 var _ratio_ok := false      # 體型比例必須在「進場景樹後」才量得到（global_transform 才有效）
+# rest 對齊補正：每對骨一個 Quaternion，把「目標骨的 rest 方向」轉到
+# 「來源骨的 rest 方向」，讓差量轉印在同一個基準上進行。見 _ensure_align()。
+var _align: Array = []
+var _align_ok := false
 
 # 只綁目標骨架：遊戲內用模型自帶動畫，不需要來源姿勢，但仍要用 IK/俯仰/握拳這些工具。
 func bind(dst: Skeleton3D) -> void:
@@ -41,15 +116,24 @@ func setup(src: Skeleton3D, dst: Skeleton3D) -> int:
 	_pairs.clear()
 	_detached.clear()
 	_ratio_ok = false
+	var missing: Array = []
 	for s in MAP.keys():
 		var si := src.find_bone(s)
 		var dname: String = MAP[s]
 		var di := dst.find_bone(dname)
-		if di < 0 and ALT.has(dname):
-			di = dst.find_bone(ALT[dname])
+		if di < 0:
+			# ALT 是**陣列**（一個 Quaternius 名可能對應多系慣例），要逐個試。
+			# ⚠ 舊寫法 `dst.find_bone(ALT[dname])` 只吃單一字串，改成陣列後
+			#   若不同步修這裡，會變成「永遠找不到替代名」＝比原本更糟。
+			for alt in ALT.get(dname, []):
+				di = dst.find_bone(String(alt))
+				if di >= 0:
+					break
 		if si < 0 or di < 0:
+			if si >= 0:
+				missing.append(dname)      # 來源有、目標找不到＝骨名慣例沒收錄
 			continue
-		_pairs.append([si, di])
+		_pairs.append([si, di, String(GROUP.get(s, "")), String(s)])
 		if s == "pelvis":
 			_hips = [si, di]
 		elif _broken_parent(src, dst, si, di):
@@ -57,7 +141,90 @@ func setup(src: Skeleton3D, dst: Skeleton3D) -> int:
 			# 但髖部下沉時它不會跟著走 → 蹲下變成「上半身沉下去、腿還站著」。
 			# 這類骨頭的位置也要自己補上。
 			_detached.append([si, di])
+	# ★★不可靜默：對上幾對骨決定了「動作到底有沒有被驅動」。
+	#   2026-08-02 實測 tripo_han.glb 只對上 1 對（只有 Head 同名），
+	#   而它照樣安靜地跑完——畫面上是「動作怪怪的」，完全看不出重定向失敗了。
+	#   人形骨架至少該對上軀幹＋四肢，少於 12 對一定是骨名慣例沒收錄。
+	if _pairs.size() < 12:
+		push_error("[rig] 重定向只對上 %d/%d 對骨，動作不會正確播放。"
+				% [_pairs.size(), MAP.size()]
+				+ "　目標骨架找不到這些骨：%s ← 把它們的實際骨名補進 Retarget.ALT" % str(missing))
 	return _pairs.size()
+
+# 這根骨的「骨頭指向」（rest，骨架空間單位向量）。
+# 用最遠的子骨當方向：tripo 的上臂同時有 L_Forearm 與兩根 Twist 子骨，
+# 取「第一個」子骨可能拿到 Twist（方向不對），取最遠的才是真正的骨幹方向。
+# 末端骨（手、腳）沒有子骨，回零向量＝不做對齊。
+func _bone_dir_rest(sk: Skeleton3D, bi: int) -> Vector3:
+	var o: Vector3 = sk.get_bone_global_rest(bi).origin
+	var best := Vector3.ZERO
+	var best_d := 0.0
+	for ci in sk.get_bone_count():
+		if sk.get_bone_parent(ci) != bi:
+			continue
+		var v: Vector3 = sk.get_bone_global_rest(ci).origin - o
+		var d: float = v.length()
+		if d > best_d:
+			best_d = d
+			best = v
+	return best.normalized() if best_d > 0.0001 else Vector3.ZERO
+
+# ★★rest 對齊（2026-08-02）——立繪本人模型能不能動起來的關鍵。
+#
+# 差量轉印的語意是「來源骨相對**自己的 rest** 轉了多少，目標骨就從**自己的 rest**
+# 轉同樣多」。它隱含一個前提：兩邊的 rest 是**同一個姿勢**。
+# hr_ 骨架剛好也是 T-pose，所以這個前提一直成立、從沒暴露過。
+#
+# 立繪本人模型（tripo）打破了它——實測上臂 rest 朝向：
+#     UAL(動作來源)：[1.00, 0.00, -0.02]  ＝沿 +X，手臂水平外伸（T-pose）
+#     tripo_han    ：[-0.01, -0.96, -0.27] ＝沿 -Y，手臂**垂下**
+# UAL 的 idle 手臂相對 T-pose 轉了約 -75°（放下來），套到「本來就垂著」的
+# tripo rest 上就是再往下 75° → 手臂穿過身體、纏成一團（實拍證實）。
+#
+# 所以轉印前要先把目標骨的 rest 方向對齊到來源骨的 rest 方向，
+# 兩邊回到同一個基準，再套變化量。對 rest 相同的骨架（hr_）這個補正
+# 自動退化成單位四元數，因此不會動到現有角色的行為。
+# ⚠ 必須等骨架進場景樹後才算：get_bone_global_rest 本身在樹外可用，
+#   但兩邊骨架空間的軸向要靠 global_basis 才能對齊（tripo 是 Z-up、UAL 是 Y-up）。
+func _ensure_align() -> void:
+	if _align_ok or _src == null or _dst == null:
+		return
+	if not _dst.is_inside_tree() or not _src.is_inside_tree():
+		return
+	var s_root := _src.global_basis.orthonormalized().get_rotation_quaternion()
+	var d_root := _dst.global_basis.orthonormalized().get_rotation_quaternion()
+	_align.clear()
+	var aligned := 0
+	var max_deg := 0.0
+	for p in _pairs:
+		var q := Quaternion.IDENTITY
+		# 只有四肢主要骨的方向能反映 rest 姿勢（見 ALIGN_BONES）
+		if p.size() > 3 and not (String(p[3]) in ALIGN_BONES):
+			_align.append(q)
+			continue
+		var sd: Vector3 = _bone_dir_rest(_src, p[0])
+		var dd: Vector3 = _bone_dir_rest(_dst, p[1])
+		if sd.length() > 0.0001 and dd.length() > 0.0001:
+			# 兩個方向都換到世界座標再求最短弧（骨架空間軸向不同，不可直接比）
+			var sw: Vector3 = (s_root * sd).normalized()
+			var dw: Vector3 = (d_root * dd).normalized()
+			var deg: float = rad_to_deg(acos(clampf(sw.dot(dw), -1.0, 1.0)))
+			max_deg = maxf(max_deg, deg)
+			# ⚠⚠ 門檻必須夠大（2026-08-02）：要區分兩件不同的事——
+			#   ① 骨頭方向的**小差異**（肩寬、四肢比例不同，通常十幾度以內）
+			#      ＝正常的骨架差異，差量法本來就吃得下，**不可以動**。
+			#      hr_ 骨架有 15~17 對骨落在這一類，補正它們會破壞現有角色的動作。
+			#   ② rest **姿勢根本不同**（T-pose 對垂手，接近 90°）＝差量法的前提破了，
+			#      必須對齊。立繪本人模型的手臂就是這一類。
+			#   45° 落在兩者之間有很大的餘裕（實測 ① 最大約 17°、② 約 76°）。
+			if deg > 45.0:
+				q = Quaternion(dw, sw)      # 把目標 rest 方向轉到來源 rest 方向
+				aligned += 1
+		_align.append(q)
+	_align_ok = true
+	if DBG or aligned > 0:
+		print("[rig] rest 對齊：%d/%d 對骨需要補正（>45°），最大方向差 %.1f°"
+				% [aligned, _pairs.size(), max_deg])
 
 # 體型比例：以「世界座標」的髖高度換算位移。
 # ⚠ 必須等骨架進場景樹後才量：global_transform 在樹外回傳單位矩陣，
@@ -88,31 +255,56 @@ func apply() -> void:
 	# 兩邊骨架空間可能不同軸向（glTF 為 Y-up、FBX 匯入常帶 -90°X），
 	# 故一律換算到世界座標再轉回目標骨架空間，否則差量會套錯軸。
 	_ensure_ratio()
-	var s_root := _src.global_basis.get_rotation_quaternion()
-	var d_root := _dst.global_basis.get_rotation_quaternion()
+	_ensure_align()      # rest 姿勢不同的骨架要先對齊，否則變化量會被套兩次
+	# 顯式 orthonormalized：basis 帶縮放時取旋轉必須先正規化。
+	# （Godot 的 get_rotation_quaternion() 內部已經會做，所以這行是保險而非修正——
+	#  2026-08-02 實測加了它對立繪模型的扭曲**沒有改善**，別誤以為這是那個問題的解。）
+	var s_root := _src.global_basis.orthonormalized().get_rotation_quaternion()
+	var d_root := _dst.global_basis.orthonormalized().get_rotation_quaternion()
 	var d_root_inv := d_root.inverse()
-	for p in _pairs:
+	for pi in _pairs.size():
+		var p: Array = _pairs[pi]
+		# 診斷（rigpart=torso,arms）：只轉印指定的身體段，其餘留在 rest。
+		# ⚠ 單獨測一段會有假象：手臂轉到世界絕對朝向、軀幹卻留在 rest，
+		#   本來就會不自然。所以要能同時指定多段（逗號分隔）才能分辨真偽。
+		if PART != "" and p.size() > 2 and not (String(p[2]) in PART.split(",")):
+			continue
 		var si: int = p[0]
 		var di: int = p[1]
 		var s_rest_w := s_root * _src.get_bone_global_rest(si).basis.get_rotation_quaternion()
 		var s_pose_w := s_root * _src.get_bone_global_pose(si).basis.get_rotation_quaternion()
 		var d_rest_w := d_root * _dst.get_bone_global_rest(di).basis.get_rotation_quaternion()
+		# ★rest 對齊補正：先把目標骨的 rest **姿勢**擺到與來源同一基準，
+		#   再套變化量。兩邊 rest 姿勢相同時 _align 是單位四元數＝完全等於舊行為。
+		#   （沒有這一步，UAL「從 T-pose 放下手臂」的 -75° 會套在「本來就垂手」的
+		#    tripo rest 上，手臂穿過身體——見 _ensure_align 的說明。）
+		var d_rest_aligned := d_rest_w
+		if _align_ok and pi < _align.size():
+			d_rest_aligned = (_align[pi] as Quaternion) * d_rest_w
 		# 目標骨的世界朝向＝來源世界朝向 × (兩者 rest 的固定差)
-		var target_w := s_pose_w * s_rest_w.inverse() * d_rest_w
+		var target_w := s_pose_w * s_rest_w.inverse() * d_rest_aligned
 		var target_skel := d_root_inv * target_w
 		var dp := _dst.get_bone_parent(di)
 		var parent_q := Quaternion.IDENTITY
 		if dp >= 0:
 			parent_q = _dst.get_bone_global_pose(dp).basis.get_rotation_quaternion()
 		_dst.set_bone_pose_rotation(di, parent_q.inverse() * target_skel)
-	# 髖部位移（蹲下/跳躍需要）：全程走世界座標，最後再換回目標骨架的 local，
-	# 這樣才同時吃得下「軸向不同」與「FBX 單位放大 100 倍」兩件事。
-	if _hips[0] >= 0:
-		_copy_position(_hips[0], _hips[1])
-	# 掛在 Root 的肢體（hr_ 骨架的大腿）：位置不會跟著髖部走，必須一起補，
-	# 否則蹲下時只有上半身沉下去、腿還直挺挺站著（2026-07-25 蹲姿失敗的真因）。
-	for p in _detached:
-		_copy_position(p[0], p[1])
+	# ⚠⚠ 位移轉印只對 Quaternius 骨架做（2026-08-02）。
+	#   旋轉走「相對自身 rest 的差量」，跨骨架相對安全；但**位移**依賴
+	#   _height_ratio 與兩邊 rest 的幾何比例，是最吃骨架結構的一步。
+	#   立繪本人模型（tripo 系：Hip→Pelvis→L_Thigh）實測會被搬成
+	#   「上下半身像被拆開、整個人斜躺」——而且骨名 20/20 全對上、日誌全乾淨。
+	#   `_broken_parent` 也是照 hr_ 的「大腿掛在 Root」結構寫的，對 tripo 階層會誤判。
+	#   在位移轉印支援多骨架系之前，別系骨架只轉印旋轉（蹲姿改由手寫姿勢處理）。
+	if rig_kind() == "quaternius":
+		# 髖部位移（蹲下/跳躍需要）：全程走世界座標，最後再換回目標骨架的 local，
+		# 這樣才同時吃得下「軸向不同」與「FBX 單位放大 100 倍」兩件事。
+		if _hips[0] >= 0:
+			_copy_position(_hips[0], _hips[1])
+		# 掛在 Root 的肢體（hr_ 骨架的大腿）：位置不會跟著髖部走，必須一起補，
+		# 否則蹲下時只有上半身沉下去、腿還直挺挺站著（2026-07-25 蹲姿失敗的真因）。
+		for p in _detached:
+			_copy_position(p[0], p[1])
 
 # 解析式雙骨 IK。
 #
@@ -138,9 +330,9 @@ func apply() -> void:
 #   人真的做這動作時肩膀本來就會跟著轉，所以把一部分角度交給肩骨既治病又更真實。
 func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vector3,
 		pole_world: Vector3, shoulder: String = "", shoulder_k: float = 0.0) -> bool:
-	var ui := _dst.find_bone(upper)
-	var li := _dst.find_bone(lower)
-	var hi := _dst.find_bone(hand)
+	var ui := _bone(upper)
+	var li := _bone(lower)
+	var hi := _bone(hand)
 	if ui < 0 or li < 0 or hi < 0:
 		return false
 	var xf := _dst.global_transform
@@ -150,7 +342,7 @@ func ik_two_bone(upper: String, lower: String, hand: String, target_world: Vecto
 
 	# 0) 肩骨先分攤：以「肩→手」轉到「肩→目標」所需的擺動，取 shoulder_k 比例套在肩骨上。
 	if shoulder != "" and shoulder_k > 0.001:
-		var sh_i := _dst.find_bone(shoulder)
+		var sh_i := _bone(shoulder)
 		if sh_i >= 0:
 			var a0: Vector3 = _dst.get_bone_global_pose(ui).origin
 			var c0: Vector3 = _dst.get_bone_global_pose(hi).origin
@@ -234,9 +426,9 @@ func _rotate_bone(bi: int, q: Quaternion) -> void:
 # 手臂 IK（CCD 迭代）：把手骨拉到指定世界座標，用於左手扶槍前握把。
 # 免費動作庫只有「手槍」姿勢(雙手併攏)，長槍必須靠 IK 才不會變成單手托著步槍的假動作。
 func ik_reach(upper: String, lower: String, hand: String, target_world: Vector3, iterations: int = 4) -> bool:
-	var ui := _dst.find_bone(upper)
-	var li := _dst.find_bone(lower)
-	var hi := _dst.find_bone(hand)
+	var ui := _bone(upper)
+	var li := _bone(lower)
+	var hi := _bone(hand)
 	if ui < 0 or li < 0 or hi < 0:
 		return false
 	var to_skel := _dst.global_transform.affine_inverse()
@@ -260,7 +452,7 @@ func ik_reach(upper: String, lower: String, hand: String, target_world: Vector3,
 
 # 在世界座標對單一骨骼疊加一段旋轉，用於瞄準時上半身/頭跟著俯仰。
 func add_world_rotation(bone: String, axis_world: Vector3, angle: float) -> void:
-	var bi := _dst.find_bone(bone)
+	var bi := _bone(bone)
 	if bi < 0 or is_zero_approx(angle):
 		return
 	var d_root := _dst.global_basis.get_rotation_quaternion()
@@ -278,8 +470,8 @@ func add_world_rotation(bone: String, axis_world: Vector3, angle: float) -> void
 #   實測趴姿的腿轉了 108° 而不是指定的 82°，人就變成腳朝天（2026-07-25）。
 #   絕對式重複套用結果不變，姿勢用這個。
 func point_bone(bone: String, child: String, dir_world: Vector3, weight: float = 1.0) -> void:
-	var bi := _dst.find_bone(bone)
-	var ci := _dst.find_bone(child)
+	var bi := _bone(bone)
+	var ci := _bone(child)
 	if bi < 0 or ci < 0 or weight <= 0.001:
 		return
 	var to_skel := _dst.global_transform.affine_inverse().basis
@@ -296,7 +488,7 @@ func point_bone(bone: String, child: String, dir_world: Vector3, weight: float =
 
 # 把骨頭放到指定的世界座標（絕對式）。掛在 Root 的腿要跟著髖部走就靠這個。
 func place_bone(bone: String, pos_world: Vector3, weight: float = 1.0) -> void:
-	var bi := _dst.find_bone(bone)
+	var bi := _bone(bone)
 	if bi < 0 or weight <= 0.001:
 		return
 	var cur_w: Vector3 = _dst.global_transform * _dst.get_bone_global_pose(bi).origin
@@ -309,7 +501,7 @@ func place_bone(bone: String, pos_world: Vector3, weight: float = 1.0) -> void:
 
 # 讀骨頭的世界座標（擺完姿勢要量貼地高度用）
 func bone_pos(bone: String) -> Vector3:
-	var bi := _dst.find_bone(bone)
+	var bi := _bone(bone)
 	if bi < 0:
 		return Vector3.ZERO
 	return _dst.global_transform * _dst.get_bone_global_pose(bi).origin
@@ -318,7 +510,7 @@ func bone_pos(bone: String) -> Vector3:
 # 趴姿需要這個——hr_ 骨架的大腿掛在 Root，只轉髖部的話腿會留在原地站著，
 # 人就變成「上半身趴下、腿還立正」。
 func orbit_bone(bone: String, axis_world: Vector3, angle: float, pivot_world: Vector3) -> void:
-	var bi := _dst.find_bone(bone)
+	var bi := _bone(bone)
 	if bi < 0 or is_zero_approx(angle):
 		return
 	var q := Quaternion(axis_world.normalized(), angle)
@@ -359,8 +551,25 @@ func curl_fingers(side: String, axis: int, degrees: float, thumb_degrees: float 
 
 # 擷取「目標骨架被重定向後的姿勢」成一張表：{骨名: local 旋轉} + 髖部位移。
 # 用途：蹲姿這種靜態姿勢不必讓每個單位都揹一份動畫來源，算一次快取全體共用。
+# 這具骨架屬於哪一系命名慣例。用**特徵骨名**判斷（內容決定），不看檔名——
+# 檔名判斷在本專案已經害過一次（見 Unit._forward_fix 的註解）。
+func rig_kind() -> String:
+	if _dst == null:
+		return "?"
+	if _dst.find_bone("L_Upperarm") >= 0 or _dst.find_bone("L_Thigh") >= 0:
+		return "tripo"
+	if _dst.find_bone("mixamorig:Hips") >= 0:
+		return "mixamo"
+	if _dst.find_bone("UpperArm.L") >= 0 or _dst.find_bone("Hips") >= 0:
+		return "quaternius"
+	return "?"
+
 func capture_pose() -> Dictionary:
-	var out := {"rot": {}, "hips": Vector3.ZERO, "hips_bone": ""}
+	# ★★記下「這張姿勢表是從哪一系骨架擷取的」（2026-08-02）。
+	#   骨骼旋轉值是相對**該骨架自己的 rest** 算出來的，跨骨架直接套用就是扭曲。
+	#   骨名可以映射（_bone 做得到），旋轉值不行——這是兩件不同的事。
+	#   實例：hr_ 骨架的蹲姿表套到立繪本人模型（tripo）上，整個人扭成一團。
+	var out := {"rot": {}, "hips": Vector3.ZERO, "hips_bone": "", "rig": rig_kind()}
 	for p in _pairs:
 		var di: int = p[1]
 		out["rot"][_dst.get_bone_name(di)] = _dst.get_bone_pose_rotation(di)
@@ -373,10 +582,17 @@ func capture_pose() -> Dictionary:
 func blend_pose(pose: Dictionary, weight: float, with_hips: bool = true) -> void:
 	if weight <= 0.001 or _dst == null:
 		return
+	# ⚠⚠ 跨骨架不可套用（2026-08-02）：旋轉值是相對來源骨架的 rest 算的。
+	#   `_bone()` 會成功把骨名對上，但值本身是別人的——結果是整個人扭成一團
+	#   （立繪本人模型實測）。骨名映射 ≠ 姿勢可移植，這兩件事必須分開。
+	#   同系才套；不同系就跳過，交給呼叫端用 bend_bone 那類「以自身 rest 為基準」的手法。
+	var src_rig: String = String(pose.get("rig", ""))
+	if src_rig != "" and src_rig != rig_kind():
+		return
 	var w: float = clampf(weight, 0.0, 1.0)
 	var rots: Dictionary = pose.get("rot", {})
 	for bname in rots.keys():
-		var bi := _dst.find_bone(bname)
+		var bi := _bone(bname)
 		if bi < 0:
 			continue
 		_dst.set_bone_pose_rotation(bi, _dst.get_bone_pose_rotation(bi).slerp(rots[bname], w))
@@ -384,14 +600,14 @@ func blend_pose(pose: Dictionary, weight: float, with_hips: bool = true) -> void
 		return
 	var hb: String = pose.get("hips_bone", "")
 	if hb != "":
-		var hi := _dst.find_bone(hb)
+		var hi := _bone(hb)
 		if hi >= 0:
 			_dst.set_bone_pose_position(hi, _dst.get_bone_pose_position(hi).lerp(pose["hips"], w))
 
 # 以 rest 為基準，對骨骼施加一段固定角度（手寫姿勢用）。
 # 重定向在某些骨架會扭壞，手寫姿勢則完全可控——蹲/趴這種靜態姿勢用這個最穩。
 func bend_bone(bone: String, axis: int, degrees: float, weight: float = 1.0) -> void:
-	var bi := _dst.find_bone(bone)
+	var bi := _bone(bone)
 	if bi < 0 or weight <= 0.001:
 		return
 	var ax := Vector3.RIGHT
@@ -413,7 +629,7 @@ func ground_offset(foot_bones: Array) -> float:
 		return 0.0
 	var lo := INF
 	for b in foot_bones:
-		var bi := _dst.find_bone(b)
+		var bi := _bone(b)
 		if bi < 0:
 			continue
 		lo = minf(lo, (_dst.global_transform * _dst.get_bone_global_pose(bi).origin).y)
@@ -426,8 +642,8 @@ func ground_offset(foot_bones: Array) -> float:
 #   腳骨不跟著腿動，拿它量高度或當 IK 末端都會得到垃圾數據（2026-07-25 血淚）。
 #   改用「rest 空間裡小腿骨→腳骨的向量」換算，與骨架命名/軸向慣例無關。
 func leg_end(lower: String, foot: String) -> Vector3:
-	var li := _dst.find_bone(lower)
-	var fi := _dst.find_bone(foot)
+	var li := _bone(lower)
+	var fi := _bone(foot)
 	if li < 0 or fi < 0:
 		return Vector3.ZERO
 	var shin_local: Vector3 = _dst.get_bone_global_rest(li).affine_inverse() * _dst.get_bone_global_rest(fi).origin
@@ -453,7 +669,7 @@ func reset_bones(names: Array) -> void:
 	if _dst == null:
 		return
 	for n in names:
-		var bi: int = _dst.find_bone(String(n))
+		var bi: int = _bone(String(n))
 		if bi < 0:
 			continue
 		_dst.set_bone_pose_rotation(bi, _dst.get_bone_rest(bi).basis.get_rotation_quaternion())

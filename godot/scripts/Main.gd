@@ -146,6 +146,34 @@ void fragment() {
 }
 """
 
+# 退出前主動釋放靜態快取（2026-08-02）。
+# 症狀：每次結束都印「ERROR: 1 resources still in use at exit」，而且在這台機器上
+# 每章退出時都伴隨一次 Segmentation fault（退出碼 139）。它不影響 FAILS 判定
+# （測試結論在 quit 之前就印完了），但「每章都噴一次紅字」本身就違反
+# CLAUDE.md 的驗收標準，而且會蓋掉真正該被看到的退出期錯誤。
+# 真因：各類的 `static var` 持有 Resource（ShaderMaterial／GradientTexture2D／
+# 材質與 Mesh 快取），靜態變數活到**程式結束**，比引擎關閉資源系統還晚。
+# 這些快取全是 lazy init，清掉後若還有人用會自動重建，所以在離開場景樹時清空是安全的。
+func _exit_tree() -> void:
+	_release_static()
+
+func _release_static() -> void:
+	BattleMats.clear_cache()
+	Building.clear_cache()
+	Unit.clear_cache()
+	_soft_tex = null
+
+# 測試結束的統一出口。直接 get_tree().quit() 會在**同一幀**開始關閉引擎，
+# 此時大量 MultiMesh／材質／貼圖還活著，Vulkan 裝置銷毀在這台機器上會
+# Segmentation fault（退出碼 139，每章一次）。先清掉靜態快取、讓引擎多跑一幀
+# 把釋放做完，再要求離開。
+# ⚠ 這**不影響測試判定**：結論（FAILS=）在呼叫本函式之前就已經印出來了。
+func _quit_test(code: int) -> void:
+	_release_static()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	get_tree().quit(code)
+
 func _ready() -> void:
 	_build_static()
 	ui = GameUI.new()
@@ -251,7 +279,7 @@ func _mapshots() -> void:
 		await _snap("res://map_%s_eye.png" % id)
 		print("[mapshots] %s biome=%s sky=%s OK" % [id, terrain.biome.get("key", "?"),
 				map_data.get("sky", "day")])
-	get_tree().quit(0)
+	_quit_test(0)
 
 # ---------- 場景 vs 劇本稽核（-- scene）----------
 # 使用者 2026-07-27：「場景也沒有像你說的有被和劇情修正好」。
@@ -338,7 +366,7 @@ func _sceneshots() -> void:
 			map_data.get("solids", []).size(), map_data.get("sandbags", []).size(),
 			map_data.get("trenches", []).size(), map_data.get("roads", []).size()])
 	print("[scene] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 # ---------- 實際遊玩驗證（-- play）----------
 # ---------- 全地圖走查（2026-07-27 使用者：「人物全地圖每一個角落都測試」）----------
@@ -357,7 +385,7 @@ const WALK_STEP_PX := 110.0        # 蛇行取樣間距（px）＝5.5m
 const WALK_SPEED_MIN := 0.9        # 低於這個速度（m/s）持續兩秒就算卡住
 
 func _walk_all() -> void:
-	if not await _boot_to_battle("walk"): get_tree().quit(1); return
+	if not await _boot_to_battle("walk"): _quit_test(1); return
 	var mwp: float = map_data.get("w", 960)
 	var mhp: float = map_data.get("h", 600)
 	var pu = _deployed[0]
@@ -398,7 +426,7 @@ func _walk_all() -> void:
 				break
 	if start_i < 0:
 		push_error("[walk] 全圖找不到一個乾的空地當起點")
-		get_tree().quit(1)
+		_quit_test(1)
 		return
 	pu["node"].global_position = _to3d(pts[start_i].x, pts[start_i].y)
 	pu["wx"] = pts[start_i].x
@@ -489,7 +517,7 @@ func _walk_all() -> void:
 	_unshield(pu, save)
 	print("[walk] ch%02d FAILS=%d（拍了 %d 張現場照）" % [_test_chapter(), total, shot])
 	print("[walk] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 var _walk_bad := {}
 var _walk_checked := 0
@@ -565,7 +593,7 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 # 量三類問題：①走查不變量 FAIL ②回合末全員位置掃描 ③軟鎖（敵方回合跑不完）＋最差幀時。
 # CP/AP 都吃真實規則（_begin_action 拿不到 CP 就輪空）——壓測要壓的是遊戲，不是作弊碼。
 func _stress() -> void:
-	if not await _boot_to_battle("stress", 3): get_tree().quit(1); return
+	if not await _boot_to_battle("stress", 3): _quit_test(1); return
 	var chn := _test_chapter()
 	# ③ 接線反驗證：印實戰座標下 _wrap 填出的地形事實。公式在 TerrainProbe 驗過，
 	# 這行是防「資料寫好了但沒人讀」——wrap 沒填的話這裡永遠是 0/0/0/false。
@@ -658,7 +686,7 @@ func _stress() -> void:
 	await _snap("res://stress_ch%02d_end.png" % chn)
 	print("[stress] ch%02d FAILS=%d" % [chn, fails + wtot])
 	print("[stress] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 # ---------- 沉陷掃描（-- sinkscan chNN）：直接量「人腳 vs 畫面上的地表」 ----------
 # 使用者 2026-07-31：「埋入地下一樣在第 15 章的建築物底下，其他章節一定也有」。
@@ -683,7 +711,7 @@ func _sinkscan() -> void:
 	var tmi := terrain.find_child("TerrainMesh", true, false) as MeshInstance3D
 	if tmi == null or tmi.mesh == null:
 		print("[sink] FAIL 找不到 TerrainMesh")
-		get_tree().quit(1)
+		_quit_test(1)
 		return
 	var arrs: Array = (tmi.mesh as ArrayMesh).surface_get_arrays(0)
 	var verts: PackedVector3Array = arrs[Mesh.ARRAY_VERTEX]
@@ -747,7 +775,7 @@ func _sinkscan() -> void:
 			% [chn, old_bad, old_worst])
 	print("[sink] ch%02d FAILS=%d" % [chn, bad])
 	print("[sink] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 
 # 剔除「長在地圖邊界夾限帶裡」的障礙（2026-07-31，walk ch01/06/13 同一根因）。
@@ -761,6 +789,8 @@ func _strip_edge_blockers(list: Array, mw_px: float, mh_px: float) -> Array:
 	var pad: float = EDGE_SAFE_M / WORLD_SCALE
 	var out: Array = []
 	var cut := 0
+	var kinds: Dictionary = {}     # 被剔掉的種類統計（要指名，不能只給總數）
+	var spots: Array = []          # 前幾個的座標（定位「誰生的」用）
 	for bk in list:
 		# 深水圍欄本來就該貼著水域邊緣立，不受此限（它擋的是「別走進海裡」）
 		if String(bk.get("k", "")) == "deepwater":
@@ -790,11 +820,28 @@ func _strip_edge_blockers(list: Array, mw_px: float, mh_px: float) -> Array:
 				break
 		if near_edge:
 			cut += 1
+			var kk: String = String(bk.get("k", ""))
+			if kk == "":
+				kk = "t=" + String(bk.get("t", "?"))
+			kinds[kk] = int(kinds.get(kk, 0)) + 1
+			# 帶上座標與半徑：只有種類統計時無法判斷是「誰生的、為什麼守衛沒攔到」，
+			# 上一輪就因此在 Props 與 Main 的判準之間繞了一圈（2026-08-02）。
+			if spots.size() < 6:
+				spots.append("%s@(%.0f,%.0f)r%.0f 圖%.0fx%.0f"
+						% [kk, float(pts[0].x), float(pts[0].y), r_px, mw_px, mh_px])
 		else:
 			out.append(bk)
 	# ⚠ 一律印（含 0）：只在 >0 時印＝靜默跳過，看不出這道防線到底有沒有跑。
 	#   本專案踩過三次，最貴的一次是撞窗戶那項在前置條件不成立時安靜 return 而假通過。
 	print("[edge] 剔除邊界帶障礙 %d 個（安全帶 %.2fm，深水圍欄不剔）" % [cut, EDGE_SAFE_M])
+	# ★★2026-08-02：這個數字現在是「視覺與碰撞不一致」的量化指標。
+	#   被剔掉的障礙**視覺網格還在畫面上**＝看得到卻穿得過（使用者實測「穿過柵欄」）。
+	#   Props 已改成在生成階段就避開邊界帶，所以這裡應該剔 0 個；
+	#   剔到就代表有來源沒避開（例如 maps.json 把沙包/工事放進邊界帶），
+	#   要指名種類，不可只印一個總數讓人看不出是什麼。
+	if cut > 0:
+		push_error("[edge] 有 %d 個障礙被剔掉碰撞但視覺仍在（看得到穿得過）：%s　前幾筆：%s"
+				% [cut, str(kinds), str(spots)])
 	return out
 
 # 在實際網格三角形上求 (x,z) 的地表高度（重心座標）。找不到回 -1e18。
@@ -1190,11 +1237,11 @@ func _artshots() -> void:
 		await get_tree().create_timer(1.0).timeout
 		await _snap("res://art_ch%02d_%s.png" % [chn, sp[1]])
 	print("[artshots] ch%02d DONE" % chn)
-	get_tree().quit(0)
+	_quit_test(0)
 
 # ---------- 障礙傾印（-- blkdump chNN）：查「人卡在那裡但不知道撞到什麼」 ----------
 func _blkdump() -> void:
-	if not await _boot_to_battle("blkdump"): get_tree().quit(1); return
+	if not await _boot_to_battle("blkdump"): _quit_test(1); return
 	var x0 := 820.0; var x1 := 960.0; var y0 := 700.0; var y1 := 820.0
 	print("[blkdump] 區域 x∈[%.0f,%.0f] y∈[%.0f,%.0f] 的障礙：" % [x0, x1, y0, y1])
 	for bk in _blockers:
@@ -1206,7 +1253,7 @@ func _blkdump() -> void:
 		if c.x >= x0 and c.x <= x1 and c.y >= y0 and c.y <= y1:
 			print("[blkdump] ", bk)
 	print("[blkdump] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 # ---------- 訓練場 UI 驗收（-- trainshot）----------
 # 不驗內部值先行：開真的訓練場畫面 → 拍圖 → 點真的「升級」按鈕 → 驗池扣了、等級加了
@@ -1283,7 +1330,10 @@ func _stress_sweep() -> int:
 			n += 1
 		var fixed: Vector3 = _resolve_solids(wp, BODY_R, u)
 		if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
-			print("[stress] FAIL 陷進實體 %s px=(%.0f,%.0f)" % [who, now.x, now.y])
+			# ⚠ 只印座標不夠：2026-08-02 為了同一個座標連改四次都沒中，
+			#   因為看不出「是什麼把人推開」。斷言必須指出來源。
+			print("[stress] FAIL 陷進實體 %s px=(%.0f,%.0f) 來源=%s"
+					% [who, now.x, now.y, _why_solid(wp, BODY_R, u)])
 			n += 1
 		if not Unit.is_vehicle_cls(u["cls"]):
 			if absf(wp.y - _ground_height(wp)) > 0.35:
@@ -1305,7 +1355,7 @@ func _stress_sweep() -> int:
 # 這裡不驗任何內部指標，只做玩家會做的事：切換單位、走進屋子、停下來、按姿勢鍵，
 # 每一步都留一張玩家視角的圖，並印出「玩家看得到的那個結果」。
 func _playtest() -> void:
-	if not await _boot_to_battle("play"): get_tree().quit(1); return
+	if not await _boot_to_battle("play"): _quit_test(1); return
 	var fails := 0
 
 	# A) 切換單位鍵（畫面外的隊友要能叫得出來）
@@ -1323,7 +1373,7 @@ func _playtest() -> void:
 	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
 	await get_tree().create_timer(0.4).timeout
 	if not cam.is_tps():
-		print("[play][下令] FAIL 沒進第三人稱"); get_tree().quit(1); return
+		print("[play][下令] FAIL 沒進第三人稱"); _quit_test(1); return
 	print("[play][下令] 第三人稱 OK")
 
 	# C) 停下來不可以自動蹲回去（使用者回報）
@@ -1657,7 +1707,13 @@ func _playtest() -> void:
 			var ax: Vector2 = vobb["ax"]                   # 車身前後軸（px 平面）
 			var ay := Vector2(-ax.y, ax.x)
 			var away: Vector2 = {"車尾": -ax, "車頭": ax, "左側": -ay, "右側": ay}[dir_name]
-			var start_m: float = (VEHICLE_HL if dir_name in ["車尾", "車頭"] else VEHICLE_HW) + 4.0
+			# ⚠ 判準要用**這台車實際的**碰撞盒，不可用坦克常數（2026-08-02）：
+			#   換成立繪生成模型後車體是 6.2m（半長 3.1m）、常數還寫 3.00，
+			#   0.1m 的差被容差吃掉＝測試對「碰撞盒錯了」這件事失去敏感度。
+			#   驅逐艦 18m 更是差一個量級。實際值就在 OBB 裡，直接取。
+			var hl_m: float = (vobb["e"] as Vector2).x * WORLD_SCALE
+			var hw_m: float = (vobb["e"] as Vector2).y * WORLD_SCALE
+			var start_m: float = (hl_m if dir_name in ["車尾", "車頭"] else hw_m) + 4.0
 			_end_action()
 			await get_tree().create_timer(0.3).timeout
 			cp = 6
@@ -1674,10 +1730,10 @@ func _playtest() -> void:
 			await _hold_key(KEY_W, 6.0)
 			# 換算到車體座標系：|沿車軸| 與 |沿車寬| 只要有一個超出盒子就是在車外
 			var fin: Vector2 = _live_px(pu) - vobb["c"]
-			var la: float = absf(fin.dot(ax)) * WORLD_SCALE      # 沿車身前後（半長 3.00m）
-			var lb: float = absf(fin.dot(ay)) * WORLD_SCALE      # 沿車身左右（半寬 1.75m）
+			var la: float = absf(fin.dot(ax)) * WORLD_SCALE      # 沿車身前後
+			var lb: float = absf(fin.dot(ay)) * WORLD_SCALE      # 沿車身左右
 			# 離車體「表面」多遠：人是 0.42m 的圓，貼上去時應該正好停在 0.42m
-			var surf: float = maxf(la - VEHICLE_HL, lb - VEHICLE_HW)
+			var surf: float = maxf(la - hl_m, lb - hw_m)
 			# ⚠ 兩端都要驗（本專案第三次踩到單邊門檻）：
 			#   下限＝沒穿進車體；**上限＝真的走到車邊**。少了上限的話，
 			#   「人卡在別的東西上、根本沒走到坦克」也會印 OK ——前提不成立的測試等於沒測。
@@ -1689,7 +1745,7 @@ func _playtest() -> void:
 			elif not reached:
 				verdict = "FAIL(前提不成立：走了 6 秒還離車體 %.2fm，根本沒撞到)" % surf
 			print("[play][撞戰車] 從%s走 6 秒：離車體表面 %.2fm｜車體座標 沿車軸 %.2fm(半長%.2f)／沿車寬 %.2fm(半寬%.2f) %s"
-					% [dir_name, surf, la, VEHICLE_HL, lb, VEHICLE_HW, verdict])
+					% [dir_name, surf, la, hl_m, lb, hw_m, verdict])
 			if not ok_tank:
 				solid_fail += 1
 			await _snap("res://play_tank_%d.png" % dir_i)
@@ -1698,7 +1754,7 @@ func _playtest() -> void:
 
 	print("[play] FAILS=%d" % fails)
 	print("[play] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 func _tap_key(code: Key) -> void:
 	var e := InputEventKey.new()
@@ -1779,7 +1835,7 @@ func _shotseq() -> void:
 		await get_tree().create_timer(1.2).timeout
 		await _snap("res://seq_%d.png" % i)
 		print("[shotseq] seq_%d st=%d" % [i, st])
-	get_tree().quit(0)
+	_quit_test(0)
 
 # 主選單 → 章節 → 簡報 → 對話 → 部署 → 開戰。
 # e2e 與 playtest 共用，兩邊都必須走「真的按 UI」這條路（測試從中間插進去是驗證盲區）。
@@ -1881,7 +1937,7 @@ func _boot_to_battle(tag: String, deploy_n := 1) -> bool:
 	return true
 
 func _e2e() -> void:
-	if not await _boot_to_battle("e2e"): get_tree().quit(1); return
+	if not await _boot_to_battle("e2e"): _quit_test(1); return
 	print("[e2e] 7 選兵 → 點地面移動")
 	var pu = _deployed[0]
 	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
@@ -1990,7 +2046,7 @@ func _e2e() -> void:
 		print("[bonechk] want_prone=%s _prone=%.2f" % [hero["node"].want_prone,
 				hero["node"]._prone])
 	print("[e2e] DONE")
-	get_tree().quit(0)
+	_quit_test(0)
 
 # 送出「真正的」滑鼠事件走完整派送鏈（UI → _unhandled_input），才驗得到「點擊被 UI 吃掉」這類病
 func _send_click(pos: Vector2) -> void:
@@ -3607,7 +3663,7 @@ func _selftest() -> void:
 		print("[perf] units=%d 平均幀時=%.1fms (%.0f FPS) %s" % [
 			units.size(), ms, 1000.0 / maxf(ms, 0.001), "OK" if ms < 22.0 else "慢"])
 	print("[selftest] DONE units=", units.size())
-	get_tree().quit(0)
+	_quit_test(0)
 
 var _sun: DirectionalLight3D = null
 var _fill: DirectionalLight3D = null
@@ -4269,31 +4325,229 @@ func _ai_deploy() -> void:
 			continue
 		var wx: float = zone.get("x", 560) + 30 + float(placed_e % 3) * 55.0
 		var wy: float = zone.get("y", 250) + 30 + float(placed_e / 3) * 55.0
-		_spawn_unit(cls, es, wx, wy, false)
+		# ★★步兵也要有場地限制（2026-08-02 使用者：「不管是人物也好還是載具也好
+		#   都要有場地限制並且合理化」）。先前只有載具做了落點檢查，步兵是照網格
+		#   硬放——stress ch09（海圖）因此把 engineer/mortar 放在水上，深水圍欄
+		#   把人一路推到離地圖邊緣 1m 還在水裡＝「陷進實體」2 筆。
+		#   人站的地方必須是人走得到的地方，這跟載具是同一條規則。
+		var isp = _inf_spawn_spot(Vector2(wx, wy))
+		if isp == null:
+			push_error("[diff] 第 %d 章找不到 %s 的合法站位（部署區附近無可站立地面）"
+					% [maxi(chapter, 1), cls])
+			continue
+		var ip: Vector2 = isp
+		_spawn_unit(cls, es, ip.x, ip.y, false)
 		placed_e += 1
 	# 敵方載具：依難度表的數量，且仍受 vehicle_unlock 的章節限制（玩家沒有的敵人也不該有）
+	# ⚠⚠ 2026-08-02 修：這裡原本的守衛是 `CLASS_MODEL.has(vc)`，而 CLASS_MODEL 只列
+	#   九個**步兵**兵種、從來沒有任何載具鍵 → vpool 恆空 → 第 5 章起敵方載具一台都
+	#   不出（只有 push_error 在日誌裡喊，探針不看 stderr 所以 15 章全綠）。
+	#   載具是程序化建模的（Unit.spawn → _build_vehicle，根本不讀 model_path），
+	#   拿角色模型表當存在性判準在語意上就是錯的。改用與玩家側同一條規則：
+	#   類別是否為載具看 Unit.is_vehicle_cls（class_base.mobility），解鎖看 vehicle_unlock。
 	var veh_n: int = int(dif.get("vehicles", 0))
+	var veh_placed := 0
+	var veh_spots: Array = []      # 已放好的載具落點，供最小間距檢查
 	if veh_n > 0:
 		var vpool: Array = []
 		for vc in GameData.vehicle_unlock.keys():
-			if int(GameData.vehicle_unlock[vc]) <= maxi(chapter, 1) and CLASS_MODEL.has(vc):
-				if String(GameData.class_base.get(vc, {}).get("domain", "land")) in map_data.get("allow", ["land"]):
-					vpool.append(vc)
-		if vpool.is_empty() and veh_n > 0:
+			if int(GameData.vehicle_unlock[vc]) > maxi(chapter, 1):
+				continue          # 未解鎖
+			if not Unit.is_vehicle_cls(vc):
+				push_error("[diff] vehicle_unlock 列了 %s，但 class_base 說它不是載具（mobility）" % vc)
+				continue
+			if String(GameData.class_base.get(vc, {}).get("domain", "land")) in map_data.get("allow", ["land"]):
+				vpool.append(vc)
+		if vpool.is_empty():
 			push_error("[diff] 第 %d 章要出 %d 台敵方載具，但這張圖沒有任何已解鎖的載具可選"
 					% [chapter, veh_n])
 		for k in veh_n:
 			if vpool.is_empty():
 				break
 			var vc2: String = vpool[k % vpool.size()]
-			var vx: float = zone.get("x", 560) + 30 + float(placed_e % 3) * 55.0
-			var vy: float = zone.get("y", 250) + 30 + float(placed_e / 3) * 55.0
-			_spawn_unit(vc2, es, vx, vy, false)
+			# ⚠ 載具**不可以**沿用步兵的 55px(2.75m) 網格：車長 6.2m、車寬 3.1m，
+			#   相鄰兩台一定互穿（鐵律①固體不可互穿）。載具自己一排、間距 150px=7.5m，
+			#   並沿部署區底邊排開，避免壓在步兵網格上。
+			var vx: float = zone.get("x", 560) + 40 + float(veh_placed) * 150.0
+			var vy: float = zone.get("y", 250) + float(zone.get("h", 200)) - 40.0
+			# ⚠ 落點必須對該載具的 mobility 合法：ch09/10/13/15 的池子含軍艦，
+			#   固定點很可能在陸地上＝軍艦上陸（鐵律 0①，MobilityProbe 會抓）。
+			#   反之坦克不能生在深水裡。問 terrain.move_cost 這個單一真相來源。
+			var spot = _veh_spawn_spot(vc2, Vector2(vx, vy), veh_spots)
+			# ⚠ 找不到位置時**換一台放得下的**，不要就這樣少一台（2026-08-02）：
+			#   stress ch10 實測「要 2 台、只生成 1 台」——那張圖敵方部署區附近沒有
+			#   夠深的水，驅逐艦無處可放。硬把軍艦塞到 50m 外不合理（敵軍該在自己那側），
+			#   改成退而求其次挑池子裡放得下的另一種載具，數量仍照難度表。
+			#   全都放不下才是真的該喊。
+			if spot == null:
+				for alt in vpool:
+					if alt == vc2:
+						continue
+					var alt_spot = _veh_spawn_spot(alt, Vector2(vx, vy), veh_spots)
+					if alt_spot != null:
+						print("[diff] %s 在這張圖沒有合法落點，改放 %s" % [vc2, alt])
+						vc2 = alt
+						spot = alt_spot
+						break
+			if spot == null:
+				push_error("[diff] 第 %d 章找不到 %s 的合法生成點，池子裡也沒有替代載具放得下（pool=%s）"
+						% [maxi(chapter, 1), vc2, str(vpool)])
+				continue
+			var sp: Vector2 = spot
+			_spawn_unit(vc2, es, sp.x, sp.y, false)
+			# 記下實際半長：下一台要用「兩台半長之和」算間距（船比車長得多）
+			veh_spots.append({"p": sp, "hl": _veh_half(vc2).x})
+			veh_placed += 1
 			placed_e += 1
-	print("[diff] 第 %d 章：敵步兵 %d、敵載具 %d、掩體 %.2f 集火 %.2f 側翼 %.2f 地形 %.2f"
-			% [maxi(chapter, 1), count, veh_n, float(dif.get("cover", 0.0)),
+	# ⚠ 這行以前印的是 veh_n（**意圖**值），於是「敵載具 1」看起來一切正常、
+	#   實際生成 0 台——同一個「設定看起來有、玩起來沒有」的坑印在日誌上還騙了人一次。
+	#   改印實際生成數，並在兩者不符時大聲喊。
+	if veh_placed != veh_n:
+		push_error("[diff] 第 %d 章敵載具要 %d 台、實際只生成 %d 台"
+				% [maxi(chapter, 1), veh_n, veh_placed])
+	print("[diff] 第 %d 章：敵步兵 %d、敵載具 %d/%d（實際/難度表）、掩體 %.2f 集火 %.2f 側翼 %.2f 地形 %.2f"
+			% [maxi(chapter, 1), count, veh_placed, veh_n, float(dif.get("cover", 0.0)),
 			float(dif.get("focus", 0.0)), float(dif.get("flank", 0.0)),
 			float(dif.get("terrain", 0.0))])
+
+# 替敵方載具找一個「對它的 mobility 合法」的落點（2026-08-02 新增）。
+# 為什麼需要這支：敵載具接回去之後，落點合不合法就成了真問題——
+#   ・軍艦（naval）在陸地上＝鐵律 0① 違規，MobilityProbe 會抓（terrain_mobility 的
+#     ground 欄對 naval 是 null＝不可通行）
+#   ・坦克（tracked）落在深水裡同理
+# 不自己判斷「這裡是海嗎」，而是問 terrain.move_cost 這個單一真相來源，
+# 免得又出現「同一條規則兩份實作」（本專案已因此誤判過一次）。
+# 從想要的點開始環形外擴，回傳第一個同時滿足「地形可通行」「與已放載具距離足夠」
+# 「在地圖內」的點；找不到回 null（呼叫端會 push_error，不靜默跳過）。
+func _veh_spawn_spot(cls: String, want: Vector2, taken: Array):
+	var mob: String = String(GameData.class_base.get(cls, {}).get("mobility", "tracked"))
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var half: Vector2 = _veh_half(cls)      # ★實際尺寸，不是坦克常數（見 _veh_half）
+	var margin := 40.0              # 離地圖邊界的安全距離（邊界卡人的老坑）
+	# 環形外擴：先試原點，再一圈圈往外找。40px=2m 一階，最多找到 480px=24m 外。
+	for ring in 13:
+		var r: float = float(ring) * 40.0
+		var steps: int = 1 if ring == 0 else 12
+		for s in steps:
+			var ang: float = TAU * float(s) / float(steps)
+			var p := want + Vector2(cos(ang), sin(ang)) * r
+			p.x = clampf(p.x, margin, mw - margin)
+			p.y = clampf(p.y, margin, mh - margin)
+			if terrain != null and terrain.move_cost(p.x, p.y, mob) >= BattleTerrain.IMPASSABLE:
+				continue            # 這種地形這台載具過不去
+			# ★ 場地限制（2026-08-02 使用者：「戰車不會在巷子裡面出現」）：
+			#   地形可通行不等於**塞得進去**。一台車 6.2m×3.5m，生在兩棟房子之間
+			#   的窄巷、或緊貼牆與電線桿的夾角，都是不合理的畫面。
+			#   車體不是一顆點：沿車軸取車尾／中心／車頭三處，各用車寬半徑問
+			#   _resolve_solids（它已涵蓋建築牆、樹、電線桿、柵欄與其他載具）。
+			#   任一處會被推開＝這個位置容不下這台車，換下一個候選點。
+			if not _veh_fits(p, mob, cls):
+				continue
+			# 與已放好的載具保持距離：需要的間距是**兩台各自的半長之和**再加餘裕。
+			# ⚠ 先前寫死 150px(7.5m)＝坦克尺寸，驅逐艦半長就有 9m，兩艘船照樣互穿。
+			var clash := false
+			for t in taken:
+				var tp: Vector2 = t["p"]
+				var need_px: float = (half.x + float(t["hl"]) + 1.5) / WORLD_SCALE
+				if (p - tp).length() < need_px:
+					clash = true
+					break
+			if clash:
+				continue
+			if _test_mode and r > 0.0:
+				print("[diff] %s 落點外移 %.0fpx 找到合法地形（mob=%s）" % [cls, r, mob])
+			return p
+	return null
+
+# 這個位置容得下一台車嗎（場地限制／不准生在巷子裡）。
+# 車體不是一顆點：沿車軸取車尾／中心／車頭三處，各以車寬半徑問 _resolve_solids
+# （已涵蓋建築牆、樹、電線桿、柵欄與其他載具）。任一處被推開就是塞不進去。
+# 生成時載具一律朝 ±z（_spawn_unit 設 rotation.y = 0 或 PI），所以車軸＝y(px) 方向。
+# 空中載具不受地面淨空限制——它在 100m 高，底下有沒有巷子無關。
+# 替步兵找一個「人站得住」的落點（2026-08-02）。判準與載具同源，只是換成
+# 人的尺度：mobility=foot 的地形成本 ＋ 人的半徑不被實體推開。
+# ⚠ 用 _settle 而不是只問 _resolve_solids：這個專案的「站得住」定義是
+#   「解算與夾限同時成立」，走查判準也用同一支——同一條規則只能有一份實作。
+func _inf_spawn_spot(want: Vector2):
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var margin := 40.0
+	# 25px=1.25m 一階，最多找到 500px=25m 外（部署區本身通常就這個量級）
+	for ring in 21:
+		var r: float = float(ring) * 25.0
+		var steps: int = 1 if ring == 0 else 10
+		for s in steps:
+			var ang: float = TAU * float(s) / float(steps)
+			var p := want + Vector2(cos(ang), sin(ang)) * r
+			p.x = clampf(p.x, margin, mw - margin)
+			p.y = clampf(p.y, margin, mh - margin)
+			if terrain != null and terrain.move_cost(p.x, p.y, "foot") >= BattleTerrain.IMPASSABLE:
+				continue          # 深水／不可通行：人不能站在這裡
+			var q3: Vector3 = _to3d(p.x, p.y)
+			var fixed: Vector3 = _resolve_solids(q3, BODY_R, null)
+			if Vector2(fixed.x - q3.x, fixed.z - q3.z).length() > 0.05:
+				continue          # 會被實體推開＝站在牆／障礙裡
+			# ★★也要離已經站好的人夠遠（2026-08-02）：少了這條，海圖上可站立的
+			#   陸地很窄，8 個步兵會全被塞進同一小塊合法區、彼此重疊，接著被解算
+			#   互相推開 —— 一路推到水裡（stress ch09「陷進實體」2 筆的真正機制，
+			#   夾限點 y=1338 正好是 _clamp_to_map 的距邊 1m）。
+			#   兩個人不可能站在同一格：至少要兩個身體半徑。
+			var too_close := false
+			for u in units:
+				if not u["alive"] or not is_instance_valid(u["node"]):
+					continue
+				var gap_m: float = (Vector2(u["wx"], u["wy"]) - p).length() * WORLD_SCALE
+				var need: float = BODY_R * 2.0 + 0.15
+				if Unit.is_vehicle_cls(u["cls"]):
+					need = _veh_half(u["cls"]).x + BODY_R    # 別站在車體裡
+				if gap_m < need:
+					too_close = true
+					break
+			if too_close:
+				continue
+			return p
+	return null
+
+# 從資料讀該載具的碰撞半長／半寬（公尺）。生成前還沒有 Unit 實例，所以與
+# Unit._try_build_from_art 讀**同一份**資料（vehicle_look），不可寫死坦克常數：
+# ⚠⚠ 驅逐艦半長 9m、登陸艦 7m、潛艇 7.5m，坦克只有 3m。用坦克常數去檢查船，
+#   等於 18m 的船只檢查了中間 6m —— 這正是本專案「驅逐艦畫 18m 卻用 6m 碰撞盒」
+#   那個坑的變體，只是換到了生成階段（stress ch09/ch10 各 2 筆「陷進實體」）。
+func _veh_half(cls: String) -> Vector2:
+	var vl = GameData.vehicle_look.get(cls, {})
+	if not (vl is Dictionary):
+		return Vector2(VEHICLE_HL, VEHICLE_HW)
+	var hl: float = float(vl.get("collide_hl", float(vl.get("length_m", 6.2)) * 0.5))
+	var hw: float = float(vl.get("collide_hw", VEHICLE_HW))
+	return Vector2(hl, hw)
+
+func _veh_fits(p: Vector2, mob: String, cls := "") -> bool:
+	if mob == "air":
+		return true
+	var half: Vector2 = _veh_half(cls) if cls != "" else Vector2(VEHICLE_HL, VEHICLE_HW)
+	# ★★已經站在那裡的人也算障礙（2026-08-02，stress ch09/ch10 各 2 筆「陷進實體」）：
+	#   步兵先部署、載具後生成，而步兵**不在 _blockers 裡**（它們是 units），
+	#   所以 _resolve_solids 看不到他們 → 坦克／軍艦直接生在人身上，
+	#   那個人就永遠陷在鋼板裡（鐵律 0①固體不可互穿）。
+	#   車體矩形 ＋ 人的半徑：距離不足就是壓到人。
+	for u in units:
+		if not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		if Unit.is_vehicle_cls(u["cls"]):
+			continue          # 載具之間的間距由呼叫端的 taken 清單負責
+		var d: Vector2 = (Vector2(u["wx"], u["wy"]) - p) * WORLD_SCALE   # 換成公尺
+		# 生成時車軸沿 y(px)，所以 y＝沿車長、x＝沿車寬
+		if absf(d.y) < half.x + BODY_R and absf(d.x) < half.y + BODY_R:
+			return false
+	var hl_px: float = half.x / WORLD_SCALE
+	for f in [-0.65, 0.0, 0.65]:
+		var q := Vector2(p.x, p.y + hl_px * f)
+		var q3: Vector3 = _to3d(q.x, q.y)
+		var fixed: Vector3 = _resolve_solids(q3, half.y, null)
+		if Vector2(fixed.x - q3.x, fixed.z - q3.z).length() > 0.05:
+			return false
+	return true
 
 func _start_battle() -> void:
 	if _count_side(player_side) == 0:
@@ -6496,6 +6750,38 @@ func _vehicle_obb(v) -> Dictionary:
 # （walk ch01/ch06/ch13 的 16 筆 FAIL 座標全部剛好落在離邊界 1m 那條線）。
 # 正解＝交替迭代到同時成立；真的兩邊都不滿足（例如深水圍欄貼著邊界）時，
 # 最後一步一律**往地圖內側推**——寧可站進場內，也不可以卡在牆裡。
+# 診斷：到底是**什麼**把這個點推開（給「陷進實體」的斷言用）。
+# 與 _resolve_solids 逐項對照同一批來源，回報每一項造成的位移，
+# 這樣斷言就不只給座標，而是直接指出兇手。
+func _why_solid(wp: Vector3, radius: float, ignore) -> String:
+	var mw: float = map_data.get("w", 960)
+	var mh: float = map_data.get("h", 600)
+	var p := Vector2(wp.x / WORLD_SCALE + mw * 0.5, wp.z / WORLD_SCALE + mh * 0.5)
+	var r_px: float = radius / WORLD_SCALE
+	var out: Array = []
+	if not _buildings.is_empty():
+		var aft: Vector2 = _push_walls_px(p, r_px)
+		if aft.distance_to(p) > 0.001:
+			out.append("建築牆 %.2fm" % (aft.distance_to(p) * WORLD_SCALE))
+	for bk in _blockers:
+		if float(bk.get("h", 1.2)) <= STEP_UP and String(bk.get("k", "")) != "deepwater":
+			continue
+		if not _blk_aabb(bk).grow(r_px).has_point(p):
+			continue
+		var q: Vector2 = _blk_push(bk, p, r_px)
+		if q.distance_to(p) > 0.001:
+			out.append("%s/%s %.2fm" % [String(bk.get("t", "?")),
+					String(bk.get("k", "-")), q.distance_to(p) * WORLD_SCALE])
+	for v in units:
+		if v == ignore or not Unit.is_vehicle_cls(v["cls"]) or not is_instance_valid(v["node"]):
+			continue
+		var q2: Vector2 = _blk_push(_vehicle_obb(v), p, r_px)
+		if q2.distance_to(p) > 0.001:
+			out.append("載具%s %.2fm" % [String(v["cls"]), q2.distance_to(p) * WORLD_SCALE])
+	if terrain != null:
+		out.append("水深%.2fm" % terrain.water_depth(p.x, p.y))
+	return str(out)
+
 func _settle(pos: Vector3, radius: float, ignore) -> Vector3:
 	var p := pos
 	for _i in 4:
@@ -6519,20 +6805,55 @@ func _settle(pos: Vector3, radius: float, ignore) -> Vector3:
 		return p
 	var inward := Vector3((1.0 if p.x < 0.0 else -1.0) if near_x <= near_z else 0.0, 0.0,
 			0.0 if near_x <= near_z else (1.0 if p.z < 0.0 else -1.0))
+	# ⚠⚠ 2026-08-02（stress ch09 海圖）：逃生方向不能只有「垂直邊界往場內」一個。
+	#   那張圖的邊界外緣是一條可站的窄地、往內就是深水，於是限制③ 在第一步就
+	#   break，單位停在原地＝「陷進實體」，迭代再多次也無解。
+	#   現實裡被卡在岸邊的人會**沿著岸走**，不是只能往水裡走。
+	#   所以候選方向加上「沿邊界滑動」與兩個斜向；**距離上限與不可進深水維持不變**
+	#   ——ch07 那 3357 筆的教訓是「逃生不可送進另一種不合法狀態」，
+	#   放寬方向不違反它，放寬距離才會。
+	var along := Vector3(inward.z, 0.0, inward.x)      # 與 inward 垂直＝沿著邊界
+	var cands: Array = [inward, along, -along,
+			(inward + along).normalized(), (inward - along).normalized()]
+	# 目前是不是已經泡在深水裡（決定限制③ 怎麼套，見下）
+	var cur_depth := 0.0
+	if terrain != null:
+		cur_depth = terrain.water_depth(p.x / WORLD_SCALE + mw * 0.5,
+				p.z / WORLD_SCALE + mh * 0.5)
+	var in_deep: bool = cur_depth > BattleTerrain.WADE_MAX
 	var best := p
-	for _k in 6:                      # 限制②：最多退 6 步（2.1m），不是 4.2m
-		var np: Vector3 = p + inward * 0.35
-		# 限制③：不可退進深水——那是另一條不變量，逃生不能違反它
-		if terrain != null:
-			var npx: float = np.x / WORLD_SCALE + mw * 0.5
-			var npy: float = np.z / WORLD_SCALE + mh * 0.5
-			if terrain.water_depth(npx, npy) > BattleTerrain.WADE_MAX:
+	for d in cands:
+		var q := p
+		var qd := cur_depth
+		var escaped := false
+		for _k in 6:                  # 限制②：最多退 6 步（2.1m），不是 4.2m
+			var np: Vector3 = q + d * 0.35
+			# 限制③：不可退進深水。
+			# ⚠⚠ 但這條要寫成「不可變得**更糟**」，不是「下一步必須已經是陸地」
+			#   （2026-08-02，stress ch09）：人若已經泡在深水裡（例如被 18m 的
+			#   軍艦推下海），每個方向的下一步都還是深水，於是全部 break、
+			#   永遠爬不上岸＝「陷進實體」怎麼修都在同一個座標。
+			#   現實裡落水的人會往**變淺**的方向走上岸，這才是這條不變量的原意。
+			if terrain != null:
+				var npx: float = np.x / WORLD_SCALE + mw * 0.5
+				var npy: float = np.z / WORLD_SCALE + mh * 0.5
+				var nd: float = terrain.water_depth(npx, npy)
+				if in_deep:
+					if nd >= qd:
+						break        # 已在深水：只准往越來越淺的方向爬
+				elif nd > BattleTerrain.WADE_MAX:
+					break            # 還在陸上：不可以踏進深水
+				qd = nd
+			q = np
+			var chk: Vector3 = _resolve_solids(q, radius, ignore)
+			if Vector2(chk.x - q.x, chk.z - q.z).length() < 0.06:
+				escaped = true
 				break
-		p = np
-		best = p
-		var chk: Vector3 = _resolve_solids(p, radius, ignore)
-		if Vector2(chk.x - p.x, chk.z - p.z).length() < 0.06:
-			break
+		if escaped:
+			return _clamp_to_map(q)
+		# 沒完全脫困也記下走得最遠的那一個：總比留在原地好
+		if q.distance_squared_to(p) > best.distance_squared_to(p):
+			best = q
 	return _clamp_to_map(best)
 
 # ⚠ 這裡原本還有一支 _drop_edge_blockers()：把「離邊界 1.6m 內」的障礙整個丟掉。
@@ -6566,6 +6887,14 @@ func _resolve_solids(pos: Vector3, radius := 0.42, ignore = null) -> Vector3:
 		# 載具＝3m 級的鋼鐵，人不可能從中間穿過去（被撞的一方是人，坦克不讓路）
 		for v in units:
 			if v == ignore or not Unit.is_vehicle_cls(v["cls"]) or not is_instance_valid(v["node"]):
+				continue
+			# ⚠⚠ 高度要看（2026-08-02，stress ch09 實測 0.78m）：載具的 OBB 是
+			#   **px 平面**的 2D 判定，不看 y。於是在 100m 巡航高度的戰鬥機
+			#   （collide_hw=4.9＝翼展）照樣把地面上的人推開，人被推到地圖邊界
+			#   夾限線上就成了「陷進實體」。飛機在天上，跟地面的人不在同一層，
+			#   本來就不該碰（鐵律 0①講的是固體互穿，不是投影互穿）。
+			#   用實際高度差而不是「是不是 air」：武裝直升機低空掠過時仍該撞得到。
+			if absf(v["node"].global_position.y - pos.y) > 2.5:
 				continue
 			p = _blk_push(_vehicle_obb(v), p, r_px)
 		if p.distance_squared_to(p0) < 0.000001:
@@ -6955,7 +7284,9 @@ func _build_ground() -> void:
 	# 野戰工事（GDD/14 §7）：沙包牆與壕溝護壁，幾何合併成單一網格
 	var fort = FORTIFY.new()
 	world.add_child(fort)
-	fort.begin(map_data.get("w", 960), map_data.get("h", 600), WORLD_SCALE, terrain)
+	# 邊界安全帶也傳給工事：散落沙包會偏移出牆外，偏進帶內就會變成
+	# 「畫著卻穿得過」（見 Fortify._in_edge_band）。帶寬只有一個真相來源＝EDGE_SAFE_M。
+	fort.begin(map_data.get("w", 960), map_data.get("h", 600), WORLD_SCALE, terrain, EDGE_SAFE_M)
 	# 壕溝護壁：光是地形凹下去像「地上的溝」，有木板與支撐柱才像人挖的工事
 	for tr in map_data.get("trenches", []):
 		var tpts: Array = []
@@ -6979,7 +7310,9 @@ func _build_ground() -> void:
 	fort.finish()
 	var props = PROPS.new()
 	world.add_child(props)
-	props.build(map_data, WORLD_SCALE, terrain)
+	# 邊界安全帶一併傳給 Props：讓它在**生成階段**就避開，
+	# 而不是事後由 _strip_edge_blockers 剔碰撞、留下畫著卻穿得過的柵欄。
+	props.build(map_data, WORLD_SCALE, terrain, EDGE_SAFE_M)
 	# ⚠ 2026-07-26：這裡先前只吃 props.blockers，沙包牆（Fortify 產的）從來沒進碰撞表，
 	#   所以上一批宣稱「所有物體都是實體」時，沙包其實還是可以直接走過去（使用者實測抓到）。
 	#   工事的障礙一定要一起併進來。

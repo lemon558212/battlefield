@@ -51,14 +51,22 @@ static func _dist_pt_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
 	var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
 	return p.distance_to(a + ab * t)
 
-# 建築周邊禁區判定（門口不能被自家柵欄堵死）
+# 邊界安全帶（px，含地圖外）。0＝不限制。由 Main 傳入 EDGE_SAFE_M 換算，
+# 不在本檔另寫一份數字（同一條規則兩份實作是本專案踩過的坑）。
+var _edge_pad := 0.0
+
+# 禁區判定：① 地圖邊界安全帶與地圖外 ② 建築周邊（門口不能被自家柵欄堵死）
+# ③ 部署區。①用不等式而非 Rect2，理由見 build() 內的說明。
 func _off_limits(p: Vector2) -> bool:
+	if _edge_pad > 0.0 and (p.x < _edge_pad or p.y < _edge_pad \
+			or p.x > _mw - _edge_pad or p.y > _mh - _edge_pad):
+		return true
 	for z in _no_zones:
 		if z.has_point(p):
 			return true
 	return false
 
-func build(map_data: Dictionary, world_scale: float, terrain) -> void:
+func build(map_data: Dictionary, world_scale: float, terrain, edge_safe_m := 0.0) -> void:
 	_ws = world_scale
 	_mw = float(map_data.get("w", 960))
 	_mh = float(map_data.get("h", 600))
@@ -76,6 +84,26 @@ func build(map_data: Dictionary, world_scale: float, terrain) -> void:
 	for dz in map_data.get("deploy", []):
 		_no_zones.append(Rect2(float(dz.get("x", 0)), float(dz.get("y", 0)),
 				float(dz.get("w", 300)), float(dz.get("h", 200))).grow(1.0 / _ws))
+	# ★★邊界安全帶也是禁區（2026-08-02 使用者：「現在還是會穿過柵欄，不合理」）。
+	#   真因不在柵欄本身（它登記 h=1.05，擋得住人），而在 Main._strip_edge_blockers：
+	#   為了防「人被夾在地圖邊緣」，它把邊界帶內的障礙從**碰撞清單**剔掉，
+	#   但**視覺網格是這裡建的、沒有一起移除** → 那些柵欄看得到卻穿得過。
+	#   實測各章剔掉 1~13 個（ch13 剔 13 個），全都是這種「畫著的假障礙」。
+	#   正解不是補上視覺移除（兩份資料事後對齊永遠會有第三份忘記更新），
+	#   而是**在生成階段就不放**——讓不一致無法發生。這也正是本檔既有的
+	#   「建築周邊禁區」「部署區禁區」同一條思路，直接沿用同一套 _no_zones。
+	#   ⚠ 帶寬由 Main 傳入（EDGE_SAFE_M），不可在這裡再寫一份數字：
+	#     同一條規則兩份實作是本專案踩過的坑（會讓兩邊悄悄不同步）。
+	#   ⚠ 要比 Main 的帶寬再寬一點：Main 判的是「障礙**邊緣**進入帶內」，
+	#     這裡判的是中心點，差一個障礙半徑（柵欄 0.14m、電線桿與拒馬略大）。
+	#   ⚠⚠ 不可以用四條 Rect2 拼出這條帶（2026-08-02 第一版就是這樣寫，錯了）：
+	#     Rect2 是「在框內」的封閉判定，四條帶只覆蓋地圖**內側**那一圈；
+	#     而實測有障礙生成在**地圖外**（cir@(481,1041)、seg@(1048,1148)，圖高只有 1000），
+	#     那些點不在任何一條帶裡＝守衛判它合法，Main 卻用不等式判定剔掉了它的碰撞。
+	#     同一條規則兩種幾何形狀＝兩份實作，差異藏在邊界之外看不見的地方。
+	#     改用不等式（與 Main._strip_edge_blockers、Fortify._in_edge_band 同形式），
+	#     自然涵蓋「地圖外」——而且本來就不該有東西生成在地圖外。
+	_edge_pad = (edge_safe_m + 0.6) / _ws if edge_safe_m > 0.0 else 0.0
 	# 貼圖化（GDD/14 §0a）：磚是磚、水泥是水泥、路是柏油，純色時代根本看不出材質差別。
 	# 沒有現成貼圖的（木、金屬、電線、燒黑）維持純色——硬套錯貼圖比純色更假。
 	_mats = {
@@ -305,11 +333,25 @@ func _rubble(m: Dictionary) -> void:
 			var px: float = float(sp[0]) + cos(ang) * dd
 			var py: float = float(sp[1]) + sin(ang) * dd
 			var sz: float = rng.randf_range(0.14, 0.42)
+			# ⚠ 隨機值一律**先全部取完**再決定要不要畫（2026-08-02）：
+			#   若守衛寫在 rng 呼叫之前，跳過時會少消耗隨機數，
+			#   後面所有物件的位置跟著位移＝一個守衛改掉整張圖的佈局
+			#   （實測會讓「進屋」測試從通過變成走不進去）。
+			var r_h: float = rng.randf_range(0.4, 0.8)
+			var r_d: float = rng.randf_range(0.7, 1.3)
+			var r_yaw: float = rng.randf() * TAU
+			var r_tilt: float = rng.randf_range(-0.3, 0.3)
+			# ★瓦礫也要守禁區（2026-08-02）：這裡先前完全沒檢查，而瓦礫是散在
+			#   **建築周圍**的，於是碰撞被登記在門口＝人走不進屋（play 實測抓到），
+			#   落到地圖外的那些還會被 Main 剔掉碰撞、視覺留著＝看得到穿得過。
+			#   門口不能被堵死是本檔既有的規則，瓦礫沒有理由例外。
+			if _off_limits(Vector2(px, py)):
+				continue
 			# 埋 1/3 進土＋隨機傾倒：正擺在地表的方塊像垃圾桶蓋（實拍），
 			# 真實碎石是半埋而且歪的（鐵律 0：有重量的東西會沉進軟土）
-			_box("rock", Vector3(sz, sz * rng.randf_range(0.4, 0.8), sz * rng.randf_range(0.7, 1.3)),
-					Transform3D(Basis(Vector3.UP, rng.randf() * TAU)
-					* Basis(Vector3(1, 0, 0), rng.randf_range(-0.3, 0.3)),
+			_box("rock", Vector3(sz, sz * r_h, sz * r_d),
+					Transform3D(Basis(Vector3.UP, r_yaw)
+					* Basis(Vector3(1, 0, 0), r_tilt),
 					_pos(px, py, sz * 0.12)))
 			# 大塊的瓦礫也要擋人（小碎石仍可跨過）
 			if sz > 0.36:
@@ -368,6 +410,13 @@ func _walls_brick(m: Dictionary) -> void:
 			var ang: float = a + PI * 0.5
 			var segn: int = rng.randi_range(3, 5)
 			var dirv := Vector2(cos(ang), sin(ang))
+			# ⚠ 守衛必須在「視覺與碰撞都還沒產生」之前（2026-08-02）：
+			#   這段殘牆先前完全沒檢查禁區，於是牆可能長在邊界安全帶裡，
+			#   碰撞被 Main._strip_edge_blockers 剔掉、磚牆照畫＝看得到穿得過。
+			#   線段障礙要連**兩端**一起檢查，只看中心點的話半截牆仍會伸進帶內。
+			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
+			if _off_limits(p) or _off_limits(p - half) or _off_limits(p + half):
+				continue
 			# ⚠ 一整片純色板子看不出是磚牆（實拍就是一面黑板）。改成逐層堆砌：
 			#   每層 0.24m、深淺兩色交錯、每塊略微錯位，磚砌感才出得來。
 			#   高度也降到半身牆——被炸垮的殘牆本來就不高，而且這樣才是好用的掩體。
@@ -391,8 +440,7 @@ func _walls_brick(m: Dictionary) -> void:
 							Transform3D(Basis(Vector3.UP, -ang),
 							_pos(q.x, q.y, lyh * (float(ly) + 0.5) - extra * 0.5) + Vector3(shift, 0, 0)))
 				_ground_skirt(q, ang, rng)
-			var half: Vector2 = dirv * float(segn) * 0.5 * (1.1 / _ws)
-			_blk_seg(p - half, p + half, 0.20, 1.25)
+			_blk_seg(p - half, p + half, 0.20, 1.25)   # half 在上面就算好了（守衛與碰撞用同一個值）
 
 # 牆腳的碎料堆（使用者的品質判準之一：「與地面的過渡，不可以硬插進地面」）。
 # 現實裡沒有任何東西是「一條直線切進土裡」的——牆腳一定有掉下來的磚塊、
@@ -486,7 +534,36 @@ func _cable_seg(w1: Vector3, w2: Vector3, r := 0.05) -> void:
 # 木柵欄、木電線桿擋得住人，但擋不住步槍彈——真實步槍彈輕鬆穿過 2cm 木板。
 # 沙包、混凝土龍牙、車體才是真的擋彈物。
 func _blk_cir(c: Vector2, r_m: float, h_m: float, pen := false) -> void:
+	# 診斷（2026-08-02）：登記在禁區裡的障礙，碰撞會被 Main._strip_edge_blockers
+	# 剔掉、但視覺已經畫了＝看得到穿得過。這裡**照樣登記**（不可偷偷不登記，
+	# 那會讓 Main 的剔除數變 0＝把問題藏起來），只把呼叫處喊出來以便補守衛。
+	_warn_if_off_limits(c, "cir")
 	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m, "pen": pen})
+
+# 只負責喊，不改行為。同一個呼叫處只喊一次，免得洗版。
+# ⚠⚠ 判準只能是「邊界安全帶」，不可以用完整的 _off_limits（2026-08-02 第一版錯在這）：
+#   Main._strip_edge_blockers 剔除的**只有邊界帶內**的障礙，建築周邊禁區與部署區
+#   禁區裡的障礙不會被剔 → 不會有視覺／碰撞不一致 → 沒有理由告警。
+#   用完整 _off_limits 的結果是誤報 maps.json 指定的路障（roadblocks 放在建築旁
+#   本來就是設計意圖，stress ch04 因此噴紅字）。
+#   兩條規則的目的不同，別混用：
+#     ・建築周邊／部署區禁區＝「隨機撒的東西不要堵住門口與出生點」（瓦礫堵門是真 bug）
+#     ・邊界安全帶＝「碰撞會被剔掉、視覺卻留著」的那條，只有它會造成穿越
+var _ol_said: Dictionary = {}
+func _warn_if_off_limits(p: Vector2, kind: String) -> void:
+	if _edge_pad <= 0.0:
+		return
+	if not (p.x < _edge_pad or p.y < _edge_pad \
+			or p.x > _mw - _edge_pad or p.y > _mh - _edge_pad):
+		return
+	var where := "?"
+	var st := get_stack()
+	if st.size() > 2:
+		where = "%s:%d" % [String(st[2].get("source", "?")).get_file(), int(st[2].get("line", 0))]
+	if _ol_said.has(where):
+		return
+	_ol_said[where] = true
+	push_error("[props] %s 障礙生成在禁區（視覺會留下、碰撞會被剔除）：呼叫處 %s" % [kind, where])
 
 # 長條形物件（車輛殘骸）。用圓形近似會讓長軸兩端各有一段完全沒有實體——
 # 卡車殘骸 4.6m 長、圓半徑 1.5m ＝從車頭或車尾走進貨斗裡（使用者 2026-07-27 實測）。
@@ -496,6 +573,8 @@ func _blk_obb(c: Vector2, ang: float, half_m: Vector2, h_m: float, pen := false)
 			"e": half_m / _ws, "r": 0.0, "h": h_m, "pen": pen})
 
 func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false) -> void:
+	_warn_if_off_limits(a, "seg 端點A")
+	_warn_if_off_limits(b, "seg 端點B")
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
 	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen,
 			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
@@ -520,6 +599,11 @@ func _wires(m: Dictionary) -> void:
 			var b := Vector2(float(pts[i + 1][0]), float(pts[i + 1][1]))
 			var seg_len: float = a.distance_to(b)
 			if seg_len < 1.0:
+				continue
+			# ⚠ 2026-08-02：底下的柱子逐根檢查了 _off_limits，但**纜線與碰撞線段
+			#   （_blk_seg a→b）先前完全沒檢查** → 整段的碰撞被 Main 剔掉、
+			#   纜線照畫，人就從電網中間走過去。整段一起跳過才會視覺／碰撞一致。
+			if _off_limits(a) or _off_limits(b):
 				continue
 			var n: int = maxi(2, int(seg_len * _ws / 2.2))
 			var dirv: Vector2 = (b - a).normalized()

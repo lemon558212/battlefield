@@ -250,7 +250,13 @@ static func build_rock_protos(variants := 5, seed_v := 20260731) -> Array:
 				var fc := Color(sh, sh, sh) * rng.randf_range(0.93, 1.07)
 				_quad(st, a, b, c, d, fc)
 		st.generate_normals()
-		st.generate_tangents()
+		# ⚠ 這裡**不可以**呼叫 generate_tangents()（2026-08-02 移除，先前每章噴 5~6 次
+		# 「UVs are required to generate tangents」紅字，15 章共 90 次）。理由有兩層：
+		#   ① 石頭刻意不做 UV（見 Main._scatter_rocks 的 uv1_triplanar 註解），
+		#      沒有 UV 就算不出切線，呼叫必定失敗。
+		#   ② 就算有 UV 也用不到：三平面投影的法線貼圖在 shader 內用三個投影面
+		#      各自的切線空間，不讀 mesh 的 TANGENT 屬性。
+		# 也就是說這行從第一天起就沒成功過——移除它不改變任何一個像素，只是不再噴錯。
 		out.append(st.commit())
 	return out
 

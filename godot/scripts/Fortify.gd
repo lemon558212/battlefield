@@ -18,6 +18,17 @@ var _mh := 600.0
 var _terrain = null
 var _st: SurfaceTool = null
 var blockers: Array = []          # 同 Props.blockers 的格式，交給 Main 一起吃
+# 邊界安全帶（px）。由 Main 傳入 EDGE_SAFE_M 換算，0＝不限制。
+# 為什麼工事也要管：Main._strip_edge_blockers 會把邊界帶內的障礙從碰撞表剔掉
+# （防人被夾在地圖邊緣），但**視覺是這裡畫的、不會一起消失** → 沙包看得到穿得過
+# （使用者 2026-08-02 回報「還是會穿過柵欄」，實測連沙包也是）。
+# 沙包牆本身多半在帶外，但散落沙包是牆位置**加隨機偏移**，偏出去就進帶內了。
+var _edge_pad := 0.0
+func _in_edge_band(p: Vector2) -> bool:
+	if _edge_pad <= 0.0:
+		return false
+	return p.x < _edge_pad or p.y < _edge_pad \
+			or p.x > _mw - _edge_pad or p.y > _mh - _edge_pad
 # 可摧毀的工事段（GDD/15 G1）。⚠ 為了 draw call，全部工事本來合併成一個網格，
 #   於是「炸掉其中一段沙包」在技術上做不到（不能隱藏合併網格的一部分）。
 #   折衷：**沙包牆每一道自己一個網格**（一張圖十幾道，多十幾個 draw call，
@@ -26,11 +37,12 @@ var blockers: Array = []          # 同 Props.blockers 的格式，交給 Main �
 var destructibles: Array = []
 var _wall_st: SurfaceTool = null      # 目前這道沙包牆專用（不為 null 時 _tri_raw 寫這裡）
 
-func begin(map_w: float, map_h: float, world_scale: float, terrain) -> void:
+func begin(map_w: float, map_h: float, world_scale: float, terrain, edge_safe_m := 0.0) -> void:
 	_mw = map_w
 	_mh = map_h
 	_ws = world_scale
 	_terrain = terrain
+	_edge_pad = (edge_safe_m + 0.6) / world_scale if edge_safe_m > 0.0 else 0.0
 	blockers.clear()
 	_st = SurfaceTool.new()
 	_st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -94,9 +106,14 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 				+ rng.randf_range(-0.5, 0.5), bag_h * 0.45,
 				dir.y * rng.randf_range(-length_m * 0.6, length_m * 0.6)
 				+ rng.randf_range(0.5, 1.1))
+		# ⚠ 落在邊界安全帶內就整顆不畫（連視覺一起跳過）：畫了而碰撞被剔除
+		#   ＝看得到穿得過。視覺與碰撞必須同一個判斷、同一個 if。
+		var loose_c: Vector2 = Vector2(cx, cy) + Vector2(off.x, off.z) / _ws
+		if _in_edge_band(loose_c):
+			continue
 		_bag(Vector2(cx, cy), off, Vector3(bag_l, bag_h, bag_w),
 				rng.randf() * TAU, rng.randf_range(-0.5, 0.5), rng)
-		blockers.append({"t": "cir", "c": Vector2(cx, cy) + Vector2(off.x, off.z) / _ws,
+		blockers.append({"t": "cir", "c": loose_c,
 				"r": bag_l * 0.5 / _ws, "h": bag_h, "k": "sandbag_loose"})
 	# 實體：沙包牆是一道牆，人不可能從中間穿過去（使用者 2026-07-26 指正
 	# 「任何的物體都是不能穿越的」）。用線段涵蓋整道牆。
@@ -104,6 +121,14 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 	var dpx := Vector2(dir.x, dir.y) * half_len
 	# h＝實際堆到的高度（六層 × 0.22 × 0.92 + 半個袋）：彈道要靠它判斷
 	# 「蹲在沙包後＝擋住、站起來＝上半身露出」，見 Props._blk_seg 的說明。
+	# ⚠ 沙包牆的位置是 maps.json 指定的（設計者放的工事），不像散落沙包可以直接
+	#   跳過——整道牆消失等於設計者的掩體被吃掉。所以這裡**不自己處理**，
+	#   而是要求改資料，作法同「劇情建築壓在部署區」那條。
+	#   放著不管的後果：碰撞被 Main._strip_edge_blockers 剔除、沙包牆照畫，
+	#   玩家直接走過去（使用者 2026-08-02 回報的同一類現象）。
+	if _in_edge_band(Vector2(cx, cy) - dpx) or _in_edge_band(Vector2(cx, cy) + dpx):
+		push_error("[fort] 沙包牆貼在地圖邊界安全帶內（碰撞會被剔除、視覺卻留著＝穿得過）："
+				+ "中心(%.0f,%.0f)　請改 maps.json 的 sandbags 讓它離邊界遠一點" % [cx, cy])
 	blockers.append({"t": "seg", "a": Vector2(cx, cy) - dpx, "b": Vector2(cx, cy) + dpx,
 			"r": 0.30 / _ws, "h": float(rows) * bag_h * 0.92 + bag_h * 0.5, "k": "sandbag",
 			"m": Vector2(cx, cy), "hl": half_len})
