@@ -1,0 +1,80 @@
+本批次 ID：BATCH-20260802-024453
+[gpuguard] 放行：無 Godot 行程，可用 VRAM 8151MB
+=== stress ch01  02:44:54 ===
+tools/run_stress_all_v2.sh: line 33:  1682 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch01 FAILS=0
+=== stress ch02  02:47:02 ===
+tools/run_stress_all_v2.sh: line 33:  1694 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch02 FAILS=0
+=== stress ch03  02:49:00 ===
+tools/run_stress_all_v2.sh: line 33:  1703 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch03 FAILS=0
+=== stress ch04  02:52:35 ===
+tools/run_stress_all_v2.sh: line 33:  1712 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch04 FAILS=0
+  ↑ 引擎紅字 1 行（未列白名單），種類：
+          1 ERROR: [props] seg 端點A 障礙生成在禁區（視覺會留下、碰撞會被剔除）：呼叫處 Props.gd:177
+=== stress ch05  02:54:57 ===
+tools/run_stress_all_v2.sh: line 33:  1731 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch05 FAILS=0
+=== stress ch06  02:59:32 ===
+tools/run_stress_all_v2.sh: line 33:  1740 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch06 FAILS=0
+=== stress ch07  03:02:35 ===
+tools/run_stress_all_v2.sh: line 33:  1749 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch07 FAILS=0
+=== stress ch08  03:11:00 ===
+tools/run_stress_all_v2.sh: line 33:  1758 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch08 FAILS=0
+=== stress ch09  03:14:29 ===
+tools/run_stress_all_v2.sh: line 33:  1767 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch09 FAILS=2
+=== stress ch10  03:18:30 ===
+tools/run_stress_all_v2.sh: line 33:  1776 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch10 FAILS=2
+  ↑ 引擎紅字 2 行（未列白名單），種類：
+          1 ERROR: [diff] 第 10 章敵載具要 2 台、實際只生成 1 台
+          1 ERROR: [diff] 第 10 章找不到 destroyer 的合法生成點（部署區內無可通行地形）
+=== stress ch11  03:31:41 ===
+tools/run_stress_all_v2.sh: line 33:  1795 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch11 FAILS=0
+=== stress ch12  03:33:57 ===
+tools/run_stress_all_v2.sh: line 33:  1804 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch12 FAILS=0
+=== stress ch13  03:45:33 ===
+tools/run_stress_all_v2.sh: line 33:  1813 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch13 FAILS=0
+=== stress ch14  03:49:12 ===
+tools/run_stress_all_v2.sh: line 33:  1822 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch14 FAILS=0
+=== stress ch15  04:04:34 ===
+tools/run_stress_all_v2.sh: line 33:  1831 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch15 FAILS=0
+=== 總表（stress ch1..ch15，只認 BATCH-20260802-024453）===
+[stress] ch01 FAILS=0 
+[stress] ch02 FAILS=0 
+[stress] ch03 FAILS=0 
+[stress] ch04 FAILS=0 ＋紅字
+[stress] ch05 FAILS=0 
+[stress] ch06 FAILS=0 
+[stress] ch07 FAILS=0 
+[stress] ch08 FAILS=0 
+[stress] ch09 FAILS=2 
+[stress] ch10 FAILS=2 ＋紅字
+[stress] ch11 FAILS=0 
+[stress] ch12 FAILS=0 
+[stress] ch13 FAILS=0 
+[stress] ch14 FAILS=0 
+[stress] ch15 FAILS=0 
+本批次：13 章 FAILS=0／2 章有 FAIL／0 章未完成／2 章有引擎紅字
+⚠ 有紅字的章節不算通過——逐章紅字明細用：bash tools/check_errors.sh logs/stress_chNN.log
+###STRESS_EXIT=1
+本批次 ID：BATCH-20260802-040806
+[gpuguard] 放行：無 Godot 行程，可用 VRAM 8151MB
+=== walk ch01  04:08:07 ===
+tools/run_stress_all_v2.sh: line 33:  2056 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch01 FAILS=0（拍了 0 張現場照）
+=== walk ch02  04:32:00 ===
+tools/run_stress_all_v2.sh: line 33:  2065 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch02 FAILS=0（拍了 0 張現場照）
+=== walk ch03  04:54:46 ===

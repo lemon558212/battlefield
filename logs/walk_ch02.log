@@ -1,3 +1,4 @@
+BATCH-20260802-040806
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
@@ -8,14 +9,14 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 4 對話：連點推進 (st=3)
 [water] 這張圖沒有深過 1.05m 的水，不需要深水圍欄
 [poles] 桿=2 電線段=0
-[edgeclr] 邊界帶內丟棄障礙 0 個（帶寬 1.6m，深水圍欄不丟）
+[edge] 剔除邊界帶障礙 0 個（安全帶 1.62m，深水圍欄不剔）
 [look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
 [look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] at 重定向骨對數=20
 [look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
-[diff] 第 2 章：敵步兵 3、敵載具 0、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
+[diff] 第 2 章：敵步兵 3、敵載具 0/0（實際/難度表）、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
 [walk]   對話結束 st=4 (應為 DEPLOY=4)
 [walk] 5 部署：點卡片 → 點藍框放置
 [look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
@@ -25,7 +26,7 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 150 個取樣點（10 列 × 15 行，間距 5.5m），地圖 77×54 m
 [walk] 起點 px(18,18)（第 0 個點；前面的都在海裡或障礙裡）
-[walk] 走完 149 段，抵達 96 段；共 4634 次取樣檢查
+[walk] 走完 149 段，抵達 53 段；共 6383 次取樣檢查
 [walk][陷進實體(人在障礙裡)] 0 次 OK
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK

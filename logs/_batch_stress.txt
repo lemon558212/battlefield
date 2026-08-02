@@ -1,0 +1,39 @@
+本批次 ID：BATCH-20260802-111331
+[gpuguard] 放行：無 Godot 行程，可用 VRAM 8151MB
+=== stress ch01  11:13:31 ===
+tools/run_stress_all_v2.sh: line 33:   833 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch01 FAILS=0
+=== stress ch02  11:15:43 ===
+tools/run_stress_all_v2.sh: line 33:  1378 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch02 FAILS=0
+=== stress ch03  11:18:33 ===
+tools/run_stress_all_v2.sh: line 33:  1387 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch03 FAILS=0
+=== stress ch04  11:20:35 ===
+tools/run_stress_all_v2.sh: line 33:  1396 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch04 FAILS=0
+=== stress ch05  11:23:03 ===
+tools/run_stress_all_v2.sh: line 33:  1405 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch05 FAILS=0
+=== stress ch06  11:27:52 ===
+tools/run_stress_all_v2.sh: line 33:  2484 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch06 FAILS=0
+=== stress ch07  11:30:13 ===
+tools/run_stress_all_v2.sh: line 33:  2496 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch07 FAILS=0
+=== stress ch08  11:41:11 ===
+tools/run_stress_all_v2.sh: line 33:  3868 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch08 FAILS=0
+=== stress ch09  11:43:32 ===
+tools/run_stress_all_v2.sh: line 33:  3877 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch09 FAILS=0
+=== stress ch10  11:46:14 ===
+tools/run_stress_all_v2.sh: line 33:  4155 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch10 FAILS=0
+=== stress ch11  11:56:53 ===
+tools/run_stress_all_v2.sh: line 33:  6873 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch11 FAILS=0
+=== stress ch12  12:00:52 ===
+tools/run_stress_all_v2.sh: line 33:  7160 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch12 FAILS=0
+=== stress ch13  12:12:36 ===

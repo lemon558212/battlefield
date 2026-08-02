@@ -1,4 +1,4 @@
-BATCH-20260801-203122
+BATCH-20260802-040806
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
@@ -9,72 +9,7 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk] 4 對話：連點推進 (st=3)
 [water] 深水圍欄 74 根樁（水深 > 1.05m 的邊界）
 [poles] 桿=1 電線段=0
-[edge] 剔除邊界帶障礙 8 個（安全帶 1.62m，深水圍欄不剔）
-ERROR: UVs are required to generate tangents.
-   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
-   GDScript backtrace (most recent call first):
-       [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7155)
-       [2] _scatter_trees (res://scripts/Main.gd:7859)
-       [3] _build_ground (res://scripts/Main.gd:7001)
-       [4] _open_deploy (res://scripts/Main.gd:3825)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
-       [6] _dlg_step (res://scripts/UI.gd:461)
-       [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:2002)
-       [9] _boot_to_battle (res://scripts/Main.gd:1827)
-ERROR: UVs are required to generate tangents.
-   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
-   GDScript backtrace (most recent call first):
-       [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7155)
-       [2] _scatter_trees (res://scripts/Main.gd:7859)
-       [3] _build_ground (res://scripts/Main.gd:7001)
-       [4] _open_deploy (res://scripts/Main.gd:3825)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
-       [6] _dlg_step (res://scripts/UI.gd:461)
-       [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:2002)
-       [9] _boot_to_battle (res://scripts/Main.gd:1827)
-ERROR: UVs are required to generate tangents.
-   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
-   GDScript backtrace (most recent call first):
-       [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7155)
-       [2] _scatter_trees (res://scripts/Main.gd:7859)
-       [3] _build_ground (res://scripts/Main.gd:7001)
-       [4] _open_deploy (res://scripts/Main.gd:3825)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
-       [6] _dlg_step (res://scripts/UI.gd:461)
-       [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:2002)
-       [9] _boot_to_battle (res://scripts/Main.gd:1827)
-ERROR: UVs are required to generate tangents.
-   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
-   GDScript backtrace (most recent call first):
-       [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7155)
-       [2] _scatter_trees (res://scripts/Main.gd:7859)
-       [3] _build_ground (res://scripts/Main.gd:7001)
-       [4] _open_deploy (res://scripts/Main.gd:3825)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
-       [6] _dlg_step (res://scripts/UI.gd:461)
-       [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:2002)
-       [9] _boot_to_battle (res://scripts/Main.gd:1827)
-ERROR: UVs are required to generate tangents.
-   at: generate_tangents (scene/resources/surface_tool.cpp:1157)
-   GDScript backtrace (most recent call first):
-       [0] build_rock_protos (res://scripts/Trees.gd:253)
-       [1] _scatter_rocks (res://scripts/Main.gd:7155)
-       [2] _scatter_trees (res://scripts/Main.gd:7859)
-       [3] _build_ground (res://scripts/Main.gd:7001)
-       [4] _open_deploy (res://scripts/Main.gd:3825)
-       [5] <anonymous lambda> (res://scripts/Main.gd:3815)
-       [6] _dlg_step (res://scripts/UI.gd:461)
-       [7] _input (res://scripts/UI.gd:580)
-       [8] _send_click (res://scripts/Main.gd:2002)
-       [9] _boot_to_battle (res://scripts/Main.gd:1827)
+[edge] 剔除邊界帶障礙 0 個（安全帶 1.62m，深水圍欄不剔）
 [rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
 [look] spawn mg side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mg 重定向骨對數=20
@@ -82,7 +17,7 @@ ERROR: UVs are required to generate tangents.
 [rig] at 重定向骨對數=20
 [look] spawn sniper side=0 player_side=1 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] sniper 重定向骨對數=20
-[diff] 第 1 章：敵步兵 3、敵載具 0、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
+[diff] 第 1 章：敵步兵 3、敵載具 0/0（實際/難度表）、掩體 0.00 集火 0.00 側翼 0.00 地形 0.00
 [walk]   對話結束 st=4 (應為 DEPLOY=4)
 [walk] 5 部署：點卡片 → 點藍框放置
 [look] spawn sniper side=1 player_side=1 mp=res://assets/models/chars/hr_w_Swat.fbx
@@ -92,7 +27,7 @@ ERROR: UVs are required to generate tangents.
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 130 個取樣點（10 列 × 13 行，間距 5.5m），地圖 70×50 m
 [walk] 起點 px(350,18)（第 3 個點；前面的都在海裡或障礙裡）
-[walk] 走完 129 段，抵達 38 段；共 6714 次取樣檢查
+[walk] 走完 129 段，抵達 28 段；共 6560 次取樣檢查
 [walk][陷進實體(人在障礙裡)] 0 次 OK
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK
