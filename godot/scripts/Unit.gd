@@ -1011,6 +1011,25 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 
+# 把生成模型轉正並置中。
+# ⚠ 生成出來的模型**朝向是隨機的**（實測：戰鬥機在 3D 裡被任意旋轉了約 76 度，
+#   攻擊機側滾 14 度）。而底下的縮放是拿 size.z 當車長、碰撞盒也吃 X/Z，
+#   不轉正就會同時錯三件事：車長、碰撞盒、車頭朝向（開起來是螃蟹走路）。
+#   轉正角由 `python3 tools/align_vehicle.py <glb>` 量出來（鏡像對稱面法），
+#   填在 vehicle_look.json 的 rot_deg，**不是猜的**。約定＝Godot 預設 Euler 序 YXZ，
+#   與 align_vehicle.py 的矩陣分解同一個約定。
+# 轉完還要水平置中：旋轉是繞模型原點轉的，模型原點不在幾何中心時，車體會偏離
+#   碰撞盒（看得到的車在這、撞得到的牆在那，本專案最愛踩的那類坑）。
+func _orient_art(art: Node3D, p_cls: String, vl: Dictionary) -> void:
+	var rot: Array = vl.get("rot_deg", [])
+	if rot.size() == 3:
+		art.rotation_degrees = Vector3(float(rot[0]), float(rot[1]), float(rot[2]))
+		if art.rotation_degrees.length() > 0.5:
+			print("[vehart] %s 轉正 rot_deg=(%.1f, %.1f, %.1f)"
+					% [p_cls, rot[0], rot[1], rot[2]])
+	elif not rot.is_empty():
+		push_warning("[vehart] %s 的 rot_deg 不是三個數字，忽略" % p_cls)
+
 # 立繪生成的載具模型（modly）：車體固定、砲塔掛在 _turret 底下才轉得動。
 # 回傳 false＝沒有可用的生成模型，呼叫端退回程式生成幾何。
 func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player: bool) -> bool:
@@ -1050,10 +1069,28 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 		var pivot: Vector3 = Vector3(tb.get_center().x, tb.position.y, tb.get_center().z)
 		tur.position = -pivot
 		_turret.position = pivot
-	else:
-		var whole: Node3D = load(whole_p).instantiate()
-		root.add_child(whole)
+	var art: Node3D = null
+	if not has_split:
+		art = load(whole_p).instantiate()
+		root.add_child(art)
+		_orient_art(art, p_cls, vl)
 	var box: AABB = _merged_aabb(root)
+	# ★轉正過的模型不可以用量到的 AABB：Godot 量的是「各 mesh 的區域盒再轉到世界」，
+	#   模型一旋轉，斜放的盒子的正交外接框就被撐大（實測戰鬥機 Z 撐大 20%）。
+	#   拿去算縮放＝飛機被縮小 17%，拿去貼地＝浮在半空。改吃 align_vehicle.py
+	#   在**轉正後的點雲**上量到的真值（vehicle_look.json 的 aligned_aabb）。
+	var ab: Array = vl.get("aligned_aabb", [])
+	if ab.size() == 6:
+		box = AABB(Vector3(float(ab[0]), float(ab[1]), float(ab[2])),
+				Vector3(float(ab[3]), float(ab[4]), float(ab[5])))
+	elif not ab.is_empty():
+		push_warning("[vehart] %s 的 aligned_aabb 不是六個數字，忽略" % p_cls)
+	# 轉正後水平置中：旋轉繞的是模型原點，原點不在幾何中心時，看得到的車與
+	# 撞得到的盒會錯開（「畫在這、牆在那」是本專案最愛踩的那類坑）。
+	if art != null:
+		var c: Vector3 = box.get_center()
+		art.position -= Vector3(c.x, 0.0, c.z)
+		box.position -= Vector3(c.x, 0.0, c.z)
 	# 車體基準盒：分件時用 hull，整件模型無法分離砲管、只能退回整體（並說明）
 	var hull_ref: AABB = hull_box if has_hull_box else box
 	var raw_len: float = maxf(hull_ref.size.z, 0.001)
@@ -1065,6 +1102,17 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 	_model_base_y = root.position.y
 	veh_hl = float(vl.get("collide_hl", hull_ref.size.z * 0.5 * k))
 	veh_hw = float(vl.get("collide_hw", hull_ref.size.x * 0.5 * k))
+	# ⚠ 碰撞盒**比模型大**＝一面看不見的牆（本專案最貴的那類 bug：坦克圓形碰撞、
+	#   18m 船用 6m 盒、砲管被算進車長）。手填的 collide_hl/hw 若比實際幾何大就喊。
+	#   反過來（盒比模型小）不喊：像直升機旋翼盤是刻意不算的（人走得過旋翼下方）。
+	var geo_hl: float = hull_ref.size.z * 0.5 * k
+	var geo_hw: float = hull_ref.size.x * 0.5 * k
+	if veh_hl > geo_hl * 1.10 or veh_hw > geo_hw * 1.10:
+		push_warning("[vehart] %s 碰撞盒比模型大：盒 %.2f×%.2f / 模型 %.2f×%.2f"
+				% [p_cls, veh_hl, veh_hw, geo_hl, geo_hw]
+				+ "——多出來的部分是看不見的牆，請重算 vehicle_look.json")
+		print("[vehart] ⚠ %s 碰撞盒比模型大（盒 %.2f×%.2f vs 模型 %.2f×%.2f）"
+				% [p_cls, veh_hl, veh_hw, geo_hl, geo_hw])
 	if not has_hull_box:
 		print("[vehart] %s 只有整件模型，碰撞盒含砲塔（無法分離砲管）" % p_cls)
 	var mob2: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
@@ -1077,8 +1125,12 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 		_fly_alt = 6.0 if p_cls == "gunship" else 14.0
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
-	print("[vehart] %s 用立繪生成模型（%s，車長 %.1fm，縮放 %.3f）"
-			% [p_cls, "車體+砲塔" if has_split else "整件", want_len, k])
+	# ⚠ 一併印**真實尺寸**：VehicleProbe 量的是各 mesh 區域盒轉到世界後的外接框，
+	#   轉正過的模型會被撐大（戰鬥機在那邊量到「高 11.1m」，實際 4.2m）。
+	#   同一件事兩個數字是本專案的老坑，所以把真值印在這裡當對照。
+	print("[vehart] %s 用立繪生成模型（%s，車長 %.1fm，縮放 %.3f，實體 %.1f×%.1f×%.1fm）"
+			% [p_cls, "車體+砲塔" if has_split else "整件", want_len, k,
+			box.size.z * k, box.size.x * k, box.size.y * k])
 	return true
 
 # ---------- 艦艇（naval）----------

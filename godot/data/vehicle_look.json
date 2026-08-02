@@ -1,60 +1,156 @@
 {
+ "_doc3": "rot_deg＝把生成模型轉正的角度（Godot Euler 序 YXZ，Unit._orient_art 套用）。生成模型的朝向是隨機的，量法＝python3 tools/align_vehicle.py <glb>（鏡像對稱面），驗收圖在 godot/qa/vehart/*_aligned.png。沒有這欄＝模型本來就是正的。",
  "_doc": "載具外觀表（2026-08-01）。使用者：『載具太陽春了，這些也有立繪，要用 modly 做 3D 模型』。base_hull/base_turret＝立繪生成的模型（modly/Hunyuan3D，見 tools/pipeline_vehicle.bat）；沒有這兩欄就退回 Unit 的程式生成幾何。length_m＝真實車長，載入後依此把模型縮到正確尺度（生成出來的模型一律被正規化成約 2m）。turret_y＝砲塔座圈高度佔全高的比例，給 tools/split_turret.py 用。",
  "tank": {
   "name": "主戰坦克",
   "length_m": 6.2,
   "turret_y": 0.46,
   "collide_hl": 3.0,
-  "collide_hw": 1.75
+  "collide_hw": 1.55,
+  "_collide_note": "半寬 1.55＝立繪生成車體實測寬 3.10m 的一半（原本 1.75 是程式生成幾何的舊值，比模型寬 0.2m＝車側有一圈看不見的牆）。"
  },
  "destroyer": {
   "name": "驅逐艦",
   "length_m": 18.0,
   "turret_y": 0.62,
   "collide_hl": 9.0,
-  "collide_hw": 1.6
+  "collide_hw": 2.18,
+  "rot_deg": [
+   3.4,
+   0.0,
+   0.0
+  ],
+  "aligned_aabb": [
+   -0.2318,
+   -0.4778,
+   -0.9632,
+   0.4608,
+   0.918,
+   1.9015
+  ]
  },
  "missileboat": {
   "name": "飛彈快艇",
   "length_m": 10.0,
   "turret_y": 0.6,
   "collide_hl": 5.0,
-  "collide_hw": 1.4
+  "collide_hw": 2.18,
+  "rot_deg": [
+   2.4,
+   0.0,
+   0.0
+  ],
+  "aligned_aabb": [
+   -0.4101,
+   -0.4752,
+   -0.9257,
+   0.8173,
+   1.0044,
+   1.8746
+  ]
  },
  "lst": {
   "name": "戰車登陸艦",
   "length_m": 14.0,
   "turret_y": 0.66,
   "collide_hl": 7.0,
-  "collide_hw": 2.0
+  "collide_hw": 1.58,
+  "rot_deg": [
+   -1.8,
+   0.0,
+   0.0
+  ],
+  "aligned_aabb": [
+   -0.4227,
+   -0.3148,
+   -0.9479,
+   0.4305,
+   0.6422,
+   1.906
+  ]
  },
  "submarine": {
   "name": "潛艦",
   "length_m": 15.0,
   "turret_y": 0.99,
   "collide_hl": 7.5,
-  "collide_hw": 1.2
+  "collide_hw": 1.62,
+  "rot_deg": [
+   0.5,
+   0.0,
+   0.0
+  ],
+  "aligned_aabb": [
+   -0.2044,
+   -0.3076,
+   -0.9532,
+   0.4104,
+   0.5998,
+   1.8994
+  ]
  },
  "fighter": {
   "name": "戰鬥機",
   "length_m": 9.8,
   "turret_y": 0.99,
-  "collide_hl": 4.4,
-  "collide_hw": 4.9
+  "collide_hl": 4.9,
+  "collide_hw": 4.01,
+  "rot_deg": [
+   -25.6,
+   75.9,
+   28.4
+  ],
+  "aligned_aabb": [
+   -0.8304,
+   -0.2218,
+   -0.897,
+   1.6318,
+   0.854,
+   1.9948
+  ]
  },
  "attacker": {
   "name": "攻擊機",
   "length_m": 10.1,
   "turret_y": 0.99,
-  "collide_hl": 4.4,
-  "collide_hw": 5.9
+  "collide_hl": 5.05,
+  "collide_hw": 3.87,
+  "rot_deg": [
+   1.1,
+   2.9,
+   14.1
+  ],
+  "aligned_aabb": [
+   -0.714,
+   -0.2309,
+   -0.943,
+   1.4491,
+   0.529,
+   1.893
+  ]
  },
  "gunship": {
   "name": "武裝直升機",
   "length_m": 9.5,
   "turret_y": 0.99,
-  "collide_hl": 4.6,
-  "collide_hw": 1.3
+  "collide_hl": 4.75,
+  "collide_hw": 1.3,
+  "rot_deg": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "_rot_note": "量測對稱度僅 0.55（主旋翼與尾旋翼本身不對稱）＝量不準，目視原朝向已正確，故不轉。改動前請先看 godot/qa/vehart/gunship.png",
+  "_collide_note": "hw 只取機身寬（1.3），不含旋翼盤（實測 3.97）——旋翼在 3m 以上、人走得過去，把旋翼算成實體會變成一面看不見的牆。",
+  "aligned_aabb": [
+   -0.7921,
+   -0.407,
+   -0.9475,
+   1.5864,
+   0.8042,
+   1.8959
+  ]
  },
- "_doc2": "turret_y=0.99 ＝這個載具沒有可轉砲塔（潛艦/航空），整台當一件。"
+ "_doc2": "turret_y=0.99 ＝這個載具沒有可轉砲塔（潛艦/航空），整台當一件。",
+ "_doc4": "collide_hl/hw＝以**轉正後的模型實際尺寸**換算（半長=length_m/2、半寬=模型X×縮放/2），不是沿用坦克常數。換模型就要重算：python3 tools/align_vehicle.py 會印轉正後尺寸。"
 }
