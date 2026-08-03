@@ -194,10 +194,15 @@ func _ready() -> void:
 	# 測試模式一律靜音（2026-07-30 使用者：「測試階段不要播背景音樂」）——
 	# 跑批一跑七小時，BGM 跟著響七小時。靜音掛在 Master bus，不動遊戲本身的音量設定。
 	for targ in ["e2e", "selftest", "shotseq", "mapshots", "play", "scene",
-			"walk", "stress", "trainshot", "blkdump", "artshots"]:
+			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift"]:
 		if targ in OS.get_cmdline_user_args():
 			AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
 			break
+	# 實玩飄移守望：一併打開記帳，這樣抓到時才知道是誰推的
+	if "driftwatch" in OS.get_cmdline_user_args():
+		_drift_watch = true
+		_drift_dbg = true
+		print("[driftwatch] 已啟用：照平常玩即可，沒按鍵卻位移超過 1cm 就會記一筆")
 	if "e2e" in OS.get_cmdline_user_args():
 		_e2e()
 	elif "selftest" in OS.get_cmdline_user_args():
@@ -214,6 +219,8 @@ func _ready() -> void:
 		_walk_all()
 	elif "stress" in OS.get_cmdline_user_args():
 		_stress()
+	elif "idledrift" in OS.get_cmdline_user_args():
+		_idledrift()
 	elif "trainshot" in OS.get_cmdline_user_args():
 		_trainshot()
 	elif "blkdump" in OS.get_cmdline_user_args():
@@ -586,6 +593,175 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 			break                                  # 兩秒沒動：交給呼叫端決定要不要繞路
 	_press_key(KEY_W, false)
 	return _live_px(pu).distance_to(goal) * WORLD_SCALE < 1.2
+
+# ---------- 原地飄移量測（-- idledrift chNN）----------
+# 使用者 2026-08-02：「人物停在原地會小飄移」。
+# 做法：真實流程開場、部署 3 個單位，**完全不下任何命令**，靜置 8 秒，
+# 逐幀量每個活著單位的 XZ 位移，並對照 _drift 的記帳看是誰推的。
+# 合格線（肉眼不可見）：淨位移 < 0.02m、單幀最大 < 0.005m。
+func _idledrift() -> void:
+	_drift_dbg = true
+	_drift.clear()
+	if not await _boot_to_battle("idledrift", 3): _quit_test(1); return
+	# ⚠ 第一版只量「部署完不下令」的狀態，六個單位全 0.0000m ——量不到使用者看到的東西。
+	#   使用者是**在第三人稱操控自己的角色時**看到飄移的，所以必須先進到那個狀態。
+	var pu = _deployed[0]
+	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
+	await get_tree().create_timer(0.5).timeout
+	print("[drift] 第三人稱=%s（操控 %s）"
+			% ["是" if cam.is_tps() else "否", String(pu["cls"])])
+	# ⚠ 也要量**模型節點**，不是只量單位座標：人物網格掛在單位底下，
+	#   模型自己的 position 若每幀抖動，畫面上就是人在飄，而單位座標完全不動
+	#   （第一版就是這樣量到全 0 的）。
+	# ⚠⚠ 第二版還是量到全 0（單位座標與模型節點都不動）——因為**骨骼在動時
+	#   節點座標完全不變**。真正要量的是「畫面上看到的網格」：把單位底下所有
+	#   MeshInstance3D 的世界 AABB 合併，取中心。這才是使用者眼睛看到的位置。
+	#   （同一條教訓的第三次出現：骨骼數值正確 ≠ 畫面對，量錯對象等於沒量。）
+	var vstart := {}
+	var vlast := {}
+	var vworst := {}
+	# 先走 1.2 秒再放開——使用者是走一段停下來才看到飄的，直接靜置可能碰不到
+	# ⚠ 合成輸入要像真的在玩：實際玩法是**一邊走一邊用滑鼠轉鏡頭**、而且常常斜走。
+	#   只按 W 不動滑鼠，放開鍵時身體與鏡頭朝向剛好一致，那段「身體轉向鏡頭」的
+	#   收斂根本不會被觸發——第一版就是這樣量到 0 的。
+	_press_key(KEY_W, true)
+	_press_key(KEY_D, true)
+	var mt := 0.0
+	while mt < 1.2:
+		var mm := InputEventMouseMotion.new()
+		mm.relative = Vector2(6.0, 0.0)      # 邊走邊轉鏡頭
+		mm.screen_relative = mm.relative
+		Input.parse_input_event(mm)
+		await get_tree().process_frame
+		mt += get_process_delta_time()
+	_press_key(KEY_W, false)
+	_press_key(KEY_D, false)
+	await get_tree().create_timer(0.3).timeout
+	print("[drift] 已斜走一段（含轉鏡頭）並放開按鍵，開始靜置量測")
+	var start := {}
+	var last := {}
+	var worst := {}
+	var mstart := {}
+	var mlast := {}
+	var mworst := {}
+	var frames := 0
+	var t := 0.0
+	# 逐個網格點名（只對操控中那一個）：4.96m 的位移不像身體，要知道是哪個子節點在動
+	var per := {}       # 節點路徑 -> [起點, 終點, 單幀最大]
+	# 鏡頭與朝向也要量：鏡頭若在飄，畫面上看起來就是「人相對背景在移動」；
+	# 朝向若持續轉，看起來也像在飄（兩者都不是位置問題，但使用者看到的是同一件事）。
+	var cam0: Vector3 = cam.global_position
+	var camlast: Vector3 = cam0
+	var camworst := 0.0
+	var yaw0: float = (pu["node"] as Node3D).rotation.y
+	while t < 8.0:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		frames += 1
+		camworst = maxf(camworst, cam.global_position.distance_to(camlast))
+		camlast = cam.global_position
+		for mi in (pu["node"] as Node).find_children("*", "MeshInstance3D", true, false):
+			var m := mi as MeshInstance3D
+			if not m.is_visible_in_tree():
+				continue
+			var b: AABB = m.global_transform * m.get_aabb()
+			var c3: Vector3 = b.get_center()
+			var c2 := Vector2(c3.x, c3.z)
+			var nm: String = String(m.name)
+			if not per.has(nm):
+				per[nm] = [c2, c2, 0.0]
+			else:
+				var e: Array = per[nm]
+				e[2] = maxf(e[2], c2.distance_to(e[1]))
+				e[1] = c2
+		for u in units:
+			if not u["alive"] or not is_instance_valid(u["node"]):
+				continue
+			var id: int = u["node"].get_instance_id()
+			var p: Vector3 = u["node"].global_position
+			var flat := Vector2(p.x, p.z)
+			# 模型（網格）的世界座標：抓單位底下第一個 Node3D 子節點的 global_position
+			var vp := _visual_center(u["node"])
+			var mp := flat
+			var mdl = u["node"].get("_model")
+			if mdl != null and is_instance_valid(mdl):
+				var g: Vector3 = (mdl as Node3D).global_position
+				mp = Vector2(g.x, g.z)
+			if not start.has(id):
+				start[id] = flat
+				last[id] = flat
+				worst[id] = 0.0
+				mstart[id] = mp
+				mlast[id] = mp
+				mworst[id] = 0.0
+				vstart[id] = vp
+				vlast[id] = vp
+				vworst[id] = 0.0
+				continue
+			worst[id] = maxf(worst[id], flat.distance_to(last[id]))
+			last[id] = flat
+			mworst[id] = maxf(mworst[id], mp.distance_to(mlast[id]))
+			mlast[id] = mp
+			vworst[id] = maxf(vworst[id], vp.distance_to(vlast[id]))
+			vlast[id] = vp
+	var fails := 0
+	print("[drift] 靜置 %.1f 秒 / %d 幀" % [t, frames])
+	var movers: Array = []
+	for nm in per.keys():
+		var e: Array = per[nm]
+		movers.append([(e[1] as Vector2).distance_to(e[0]), e[2], nm])
+	movers.sort_custom(func(a, b): return a[0] > b[0])
+	for i in mini(6, movers.size()):
+		print("[drift]   逐網格 %-28s 淨%.4fm 幀最大%.4fm" % [movers[i][2], movers[i][0], movers[i][1]])
+	var yaw1: float = (pu["node"] as Node3D).rotation.y
+	print("[drift] 鏡頭 淨%.4fm 幀最大%.4fm ／ 操控角色朝向變化 %.2f 度"
+			% [cam.global_position.distance_to(cam0), camworst,
+			rad_to_deg(absf(wrapf(yaw1 - yaw0, -PI, PI)))])
+	if cam.global_position.distance_to(cam0) > 0.02:
+		print("[drift] FAIL 鏡頭靜置時淨位移 %.4fm（門檻 0.02m）"
+				% cam.global_position.distance_to(cam0))
+		fails += 1
+	for id in start.keys():
+		var net: float = (last[id] as Vector2).distance_to(start[id] as Vector2)
+		var wf: float = worst[id]
+		var acc: Dictionary = _drift.get(id, {})
+		# ⚠ 標籤不可以只從 _drift 拿：沒被推過的單位在 _drift 裡根本沒有條目，
+		#   會全部印成 "?"，等於量到異常也不知道是誰（第一版就是這樣）。
+		var tag: String = String(acc.get("cls", ""))
+		var side_s := ""
+		for uu in units:
+			if is_instance_valid(uu.get("node")) and uu["node"].get_instance_id() == id:
+				tag = String(uu["cls"])
+				side_s = "我方" if uu["side"] == player_side else "敵方"
+				if acting != null and acting.get("node") == uu["node"]:
+					side_s += "★操控中"
+				break
+		tag = "%s%s" % [side_s, tag]
+		var mnet: float = (mlast[id] as Vector2).distance_to(mstart[id] as Vector2)
+		print("[drift] %-10s 單位 淨%.4fm 幀%.4fm ／ 模型 淨%.4fm 幀%.4fm"
+				% [tag, net, wf, mnet, mworst[id]]
+				+ " ／ settle %.3f pair %.3f clamp %.3f 逃生 %d 次"
+				% [acc.get("settle", 0.0), acc.get("pair", 0.0),
+				acc.get("clamp", 0.0), acc.get("esc", 0)])
+		var vnet: float = (vlast[id] as Vector2).distance_to(vstart[id] as Vector2)
+		print("[drift]   └ 網格（畫面看到的）淨 %.4fm 幀最大 %.4fm　起(%.2f,%.2f)→終(%.2f,%.2f)"
+				% [vnet, vworst[id], (vstart[id] as Vector2).x, (vstart[id] as Vector2).y,
+				(vlast[id] as Vector2).x, (vlast[id] as Vector2).y])
+		if vnet > 0.02 or vworst[id] > 0.005:
+			print("[drift] FAIL %s 網格在飄：淨 %.4fm、單幀 %.4fm（節點不動＝骨骼層在動）"
+					% [tag, vnet, vworst[id]])
+			fails += 1
+		if mnet > 0.02 or mworst[id] > 0.005:
+			print("[drift] FAIL %s 模型節點在飄：淨 %.4fm、單幀 %.4fm" % [tag, mnet, mworst[id]])
+			fails += 1
+		if net > 0.02:
+			print("[drift] FAIL %s 靜置 %.1f 秒淨位移 %.3fm（門檻 0.02m）" % [tag, t, net])
+			fails += 1
+		if wf > 0.005:
+			print("[drift] FAIL %s 單幀位移 %.4fm（門檻 0.005m）" % [tag, wf])
+			fails += 1
+	print("[drift] FAILS=%d" % fails)
+	_quit_test(0 if fails == 0 else 1)
 
 # ---------- 章節壓力測試（-- stress chNN，2026-07-28 使用者第 5 項）----------
 # 真的打一場仗：走真實 UI 部署 3 個單位，每回合每兵向最近敵人推進（按 W 用走的，
@@ -5539,6 +5715,7 @@ func _process(delta: float) -> void:
 	_solid_bodies()
 	_roof_fade(delta)
 	_tps_control(delta)
+	_drift_watch_tick(delta)
 	_flicker_fire(delta)
 	_weather_follow()
 	_action_tick(delta)
@@ -5549,6 +5726,98 @@ func _process(delta: float) -> void:
 		if _enemy_t <= 0:
 			_enemy_step()
 			_enemy_t = 0.25
+
+# ---------- 原地飄移診斷（-- idledrift chNN）----------
+# 使用者 2026-08-02 回報「人物停在原地會小飄移」。每幀會動到單位 XZ 的路徑有四條
+# （_settle／步兵互推／邊界 clamp／玩家輸入），用猜的必然重蹈 lessons 0b 的覆轍
+# （ch09「陷進實體」連改四次座標分毫不動，最後是讓斷言印出「是什麼把人推開」才一次找到）。
+# 所以先記帳：每幀每個來源推了多少，跑完印表，最大的那個就是兇手。
+# 平時只多一個 bool 判斷，零成本。
+var _drift_dbg := false
+var _drift := {}            # instance_id -> {cls, settle, pair, clamp, esc, n}
+func _drift_add(u, key: String, d: float) -> void:
+	if not _drift_dbg or d < 0.000001:
+		return
+	if not is_instance_valid(u.get("node")):
+		return
+	var id: int = u["node"].get_instance_id()
+	if not _drift.has(id):
+		_drift[id] = {"cls": u["cls"], "side": u["side"],
+				"settle": 0.0, "pair": 0.0, "clamp": 0.0, "esc": 0, "n": 0}
+	_drift[id][key] += d
+	_drift[id]["n"] += 1
+
+# ---------- 實玩飄移守望（啟動時加 -- driftwatch）----------
+# 使用者 2026-08-02 回報「人物停在原地會小飄移」，但合成輸入（走一段→放開鍵→靜置 8 秒，
+# 平地與斜坡都試過）量到的位移只有 0.5 公釐＝重現不出來。
+# 與其繼續猜，不如讓使用者照平常玩、由程式當場抓：
+#   「沒按任何移動鍵**且** AP 沒在消耗，人卻在動」就記一筆，並附上是誰推的。
+# 平時（沒帶參數）完全不執行。
+var _drift_watch := false
+var _dw_t := 0.0
+var _dw_node := Vector2.ZERO
+var _dw_mesh := Vector2.ZERO
+var _dw_hits := 0
+func _drift_watch_tick(delta: float) -> void:
+	if not _drift_watch or acting == null or not is_instance_valid(acting.get("node")):
+		return
+	for k in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
+		if Input.is_key_pressed(k):
+			_dw_t = 0.0                 # 有在操作就重新計時
+			return
+	_dw_t += delta
+	if _dw_t < 0.5:                     # 剛放開鍵的減速不算飄移
+		return
+	var node: Node3D = acting["node"]
+	var np := Vector2(node.global_position.x, node.global_position.z)
+	var mp := _visual_center(node)
+	if _dw_node == Vector2.ZERO:
+		_dw_node = np
+		_dw_mesh = mp
+		return
+	var dn: float = np.distance_to(_dw_node)
+	var dm: float = mp.distance_to(_dw_mesh)
+	if dn > 0.01 or dm > 0.01:          # 一公分就算（肉眼看得到的下限）
+		_dw_hits += 1
+		var acc: Dictionary = _drift.get(node.get_instance_id(), {})
+		print("[driftwatch] #%d 沒按鍵 %.1f 秒卻動了：單位 %.3fm／網格 %.3fm"
+				% [_dw_hits, _dw_t, dn, dm]
+				+ "　來源 settle %.3f pair %.3f clamp %.3f 逃生 %d 次　"
+				% [acc.get("settle", 0.0), acc.get("pair", 0.0),
+				acc.get("clamp", 0.0), acc.get("esc", 0)]
+				+ "座標 (%.2f, %.2f)" % [np.x, np.y])
+		_dw_node = np
+		_dw_mesh = mp
+
+# 單位「畫面上」的水平中心：合併底下所有 MeshInstance3D 的世界 AABB。
+# ⚠ 骨骼在動時節點座標完全不變，量節點等於沒量——要量網格本身。
+func _visual_center(n: Node) -> Vector2:
+	var box := AABB()
+	var first := true
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		# ⚠ 只算**看得見**的：UAL 動作來源那具 Mannequin 是隱藏的（還被丟到 z=-400），
+		#   但它的動作自帶根位移，一路飄了 9.3m。把它算進來就會誤報
+		#   「網格在飄」——使用者根本看不到它。量測對象要跟使用者的眼睛一致。
+		if not m.is_visible_in_tree():
+			continue
+		var b: AABB = m.global_transform * m.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	if first:
+		return Vector2.ZERO
+	var c: Vector3 = box.get_center()
+	return Vector2(c.x, c.z)
+
+# 走到 _settle 逃生分支一次（沒有位移量，只計次）
+func _drift_esc(u) -> void:
+	if not _drift_dbg or not is_instance_valid(u.get("node")):
+		return
+	var id: int = u["node"].get_instance_id()
+	if not _drift.has(id):
+		_drift[id] = {"cls": u["cls"], "side": u["side"],
+				"settle": 0.0, "pair": 0.0, "clamp": 0.0, "esc": 0, "n": 0}
+	_drift[id]["esc"] += 1
 
 # 實體約束（GDD/14 §2）：每幀把所有單位推出牆體。
 # ⚠ 先前只有「第三人稱操控中的那一個」會吃碰撞，敵方 AI、點擊移動、
@@ -5564,6 +5833,7 @@ func _solid_bodies() -> void:
 		#   只解算實體的話下一幀又被夾限推回障礙裡（ch01/06/13 卡邊界真因）
 		var fixed: Vector3 = _settle(node.global_position, r, u)
 		if fixed.distance_squared_to(node.global_position) > 0.000001:
+			_drift_add(u, "settle", fixed.distance_to(node.global_position))
 			node.global_position = Vector3(fixed.x, node.global_position.y, fixed.z)
 			var p := _live_px(u)
 			u["wx"] = p.x
@@ -5588,6 +5858,8 @@ func _solid_bodies() -> void:
 			if d >= need or d < 0.0001:
 				continue
 			var push: Vector2 = dxz / d * (need - d) * 0.5
+			_drift_add(a, "pair", push.length())
+			_drift_add(b, "pair", push.length())
 			a["node"].global_position -= Vector3(push.x, 0, push.y)
 			b["node"].global_position += Vector3(push.x, 0, push.y)
 			for uu in [a, b]:
@@ -5602,6 +5874,7 @@ func _solid_bodies() -> void:
 			continue
 		var pcl: Vector3 = _clamp_to_map(u2["node"].global_position)
 		if pcl.distance_squared_to(u2["node"].global_position) > 0.000001:
+			_drift_add(u2, "clamp", pcl.distance_to(u2["node"].global_position))
 			u2["node"].global_position = Vector3(pcl.x, u2["node"].global_position.y, pcl.z)
 			var pq := _live_px(u2)
 			u2["wx"] = pq.x
@@ -6794,6 +7067,10 @@ func _settle(pos: Vector3, radius: float, ignore) -> Vector3:
 	#   在第 7 章把人推**穿過深水圍欄、直接推進河裡**（walk ch07 一次 3357 筆
 	#   「走進深水」）。逃生用的位移不可以把人送進另一種不合法狀態——
 	#   逃生只能逃到「合法的地方」，否則就是用一個 bug 換另一個更糟的 bug。
+	# 診斷用：走到逃生分支的次數。待機時這個數字若不是 0，飄移的兇手就是它
+	# （逃生位移每步 0.35m，每幀都走一次就是持續爬行）。
+	if _drift_dbg and ignore is Dictionary:
+		_drift_esc(ignore)
 	var mw: float = map_data.get("w", 960)
 	var mh: float = map_data.get("h", 600)
 	var hx: float = mw * 0.5 * WORLD_SCALE
