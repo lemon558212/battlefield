@@ -1504,12 +1504,16 @@ func _stress_sweep() -> int:
 		if now.x < -1.0 or now.y < -1.0 or now.x > mwp + 1.0 or now.y > mhp + 1.0:
 			print("[stress] FAIL 出界 %s px=(%.0f,%.0f)" % [who, now.x, now.y])
 			n += 1
-		var fixed: Vector3 = _resolve_solids(wp, BODY_R, u)
-		if Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
+		# ⚠ 半徑要跟每幀解算用的**同一個**（2026-08-03）：先前掃描一律用 BODY_R(0.42m)，
+		#   但 _solid_bodies 對載具用的是 VEHICLE_R(1.6m)。同一台坦克兩個數字，
+		#   於是「解算覺得沒問題、掃描說陷進去了」這種縫永遠修不完。
+		var chk_r: float = VEHICLE_R if Unit.is_vehicle_cls(u["cls"]) else BODY_R
+		var fixed: Vector3 = _resolve_solids(wp, chk_r, u)
+		if not _flies_over_solids(u) 				and Vector2(fixed.x - wp.x, fixed.z - wp.z).length() > 0.06:
 			# ⚠ 只印座標不夠：2026-08-02 為了同一個座標連改四次都沒中，
 			#   因為看不出「是什麼把人推開」。斷言必須指出來源。
 			print("[stress] FAIL 陷進實體 %s px=(%.0f,%.0f) 來源=%s"
-					% [who, now.x, now.y, _why_solid(wp, BODY_R, u)])
+					% [who, now.x, now.y, _why_solid(wp, chk_r, u)])
 			n += 1
 		if not Unit.is_vehicle_cls(u["cls"]):
 			if absf(wp.y - _ground_height(wp)) > 0.35:
@@ -5895,6 +5899,17 @@ func _drift_esc(u) -> void:
 				"settle": 0.0, "pair": 0.0, "clamp": 0.0, "esc": 0, "n": 0}
 	_drift[id]["esc"] += 1
 
+# 這個單位高到不該被地面障礙碰到嗎（鐵律 0②：遮蔽看幾何與高度，不是看標籤）。
+# ★單一真相來源：解算（_solid_bodies）與斷言（_stress_sweep／走查）都必須問這一支。
+#   2026-08-03 stress ch12 兩次踩到同一個坑的兩半：
+#     ① 解算沒判高度 → 14m 巡航的戰鬥機被樹和建築的平面足跡推來推去（「頂著障礙空轉」）
+#     ② 只修了解算、斷言沒跟著改 → 掃描照樣報「fighter 陷進實體」
+#   門檻 8m：固定翼（14m）一定跳過；武裝直升機（6m）仍要撞得到高樓。
+func _flies_over_solids(u) -> bool:
+	if not is_instance_valid(u.get("node")) or u["node"].get("_is_air") != true:
+		return false
+	return u["node"].global_position.y - _ground_height(u["node"].global_position) > 8.0
+
 # 實體約束（GDD/14 §2）：每幀把所有單位推出牆體。
 # ⚠ 先前只有「第三人稱操控中的那一個」會吃碰撞，敵方 AI、點擊移動、
 #   甚至測試把兵直接放進屋裡都能穿牆——牆等於只對玩家有效。
@@ -5905,6 +5920,8 @@ func _solid_bodies() -> void:
 			continue
 		var node = u["node"]
 		var r: float = VEHICLE_R if Unit.is_vehicle_cls(u["cls"]) else BODY_R
+		if _flies_over_solids(u):
+			continue
 		# ★ 用 _settle 不用 _resolve_solids：邊界上的單位要同時滿足夾限與實體，
 		#   只解算實體的話下一幀又被夾限推回障礙裡（ch01/06/13 卡邊界真因）
 		var fixed: Vector3 = _settle(node.global_position, r, u)
@@ -5914,6 +5931,19 @@ func _solid_bodies() -> void:
 			var p := _live_px(u)
 			u["wx"] = p.x
 			u["wy"] = p.y
+			# ★載具連續被推＝它正頂著障礙空轉（stress ch12：坦克六個回合卡在同一座標，
+			#   每幀被推出來、下一幀又開回去）。連續 12 幀（0.2 秒）就叫它停車改路。
+			if Unit.is_vehicle_cls(u["cls"]):
+				u["veh_push_n"] = int(u.get("veh_push_n", 0)) + 1
+				if int(u["veh_push_n"]) >= 12:
+					u["veh_push_n"] = 0
+					if node.has_method("veh_blocked"):
+						node.veh_blocked()
+						if _test_mode:
+							print("[veh] %s 頂著障礙空轉，停車改路 px=(%.0f,%.0f)"
+									% [String(u["cls"]), p.x, p.y])
+		elif Unit.is_vehicle_cls(u["cls"]):
+			u["veh_push_n"] = 0
 	# 步兵彼此也是實體（鐵律 0①：固體不可互穿——先前刻意放行，理由是怕 AI 卡死，
 	# 但那違反物理；卡死交給既有的「真停滯偵測」收尾，不該靠互穿解決）。
 	# 對稱推開：兩人各退一半，誰也不把誰彈飛。已死者不算（屍體可以跨過）。
@@ -7123,6 +7153,12 @@ func _why_solid(wp: Vector3, radius: float, ignore) -> String:
 					String(bk.get("k", "-")), q.distance_to(p) * WORLD_SCALE])
 	for v in units:
 		if v == ignore or not Unit.is_vehicle_cls(v["cls"]) or not is_instance_valid(v["node"]):
+			continue
+		# ⚠ 高度判定必須跟 _resolve_solids **一模一樣**（2026-08-03，stress ch12）：
+		#   少了這一條，14m 高空的戰鬥機會被列進地面坦克的推擠來源，
+		#   診斷本身就在誤導人往錯的方向查。同一條規則兩份實作＝本專案的老坑，
+		#   而「診斷」也是一份實作。
+		if absf(v["node"].global_position.y - wp.y) > 2.5:
 			continue
 		var q2: Vector2 = _blk_push(_vehicle_obb(v), p, r_px)
 		if q2.distance_to(p) > 0.001:

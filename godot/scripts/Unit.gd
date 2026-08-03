@@ -2596,6 +2596,20 @@ func _vehicle_process(delta: float) -> void:
 		if _veh_spd > 0.01:
 			global_position += facing_dir() * _veh_spd * delta   # 只能往車頭方向走
 
+# 載具撞到東西＝停車並放棄這個目標（2026-08-03，stress ch12）。
+# ⚠ 為什麼需要這支：載具的行進是「照車頭方向前進」、不看障礙，撞上石頭之後
+#   每幀被 Main._solid_bodies 推出來、下一幀又開回去 → 永遠停在障礙邊緣的平衡點，
+#   回合末掃描就報「陷進實體」而且**座標分毫不動**（六次都是 px=(1077,797)）。
+#   現實裡履帶車頂著石頭只會空轉，駕駛會停下來改路——照現實做。
+#   emit arrived 讓 AI 認為這段行程結束，下回合會重新選目標，不會卡在同一條路上。
+func veh_blocked() -> void:
+	if not _is_vehicle:
+		return
+	_veh_spd = 0.0
+	if _move_target != null:
+		_move_target = null
+		arrived.emit()
+
 # 砲口世界座標（曳光/火光起點）
 func _muzzle_pos() -> Vector3:
 	if _turret == null:
