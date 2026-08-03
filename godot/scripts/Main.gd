@@ -4537,10 +4537,31 @@ func _ai_deploy() -> void:
 		if vpool.is_empty():
 			push_error("[diff] 第 %d 章要出 %d 台敵方載具，但這張圖沒有任何已解鎖的載具可選"
 					% [chapter, veh_n])
+		# ⚠⚠ 2026-08-03：不可以照 vehicle_unlock 的鍵序取。
+		#   每章只出 1~3 台，照鍵序等於永遠只取到前三種（tank/fighter/attacker），
+		#   **四種軍艦一次都沒上場過**——連 ch09「海峽封鎖線」（allow=['sea','air']、
+		#   劇本設定就是海上封鎖）出的都是兩架飛機。戰場上有什麼，該由**地圖的作戰域**
+		#   決定，不是由資料檔的鍵順序決定。改成依 domain 分組後輪流取（陸→海→空），
+		#   海圖至少會有一艘船，陸海空混合圖三種都看得到。
+		var by_dom := {}
+		for vc3 in vpool:
+			var dm3: String = String(GameData.class_base.get(vc3, {}).get("domain", "land"))
+			if not by_dom.has(dm3):
+				by_dom[dm3] = []
+			(by_dom[dm3] as Array).append(vc3)
+		var doms: Array = []
+		for dm4 in map_data.get("allow", ["land"]):
+			if by_dom.has(dm4):
+				doms.append(dm4)
+		if doms.is_empty():
+			doms = by_dom.keys()
+		print("[diff] 敵方載具池：%s（依作戰域輪流取：%s）" % [str(by_dom), str(doms)])
 		for k in veh_n:
 			if vpool.is_empty():
 				break
-			var vc2: String = vpool[k % vpool.size()]
+			var dm5: String = String(doms[k % doms.size()])
+			var dlist: Array = by_dom[dm5]
+			var vc2: String = String(dlist[int(k / doms.size()) % dlist.size()])
 			# ⚠ 載具**不可以**沿用步兵的 55px(2.75m) 網格：車長 6.2m、車寬 3.1m，
 			#   相鄰兩台一定互穿（鐵律①固體不可互穿）。載具自己一排、間距 150px=7.5m，
 			#   並沿部署區底邊排開，避免壓在步兵網格上。
@@ -4556,7 +4577,18 @@ func _ai_deploy() -> void:
 			#   改成退而求其次挑池子裡放得下的另一種載具，數量仍照難度表。
 			#   全都放不下才是真的該喊。
 			if spot == null:
-				for alt in vpool:
+				# ⚠ 退路要**先試同作戰域裡比較小的**，不可以直接跳到別的域（2026-08-03）：
+				#   ch13 的 18m 驅逐艦塞不進西岸那條水道，舊寫法照 vpool 順序第一個
+				#   就是坦克 → 海圖上的海軍名額被陸軍吃掉。10m 的飛彈快艇其實放得下。
+				var alts: Array = vpool.duplicate()
+				var dom_of_vc: String = String(GameData.class_base.get(vc2, {}).get("domain", "land"))
+				alts.sort_custom(func(a, b):
+					var da: bool = String(GameData.class_base.get(a, {}).get("domain", "land")) == dom_of_vc
+					var db: bool = String(GameData.class_base.get(b, {}).get("domain", "land")) == dom_of_vc
+					if da != db:
+						return da            # 同域優先
+					return _veh_half(a).x < _veh_half(b).x)   # 再來由小到大
+				for alt in alts:
 					if alt == vc2:
 						continue
 					var alt_spot = _veh_spawn_spot(alt, Vector2(vx, vy), veh_spots)
@@ -4601,39 +4633,83 @@ func _veh_spawn_spot(cls: String, want: Vector2, taken: Array):
 	var mh: float = map_data.get("h", 600)
 	var half: Vector2 = _veh_half(cls)      # ★實際尺寸，不是坦克常數（見 _veh_half）
 	var margin := 40.0              # 離地圖邊界的安全距離（邊界卡人的老坑）
-	# 環形外擴：先試原點，再一圈圈往外找。40px=2m 一階，最多找到 480px=24m 外。
-	for ring in 13:
-		var r: float = float(ring) * 40.0
-		var steps: int = 1 if ring == 0 else 12
-		for s in steps:
-			var ang: float = TAU * float(s) / float(steps)
-			var p := want + Vector2(cos(ang), sin(ang)) * r
-			p.x = clampf(p.x, margin, mw - margin)
-			p.y = clampf(p.y, margin, mh - margin)
-			if terrain != null and terrain.move_cost(p.x, p.y, mob) >= BattleTerrain.IMPASSABLE:
-				continue            # 這種地形這台載具過不去
-			# ★ 場地限制（2026-08-02 使用者：「戰車不會在巷子裡面出現」）：
-			#   地形可通行不等於**塞得進去**。一台車 6.2m×3.5m，生在兩棟房子之間
-			#   的窄巷、或緊貼牆與電線桿的夾角，都是不合理的畫面。
-			#   車體不是一顆點：沿車軸取車尾／中心／車頭三處，各用車寬半徑問
-			#   _resolve_solids（它已涵蓋建築牆、樹、電線桿、柵欄與其他載具）。
-			#   任一處會被推開＝這個位置容不下這台車，換下一個候選點。
-			if not _veh_fits(p, mob, cls):
-				continue
-			# 與已放好的載具保持距離：需要的間距是**兩台各自的半長之和**再加餘裕。
-			# ⚠ 先前寫死 150px(7.5m)＝坦克尺寸，驅逐艦半長就有 9m，兩艘船照樣互穿。
-			var clash := false
-			for t in taken:
-				var tp: Vector2 = t["p"]
-				var need_px: float = (half.x + float(t["hl"]) + 1.5) / WORLD_SCALE
-				if (p - tp).length() < need_px:
-					clash = true
-					break
-			if clash:
-				continue
-			if _test_mode and r > 0.0:
-				print("[diff] %s 落點外移 %.0fpx 找到合法地形（mob=%s）" % [cls, r, mob])
-			return p
+	# 環形外擴：先試原點，再一圈圈往外找。40px=2m 一階。
+	# ⚠⚠ 2026-08-03：軍艦要找**遠**得多（先前上限 24m，ch09 海圖因此一艘船都放不下，
+	#   全部退回戰鬥機＝四種軍艦從來沒上場過）。軍艦本來就在外海，不會停在
+	#   步兵部署區旁邊 24m 內——搜尋半徑對海軍放到 80m。
+	#   但**不可以生到玩家背後**：加一條「必須與 want 在地圖中心的同一側」。
+	var naval: bool = mob == "naval"
+	# 找不到落點時要說得出「是哪一關卡掉的」——靜默失敗在本專案已造成三次假通過
+	var rej_side := 0
+	var rej_near := 0
+	var rej_terr := 0
+	var rej_fit := 0
+	var rej_clash := 0
+	var rings: int = 41 if naval else 13
+	var ctr := Vector2(mw * 0.5, mh * 0.5)
+	# ⚠ 「同側」對某些地圖是死路：ch13 的海在**西邊**、敵方部署區在東邊，
+	#   於是同側規則把全部水面都排除了（實測剔除 63 個候選點全是水面）。
+	#   改成兩段：先找同側，同側沒有就放寬到全圖，但**不可以生在玩家部署區 25m 內**
+	#   （軍艦從玩家背後的海上包抄是合理戰術，貼在玩家腳邊生出來則不是）。
+	var pl_zone: Dictionary = {}
+	if map_data.has("deploy") and (map_data["deploy"] as Array).size() > 0:
+		pl_zone = (map_data["deploy"] as Array)[player_side]
+	var pl_c := Vector2(float(pl_zone.get("x", 0)) + float(pl_zone.get("w", 0)) * 0.5,
+			float(pl_zone.get("y", 0)) + float(pl_zone.get("h", 0)) * 0.5)
+	var pass_n: int = 2 if naval else 1
+	for pass_i in pass_n:
+		for ring in rings:
+			var r: float = float(ring) * 40.0
+			# ⚠ 取樣密度要隨半徑增加，否則「篩子的網目比水域還大」：
+			#   固定 24 個點時，半徑 1600px 的圓周上兩點間隔 419px（21m），
+			#   ch13 西岸那條水域就是這樣被整條漏掉的。固定成大約每 6m 一點。
+			var steps: int = 1 if ring == 0 else clampi(int(TAU * r / 120.0), 12, 96)
+			for s in steps:
+				var ang: float = TAU * float(s) / float(steps)
+				var p := want + Vector2(cos(ang), sin(ang)) * r
+				p.x = clampf(p.x, margin, mw - margin)
+				p.y = clampf(p.y, margin, mh - margin)
+				if naval and pass_i == 0 and (p - ctr).dot(want - ctr) < 0.0:
+					rej_side += 1
+					continue            # 第一段：只找自己這一側
+				if naval and pass_i == 1 and pl_c != Vector2.ZERO 					and p.distance_to(pl_c) < 25.0 / WORLD_SCALE:
+					rej_near += 1
+					continue            # 第二段：全圖都可以，但不可貼在玩家部署區旁
+				if terrain != null and terrain.move_cost(p.x, p.y, mob) >= BattleTerrain.IMPASSABLE:
+					rej_terr += 1
+					continue            # 這種地形這台載具過不去
+				# ★ 場地限制（2026-08-02 使用者：「戰車不會在巷子裡面出現」）：
+				#   地形可通行不等於**塞得進去**。一台車 6.2m×3.5m，生在兩棟房子之間
+				#   的窄巷、或緊貼牆與電線桿的夾角，都是不合理的畫面。
+				#   車體不是一顆點：沿車軸取車尾／中心／車頭三處，各用車寬半徑問
+				#   _resolve_solids（它已涵蓋建築牆、樹、電線桿、柵欄與其他載具）。
+				#   任一處會被推開＝這個位置容不下這台車，換下一個候選點。
+				if not _veh_fits(p, mob, cls):
+					rej_fit += 1
+					continue
+				# 與已放好的載具保持距離：需要的間距是**兩台各自的半長之和**再加餘裕。
+				# ⚠ 先前寫死 150px(7.5m)＝坦克尺寸，驅逐艦半長就有 9m，兩艘船照樣互穿。
+				var clash := false
+				for t in taken:
+					var tp: Vector2 = t["p"]
+					var need_px: float = (half.x + float(t["hl"]) + 1.5) / WORLD_SCALE
+					if (p - tp).length() < need_px:
+						clash = true
+						break
+				if clash:
+					rej_clash += 1
+					continue
+				if _test_mode and r > 0.0:
+					print("[diff] %s 落點外移 %.0fpx（%.0fm）找到合法地形（mob=%s%s）"
+							% [cls, r, r * WORLD_SCALE, mob,
+							"、放寬到全圖" if naval and pass_i == 1 else ""])
+				return p
+	# 找不到要說清楚為什麼，不可以靜默失敗（本專案已因靜默跳過造成三次假通過）
+	if _test_mode:
+		print("[diff] %s 在 %.0fm 內找不到合法落點（mob=%s、半長 %.1fm）"
+				% [cls, float(rings) * 40.0 * WORLD_SCALE, mob, half.x]
+				+ "　剔除：同側 %d、離玩家太近 %d、地形不可通行 %d、塞不下 %d、與其他載具太近 %d"
+				% [rej_side, rej_near, rej_terr, rej_fit, rej_clash])
 	return null
 
 # 這個位置容得下一台車嗎（場地限制／不准生在巷子裡）。

@@ -2,19 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bxi0juabq6u7o"
-path="res://.godot/imported/tank_hull_0.png-6ca36b7f85cd1272e57d40db59f2ffed.ctex"
+uid="uid://d04u60084ts44"
+path="res://.godot/imported/chk_hull.png-8164aca837e14a20cf6ac7312780065a.ctex"
 metadata={
 "vram_texture": false
-}
-generator_parameters={
-"md5": "c7c4852226eeeeb904cedcd400f878eb"
 }
 
 [deps]
 
-source_file="res://assets/models/vehicles/tank_hull_0.png"
-dest_files=["res://.godot/imported/tank_hull_0.png-6ca36b7f85cd1272e57d40db59f2ffed.ctex"]
+source_file="res://qa/vehart/chk_hull.png"
+dest_files=["res://.godot/imported/chk_hull.png-8164aca837e14a20cf6ac7312780065a.ctex"]
 
 [params]
 
@@ -26,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=true
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

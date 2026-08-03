@@ -1011,6 +1011,212 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 
+# ---------- 引擎內切分砲塔（2026-08-03）----------
+# ★為什麼改成在引擎裡切，而不是用 tools/split_turret.py 產生分件檔：
+#   實拍發現坦克「砲塔陷進車體、頂上破洞、車體上緣一圈飛邊」，真因是
+#   **分件檔跟現在的整件模型根本不是同一台**：
+#     output_textured/tank.glb  X0.734 Y0.569 Z1.904  30594 頂點
+#     assets/.../tank_hull.glb  X0.998 Y0.552 Z1.995  63449 頂點 ← 裡面是一台完整坦克
+#     assets/.../tank_turret.glb                       9434 頂點 ← 只是一片頂蓋＋半截砲管
+#   遊戲裡於是同時畫了「一台完整坦克」和「一片飛邊薄板＋第二根砲管」。
+#   兩個檔案分別產生、各自演化，就一定會再發生一次——**同一份來源切出來的兩半
+#   不可能不同源**，這是把它搬進引擎的真正理由（同「一條規則不可以有兩份實作」）。
+#
+# 切法：只重排**索引**，兩半共用同一份頂點陣列（未用到的頂點留著無害）。
+#   不重建頂點＝不必逐點跑 SurfaceTool，成本從「每頂點」降到「每三角形一次比較」。
+# ⚠ 車體要多留一段重疊帶：兩片薄殼各自切齊的話，接縫會看穿到模型內部
+#   （這是生成模型是薄殼的老問題，split_turret.py 當初也是為此加 overlap）。
+static var _veh_split_cache := {}
+
+# 節點相對某個祖先的變換（模型可能還沒進場景樹，不能用 global_transform）
+static func _rel_xf(n: Node3D, root: Node3D) -> Transform3D:
+	var xf := Transform3D.IDENTITY
+	var cur: Node = n
+	while cur != null and cur != root:
+		if cur is Node3D:
+			xf = (cur as Node3D).transform * xf
+		cur = cur.get_parent()
+	return xf
+
+# 依 turret_y（座圈高度佔全高比例）把 art 底下的網格切成車體／砲塔兩份。
+# 回傳 {"hull": ArrayMesh, "turret": ArrayMesh, "cut": float, "box": AABB}，切不出來回傳 {}。
+static func _split_turret_mesh(art: Node3D, cut_ratio: float) -> Dictionary:
+	var mis: Array = art.find_children("*", "MeshInstance3D", true, false)
+	if mis.is_empty():
+		return {}
+	# 先在「載具空間」（art 的父節點座標）量整體 AABB，決定切面高度
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
+	var per_surf: Array = []          # [{verts(已轉換), idx, arrays, mat}]
+	for mi in mis:
+		var m := mi as MeshInstance3D
+		if m.mesh == null:
+			continue
+		var xf: Transform3D = _rel_xf(m, art) if m != art else Transform3D.IDENTITY
+		xf = art.transform * xf
+		for si in m.mesh.get_surface_count():
+			var arr: Array = m.mesh.surface_get_arrays(si)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var out := PackedVector3Array()
+			out.resize(vs.size())
+			for i in vs.size():
+				var v: Vector3 = xf * vs[i]
+				out[i] = v
+				lo = Vector3(minf(lo.x, v.x), minf(lo.y, v.y), minf(lo.z, v.z))
+				hi = Vector3(maxf(hi.x, v.x), maxf(hi.y, v.y), maxf(hi.z, v.z))
+			per_surf.append({"v": out, "arr": arr, "xf": xf,
+					"mat": m.mesh.surface_get_material(si)})
+	if per_surf.is_empty() or lo.y > hi.y:
+		return {}
+	var h: float = hi.y - lo.y
+	var cut: float = lo.y + h * cut_ratio
+	var overlap: float = h * 0.06
+	var hull_mesh := ArrayMesh.new()
+	var tur_mesh := ArrayMesh.new()
+	var n_hull := 0
+	var n_tur := 0
+	for ps in per_surf:
+		var verts: PackedVector3Array = ps["v"]
+		var arr: Array = ps["arr"]
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		if idx.is_empty():
+			idx = PackedInt32Array(range(verts.size()))
+		var hull_i := PackedInt32Array()
+		var tur_i := PackedInt32Array()
+		var tri := idx.size() / 3
+		for t in tri:
+			var a: int = idx[t * 3]
+			var b: int = idx[t * 3 + 1]
+			var c: int = idx[t * 3 + 2]
+			var cy: float = (verts[a].y + verts[b].y + verts[c].y) / 3.0
+			if cy > cut:
+				tur_i.append_array([a, b, c])
+			if cy < cut + overlap:      # 車體多留重疊帶塞住接縫
+				hull_i.append_array([a, b, c])
+		# 頂點座標要換成**已轉正**的那一份，否則兩半各自帶著原本的旋轉
+		var base: Array = arr.duplicate()
+		base[Mesh.ARRAY_VERTEX] = verts
+		if arr[Mesh.ARRAY_NORMAL] != null:
+			var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+			var nb := PackedVector3Array()
+			nb.resize(ns.size())
+			for i in ns.size():
+				nb[i] = ((ps["xf"] as Transform3D).basis * ns[i]).normalized()
+			base[Mesh.ARRAY_NORMAL] = nb
+		# ⚠ 兩半不可以共用整份頂點陣列：Godot 的 mesh AABB 是**從頂點陣列**算的，
+		#   不看索引，於是每一半的包圍盒都會是整台的大小（實測登陸艦被量成 22.2m，
+		#   實際 14m）。包圍盒錯會連帶影響視錐剔除與所有「量幾何」的驗收。
+		#   所以要把頂點也壓實（只留這一半真的用到的）。
+		if not hull_i.is_empty():
+			var ah: Array = _compact_surface(base, hull_i)
+			hull_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, ah)
+			hull_mesh.surface_set_material(hull_mesh.get_surface_count() - 1, ps["mat"])
+			n_hull += hull_i.size() / 3
+		if not tur_i.is_empty():
+			var at: Array = _compact_surface(base, tur_i)
+			tur_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, at)
+			tur_mesh.surface_set_material(tur_mesh.get_surface_count() - 1, ps["mat"])
+			n_tur += tur_i.size() / 3
+	if n_tur == 0 or n_hull == 0:
+		print("[vehart] ⚠ 切面 y=%.3f 把三角形全分到同一邊（車體 %d／砲塔 %d）——turret_y 給錯了"
+				% [cut, n_hull, n_tur])
+		return {}
+	return {"hull": hull_mesh, "turret": tur_mesh, "cut": cut,
+			"box": AABB(lo, hi - lo), "n_hull": n_hull, "n_tur": n_tur}
+
+# 只留 idx 真的用到的頂點，索引重新編號（見「mesh AABB 是從頂點陣列算的」那條）。
+static func _compact_surface(base: Array, idx: PackedInt32Array) -> Array:
+	var remap := {}
+	var new_idx := PackedInt32Array()
+	new_idx.resize(idx.size())
+	var order := PackedInt32Array()          # 新編號 -> 舊編號
+	for i in idx.size():
+		var o: int = idx[i]
+		if not remap.has(o):
+			remap[o] = order.size()
+			order.append(o)
+		new_idx[i] = remap[o]
+	var out: Array = []
+	out.resize(Mesh.ARRAY_MAX)
+	for slot in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TANGENT,
+			Mesh.ARRAY_COLOR, Mesh.ARRAY_TEX_UV, Mesh.ARRAY_TEX_UV2]:
+		var src = base[slot]
+		if src == null:
+			continue
+		if slot == Mesh.ARRAY_TANGENT:
+			var t: PackedFloat32Array = src
+			var nt := PackedFloat32Array()
+			nt.resize(order.size() * 4)
+			for i in order.size():
+				for c in 4:
+					nt[i * 4 + c] = t[order[i] * 4 + c]
+			out[slot] = nt
+		elif src is PackedVector3Array:
+			var a: PackedVector3Array = src
+			var na := PackedVector3Array()
+			na.resize(order.size())
+			for i in order.size():
+				na[i] = a[order[i]]
+			out[slot] = na
+		elif src is PackedVector2Array:
+			var b: PackedVector2Array = src
+			var nb := PackedVector2Array()
+			nb.resize(order.size())
+			for i in order.size():
+				nb[i] = b[order[i]]
+			out[slot] = nb
+		elif src is PackedColorArray:
+			var cc: PackedColorArray = src
+			var nc := PackedColorArray()
+			nc.resize(order.size())
+			for i in order.size():
+				nc[i] = cc[order[i]]
+			out[slot] = nc
+	out[Mesh.ARRAY_INDEX] = new_idx
+	return out
+
+# 網格中「低於 cut 高度」那部分的 AABB。
+# 為什麼要這支：車體基準盒必須是**車體**的盒子。直接用整份 hull 網格的 AABB 會
+# 含到重疊帶裡的砲塔底緣，長度虛胖——2026-08-02「砲管被算成車長」那個坑的同一類。
+static func _mesh_aabb_below(m: ArrayMesh, cut: float) -> AABB:
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
+	for si in m.get_surface_count():
+		for v in (m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			if v.y > cut:
+				continue
+			lo = Vector3(minf(lo.x, v.x), minf(lo.y, v.y), minf(lo.z, v.z))
+			hi = Vector3(maxf(hi.x, v.x), maxf(hi.y, v.y), maxf(hi.z, v.z))
+	if lo.x > hi.x:
+		return AABB()
+	return AABB(lo, hi - lo)
+
+# 砲塔座圈中心：取「貼近切面那一層」的頂點平均，不是整個砲塔的 AABB 中心。
+# ⚠ 砲管往前伸 2.6m，用 AABB 中心會把旋轉軸拉到車頭外面，砲塔一轉就甩出車外。
+#   座圈那一圈才是真正的旋轉軸所在。
+static func _turret_ring_center(m: ArrayMesh, cut: float) -> Vector3:
+	var band := 0.0
+	var lo := INF
+	var hi := -INF
+	for si in m.get_surface_count():
+		for v in (m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			lo = minf(lo, v.y)
+			hi = maxf(hi, v.y)
+	band = maxf((hi - lo) * 0.15, 0.02)
+	var sx := 0.0
+	var sz := 0.0
+	var n := 0
+	for si in m.get_surface_count():
+		for v in (m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			if v.y > lo + band:
+				continue
+			sx += v.x
+			sz += v.z
+			n += 1
+	if n == 0:
+		return Vector3(0.0, cut, 0.0)
+	return Vector3(sx / float(n), lo, sz / float(n))
+
 # 把生成模型轉正並置中。
 # ⚠ 生成出來的模型**朝向是隨機的**（實測：戰鬥機在 3D 裡被任意旋轉了約 76 度，
 #   攻擊機側滾 14 度）。而底下的縮放是拿 size.z 當車長、碰撞盒也吃 X/Z，
@@ -1036,8 +1242,15 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 	var hull_p := "res://assets/models/vehicles/%s_hull.glb" % p_cls
 	var tur_p := "res://assets/models/vehicles/%s_turret.glb" % p_cls
 	var whole_p := "res://assets/models/vehicles/%s.glb" % p_cls
-	var has_split: bool = ResourceLoader.exists(hull_p) and ResourceLoader.exists(tur_p)
-	if not has_split and not ResourceLoader.exists(whole_p):
+	# ⚠⚠ 2026-08-03：**不再讀分件檔**。那對 tank_hull/tank_turret 是另一輪從另一台
+	#   模型切出來的，跟現在的 tank.glb 不同源，結果是遊戲裡同時畫了一台完整坦克
+	#   和一片飛邊薄板（使用者實拍看到「砲塔陷進車體、頂上破洞」）。
+	#   改成從**同一份整件模型**在引擎內即時切分（_split_turret_mesh），
+	#   同源就不可能再對不上。舊分件檔留在硬碟上也不會被讀到。
+	if not ResourceLoader.exists(whole_p):
+		if ResourceLoader.exists(hull_p):
+			push_warning("[vehart] %s 只有舊分件檔、沒有整件模型——分件檔已停用，"
+					% p_cls + "請把整件 glb 放進 assets/models/vehicles/")
 		return false
 	# 尺度：生成模型一律被正規化成約 2m，依真實車長縮回去
 	var want_len: float = float(vl.get("length_m", 6.2))
@@ -1054,26 +1267,48 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 	#   分件模型（hull+turret）有現成的解：兩者都以 **hull** 為基準。
 	var hull_box := AABB()
 	var has_hull_box := false
+	var art: Node3D = null
+	var src: Node3D = load(whole_p).instantiate()
+	_orient_art(src, p_cls, vl)          # 轉正要在切分之前：切面是水平的，模型歪著切就切歪了
+	# turret_y=0.99 ＝這台沒有可轉砲塔（潛艦／航空），整件當一件用
+	var ty: float = float(vl.get("turret_y", 0.99))
+	var split: Dictionary = {}
+	if ty < 0.98:
+		if _veh_split_cache.has(p_cls):
+			split = _veh_split_cache[p_cls]
+		else:
+			split = _split_turret_mesh(src, ty)
+			_veh_split_cache[p_cls] = split
+	var has_split: bool = not split.is_empty()
 	if has_split:
-		var hull: Node3D = load(hull_p).instantiate()
-		root.add_child(hull)
-		hull_box = _merged_aabb(hull)      # 縮放前的車體局部尺寸（不含砲塔砲管）
+		src.queue_free()                 # 切分完就不需要原模型節點了
+		var hull_mi := MeshInstance3D.new()
+		hull_mi.name = "Hull"
+		hull_mi.mesh = split["hull"]
+		root.add_child(hull_mi)
+		hull_box = (split["box"] as AABB)
+		# 車體基準盒要扣掉砲塔以上（砲管會讓長度虛胖，這是 2026-08-02 那個坑）
+		var cut: float = split["cut"]
+		hull_box = _mesh_aabb_below(split["hull"], cut)
 		has_hull_box = true
 		_turret = Node3D.new()
 		_turret.name = "Turret"
 		root.add_child(_turret)
-		var tur: Node3D = load(tur_p).instantiate()
-		_turret.add_child(tur)
-		# 砲塔要繞自己的座圈中心轉，不是繞車體原點——否則一轉就飛出車外
-		var tb: AABB = _merged_aabb(tur)
-		var pivot: Vector3 = Vector3(tb.get_center().x, tb.position.y, tb.get_center().z)
-		tur.position = -pivot
+		var tur_mi := MeshInstance3D.new()
+		tur_mi.name = "TurretMesh"
+		tur_mi.mesh = split["turret"]
+		_turret.add_child(tur_mi)
+		# 砲塔繞**座圈中心**轉，不是繞車體原點——否則一轉就飛出車外。
+		# 座圈中心＝切面附近那圈的中心，不可以用含砲管的 AABB 中心
+		# （砲管往前伸 2.6m，會把中心拉到車頭外）。
+		var pivot: Vector3 = _turret_ring_center(split["turret"], split["cut"])
+		tur_mi.position = -pivot
 		_turret.position = pivot
-	var art: Node3D = null
-	if not has_split:
-		art = load(whole_p).instantiate()
+		print("[vehart] %s 引擎內切分砲塔：車體 %d 面／砲塔 %d 面（切面 %.0f%% 高）"
+				% [p_cls, split["n_hull"], split["n_tur"], ty * 100.0])
+	else:
+		art = src
 		root.add_child(art)
-		_orient_art(art, p_cls, vl)
 	var box: AABB = _merged_aabb(root)
 	# ★轉正過的模型不可以用量到的 AABB：Godot 量的是「各 mesh 的區域盒再轉到世界」，
 	#   模型一旋轉，斜放的盒子的正交外接框就被撐大（實測戰鬥機 Z 撐大 20%）。
@@ -1087,10 +1322,18 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 		push_warning("[vehart] %s 的 aligned_aabb 不是六個數字，忽略" % p_cls)
 	# 轉正後水平置中：旋轉繞的是模型原點，原點不在幾何中心時，看得到的車與
 	# 撞得到的盒會錯開（「畫在這、牆在那」是本專案最愛踩的那類坑）。
-	if art != null:
-		var c: Vector3 = box.get_center()
-		art.position -= Vector3(c.x, 0.0, c.z)
-		box.position -= Vector3(c.x, 0.0, c.z)
+	# ⚠ 切分過的載具也要置中，而且**兩半要一起搬**：登陸艦的模型原點就偏了 0.21
+	#   （換算成實際尺寸是 1.5m），只搬一半會讓砲塔離開船身。
+	var ctr: Vector3 = box.get_center()
+	var shift := Vector3(ctr.x, 0.0, ctr.z)
+	if shift.length() > 0.0001:
+		if art != null:
+			art.position -= shift
+		for ch in root.get_children():
+			if ch == art or not (ch is Node3D):
+				continue
+			(ch as Node3D).position -= shift
+		box.position -= shift
 	# 車體基準盒：分件時用 hull，整件模型無法分離砲管、只能退回整體（並說明）
 	var hull_ref: AABB = hull_box if has_hull_box else box
 	var raw_len: float = maxf(hull_ref.size.z, 0.001)

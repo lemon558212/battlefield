@@ -2,19 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dh8siwrr82nbs"
-path="res://.godot/imported/tank_turret_0.png-53073c867796c2ea36daa50c77e005e2.ctex"
+uid="uid://cxl0be710pgam"
+path="res://.godot/imported/chk_turret.png-d4370c0d6653ded895f35e3fb25c7e43.ctex"
 metadata={
 "vram_texture": false
-}
-generator_parameters={
-"md5": "c7c4852226eeeeb904cedcd400f878eb"
 }
 
 [deps]
 
-source_file="res://assets/models/vehicles/tank_turret_0.png"
-dest_files=["res://.godot/imported/tank_turret_0.png-53073c867796c2ea36daa50c77e005e2.ctex"]
+source_file="res://qa/vehart/chk_turret.png"
+dest_files=["res://.godot/imported/chk_turret.png-d4370c0d6653ded895f35e3fb25c7e43.ctex"]
 
 [params]
 
@@ -26,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=true
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""
