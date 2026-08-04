@@ -197,6 +197,15 @@ func _ready() -> void:
 			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift"]:
 		if targ in OS.get_cmdline_user_args():
 			AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
+			# ★★測試模式固定亂數種子（2026-08-04）。
+			#   Godot 4 每次啟動都會自動隨機化全域 RNG，於是**同一份程式碼**
+			#   兩輪跑出不同結果：20:25 那輪 play 是 0 FAIL，22:02 同一段就
+			#   「走不進屋」。抖動的測試抓到的失敗沒辦法重現，也沒辦法證明修好了。
+			#   理由與既有的「測試不吃養成存檔＝結果要可重現」完全同一條
+			#   （_boot_to_battle 的 _growth 歸零）。
+			#   ⚠ 只在測試模式固定；真正玩的時候天候、AI 仍該是隨機的。
+			seed(20260804)
+			print("[test] 固定亂數種子 20260804（測試結果要可重現）")
 			break
 	# 實玩飄移守望：一併打開記帳，這樣抓到時才知道是誰推的
 	if "driftwatch" in OS.get_cmdline_user_args():
@@ -1664,7 +1673,12 @@ func _playtest() -> void:
 				else Vector2(0.0, signf(ddv.y))
 		var stage: Vector2 = door + outward * 26.0     # 門外 1.3m
 		var inner: Vector2 = door - outward * 26.0     # 門內 1.3m
-		var ok_in := await _walk_to_px(pu, stage, 16.0, 0.8)
+		# ⚠⚠ 容差不可以比門洞半寬還大（2026-08-04）：門外定位點原本容差 0.8m，
+		#   於是人可以「合格地」停在門洞**旁邊 0.75m 的牆前面**，接著往北就是撞牆，
+		#   而診斷顯示四個關鍵點全都沒有障礙——不是碰撞問題，是**對位問題**。
+		#   這也是 play 時好時壞的真因：幀率不同 → 停的位置不同 → 有時剛好對準門。
+		#   門洞約 1m 寬，容差收到 0.3m 才保證人真的站在門洞正前方。
+		var ok_in := await _walk_to_px(pu, stage, 30.0, 0.3)
 		for _detour in 4:
 			if ok_in:
 				break
@@ -1677,17 +1691,29 @@ func _playtest() -> void:
 			if wp2.distance_to(_live_px(pu)) * WORLD_SCALE < 1.0:
 				break
 			await _walk_to_px(pu, wp2, 10.0)
-			ok_in = await _walk_to_px(pu, stage, 16.0, 0.8)
+			ok_in = await _walk_to_px(pu, stage, 30.0, 0.3)
 		if ok_in:
-			ok_in = await _walk_to_px(pu, inner, 8.0, 0.8)
+			ok_in = await _walk_to_px(pu, inner, 14.0, 0.5)
 		if ok_in:
-			ok_in = await _walk_to_px(pu, bctr, 8.0)
+			ok_in = await _walk_to_px(pu, bctr, 14.0)
 		var inside: bool = bd.inside(_live_px(pu).x, _live_px(pu).y)
 		var here_px := _live_px(pu)
 		print("[play][進屋] 走進去=%s（人在 px(%.0f,%.0f)、門在 px(%.0f,%.0f)、屋框 %s）"
 				% ["OK" if inside else "FAIL(走不進去)", here_px.x, here_px.y,
 				door.x, door.y, bd.rect])
-		if not inside: fails += 1
+		if not inside:
+			fails += 1
+			print("[play][進屋] 收工時還差 %.1fm、最後兩秒前進 %.2fm → %s"
+					% [_walk_left, _walk_gain,
+					"停滯不前（真的走不過去）" if _walk_gain < 0.15 else "還在前進、只是時間不夠"])
+			# ⚠ 只印「走不進去」等於沒說原因（lessons 0b：斷言要指出兇手）。
+			#   把門口這條路上的三個關鍵點各問一次「是什麼在推人」。
+			for tag_pt in [["人所在", here_px], ["門外定位點", stage],
+					["門口", door], ["門內定位點", inner]]:
+				var pt: Vector2 = tag_pt[1]
+				print("[play][進屋] %s px=(%.0f,%.0f) 阻擋=%s"
+						% [tag_pt[0], pt.x, pt.y,
+						_why_solid(_to3d(pt.x, pt.y), BODY_R, pu)])
 		await get_tree().create_timer(1.2).timeout
 		await _snap("res://play_indoor.png")
 		# 鏡頭不可以停在牆的另一側：從角色頭部到鏡頭之間不能有牆
@@ -1960,8 +1986,14 @@ func _nearest_building(p: Vector2):
 
 # 用「真的按鍵」走到地圖上某個 px 座標（先把鏡頭轉到目標方向再按 W）。
 # ⚠ 不可以直接設座標——使用者要求驗收一律「用走的」，瞬移證明不了碰撞與鏡頭。
+# 逾時時的兩種情況要分得出來（2026-08-04）：「停滯不前」是真 bug，
+# 「還在前進但時間不夠」只是預算太緊。放寬預算若不附這個判別，就等於掩蓋 bug。
+var _walk_gain := 0.0        # 最後兩秒縮短了多少距離（公尺）
+var _walk_left := 0.0        # 收工時還差多少
 func _walk_to_px(u, target_px: Vector2, secs: float, tol := 1.1) -> bool:
 	var t3 := _to3d(target_px.x, target_px.y)
+	var gain_t: float = Time.get_ticks_msec() / 1000.0 + 2.0
+	var gain_from := 1e9
 	var deadline: float = Time.get_ticks_msec() / 1000.0 + secs
 	var down := InputEventKey.new()
 	down.keycode = KEY_W
@@ -1982,6 +2014,13 @@ func _walk_to_px(u, target_px: Vector2, secs: float, tol := 1.1) -> bool:
 			break
 		cam.tps_yaw = rad_to_deg(atan2(to.x, to.z))     # 鏡頭朝目標，W＝往鏡頭前方走
 		var now: float = Time.get_ticks_msec() / 1000.0
+		_walk_left = to.length()
+		if gain_from > 1e8:
+			gain_from = to.length()
+		if now > gain_t:
+			_walk_gain = gain_from - to.length()
+			gain_from = to.length()
+			gain_t = now + 2.0
 		if now > log_t:
 			log_t = now + 1.0
 			print("[play][走路] 還差 %.1fm　AP=%.0f　px=(%.0f,%.0f)"
@@ -1991,6 +2030,23 @@ func _walk_to_px(u, target_px: Vector2, secs: float, tol := 1.1) -> bool:
 		if now > check_t:
 			check_t = now + 0.7
 			if last_d - to.length() < 0.08:
+				# ⚠⚠ 2026-08-04：舊版是「左右輪流試」（D 0.75 秒、換 A 0.75 秒），
+				#   淨位移為零。實測軌跡：人貼在南牆外側 y=771 來回擺盪
+				#   870→901→880→904→883→905，永遠在門洞東邊 2m，進不了門
+				#   ——這就是 play「走不進屋」時好時壞的真因（幀率決定擺到哪一邊停）。
+				#   真人玩家會往**空的那一側**繞。改成先量兩側 1.2m 有沒有實體，
+				#   哪邊空就往哪邊；兩邊都空就選比較接近目標的那邊。
+				var fwd2 := Vector3(to.x, 0.0, to.z).normalized()
+				var rightv := Vector3(-fwd2.z, 0.0, fwd2.x)
+				var free_r: bool = _resolve_solids(here + rightv * 1.2, BODY_R, u)						.distance_to(here + rightv * 1.2) < 0.05
+				var free_l: bool = _resolve_solids(here - rightv * 1.2, BODY_R, u)						.distance_to(here - rightv * 1.2) < 0.05
+				if free_r != free_l:
+					strafe = KEY_D if free_r else KEY_A
+				elif free_r and free_l:
+					# 兩邊都空：往「側移之後離目標比較近」的那一側
+					var dr: float = (here + rightv * 1.2).distance_to(t3)
+					var dl: float = (here - rightv * 1.2).distance_to(t3)
+					strafe = KEY_D if dr < dl else KEY_A
 				var sd := InputEventKey.new()
 				sd.keycode = strafe; sd.physical_keycode = strafe; sd.pressed = true
 				Input.parse_input_event(sd)
@@ -1998,7 +2054,6 @@ func _walk_to_px(u, target_px: Vector2, secs: float, tol := 1.1) -> bool:
 				var su := InputEventKey.new()
 				su.keycode = strafe; su.physical_keycode = strafe; su.pressed = false
 				Input.parse_input_event(su)
-				strafe = KEY_A if strafe == KEY_D else KEY_D    # 這邊繞不過就換另一邊
 				check_t = Time.get_ticks_msec() / 1000.0 + 0.7
 			last_d = to.length()
 		await get_tree().process_frame
