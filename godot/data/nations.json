@@ -76,41 +76,9 @@
     "weapon": "愛國者 PAC-3",
     "mods": {}
    },
-   "destroyer": {
-    "label": "驅逐艦",
-    "weapon": "阿利·柏克級 神盾艦",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "濱海戰鬥艦",
-    "weapon": "LCS 瀕海戰鬥艦",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "聖安東尼奧級 LPD",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "維吉尼亞級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-22 猛禽",
-    "mods": {
-     "atk": 8
-    }
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "F-15E 打擊鷹",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-64E 阿帕契",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "MQ-9A 死神",
     "mods": {}
    }
   }
@@ -193,39 +161,9 @@
     "weapon": "天空軍刀 Sky Sabre",
     "mods": {}
    },
-   "destroyer": {
-    "label": "驅逐艦",
-    "weapon": "45型驅逐艦",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "巡邏艦",
-    "weapon": "河號級 OPV",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "海灣級 LSD",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "機敏級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "颱風戰鬥機",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "F-35B 閃電II",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-64E 阿帕契",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "Protector RG Mk1",
     "mods": {}
    }
   }
@@ -301,39 +239,9 @@
     "weapon": "天弓 M-SAM",
     "mods": {}
    },
-   "destroyer": {
-    "label": "驅逐艦",
-    "weapon": "世宗大王級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "飛彈快艇",
-    "weapon": "尹永夏級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "獨島級 LPH",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "島山安昌浩級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-15K 勇士鷹",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "KF-21 梟龍",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-64E 阿帕契",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "KUS-FS 中空長航時無人機",
     "mods": {}
    }
   }
@@ -414,39 +322,9 @@
     "weapon": "03式中SAM改",
     "mods": {}
    },
-   "destroyer": {
-    "label": "護衛艦",
-    "weapon": "摩耶級 神盾艦",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "飛彈艇",
-    "weapon": "隼級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "輸送艦",
-    "weapon": "大隅級",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "蒼龍級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-35A 閃電II",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "支援戰鬥機",
-    "weapon": "F-2",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-64DJP 阿帕契",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "攻擊型無人機（採購評估中）",
     "mods": {}
    }
   }
@@ -526,39 +404,9 @@
     "weapon": "天弓三型",
     "mods": {}
    },
-   "destroyer": {
-    "label": "驅逐艦",
-    "weapon": "基隆級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "巡邏艦",
-    "weapon": "沱江級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "玉山級 LPD",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "海鯤級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-16V Block 70",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "經國號 IDF",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-64E 阿帕契",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "騰雲二型",
     "mods": {}
    }
   }
@@ -640,41 +488,9 @@
     "weapon": "紅旗-9B",
     "mods": {}
    },
-   "destroyer": {
-    "label": "驅逐艦",
-    "weapon": "055型",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "飛彈快艇",
-    "weapon": "022型",
-    "mods": {
-     "cost": -20
-    }
-   },
-   "lst": {
-    "label": "船塢登陸艦",
-    "weapon": "071型",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "核潛艦",
-    "weapon": "093型",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "殲-20 威龍",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "殲轟-7A 飛豹",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "武直-10",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "翼龍-2",
     "mods": {}
    }
   }
@@ -753,41 +569,9 @@
     "weapon": "斯帕達2000",
     "mods": {}
    },
-   "destroyer": {
-    "label": "巡防艦",
-    "weapon": "布米蓬·阿杜德級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "巡邏艦",
-    "weapon": "拉達那哥欣級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "安通級 LPD",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "S26T 元級(建造中)",
-    "mods": {
-     "cost": -40
-    }
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "JAS-39 獅鷲",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "F-5TH 超級虎",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-1F 眼鏡蛇",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "Hermes 450",
     "mods": {}
    }
   }
@@ -874,39 +658,9 @@
     "weapon": "S-300PMU1",
     "mods": {}
    },
-   "destroyer": {
-    "label": "巡防艦",
-    "weapon": "獵豹3.9級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "飛彈艇",
-    "weapon": "閃電級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "波爾諾契級",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "基洛級 636",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "Su-30MK2",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "Su-22",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "Mi-24 雌鹿",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "Orbiter 3",
     "mods": {}
    }
   }
@@ -986,44 +740,9 @@
     "weapon": "NASAMS",
     "mods": {}
    },
-   "destroyer": {
-    "label": "巡防艦",
-    "weapon": "Ada級 馬澤帕號",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "突擊艇",
-    "weapon": "半人馬座級",
-    "mods": {
-     "cost": -40
-    }
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "奧列菲連科號",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "攻擊無人艇",
-    "weapon": "Magura V5",
-    "mods": {
-     "cost": -120,
-     "hp": -200
-    }
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-16 戰隼",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "Su-25 蛙足",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "Mi-24V 雌鹿",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "Bayraktar TB2",
     "mods": {}
    }
   }
@@ -1107,39 +826,9 @@
     "weapon": "鎧甲-S1",
     "mods": {}
    },
-   "destroyer": {
-    "label": "護衛艦",
-    "weapon": "戈爾什科夫級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "飛彈艦",
-    "weapon": "毒蜘蛛級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艦",
-    "weapon": "羅普查級",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "核潛艦",
-    "weapon": "亞森級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "蘇-35S",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "戰鬥轟炸機",
-    "weapon": "蘇-34",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "卡-52 短吻鱷",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "獵戶座 Orion",
     "mods": {}
    }
   }
@@ -1225,48 +914,9 @@
     "weapon": "巴瓦爾-373",
     "mods": {}
    },
-   "destroyer": {
-    "label": "巡防艦",
-    "weapon": "莫杰級 賈馬蘭號",
-    "mods": {
-     "cost": -40
-    }
-   },
-   "missileboat": {
-    "label": "飛彈快艇",
-    "weapon": "佩坎級三型",
-    "mods": {
-     "cost": -30
-    }
-   },
-   "lst": {
-    "label": "戰車登陸艦",
-    "weapon": "亨甘級",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "基洛級/加迪爾級",
-    "mods": {
-     "cost": -40
-    }
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-14A 雄貓",
-    "mods": {
-     "hp": -30,
-     "cost": -40
-    }
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "蘇-24",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-1J 颶風",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "見證者-129 Shahed-129",
     "mods": {}
    }
   }
@@ -1350,41 +1000,9 @@
     "weapon": "鐵穹 Iron Dome",
     "mods": {}
    },
-   "destroyer": {
-    "label": "護衛艦",
-    "weapon": "薩爾6型",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "飛彈快艇",
-    "weapon": "薩爾4.5型",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艇",
-    "weapon": "機械化登陸艇 LCM",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "海豚級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "F-35I 阿迪爾",
-    "mods": {
-     "acc": 0.05
-    }
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "F-16I 暴風",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "AH-64D 薩拉夫",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "Hermes 450",
     "mods": {}
    }
   }
@@ -1464,39 +1082,9 @@
     "weapon": "IRIS-T SLM",
     "mods": {}
    },
-   "destroyer": {
-    "label": "巡防艦",
-    "weapon": "F125 巴登-符騰堡級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "巡邏艦",
-    "weapon": "K130 布藍茲維克級",
-    "mods": {}
-   },
-   "lst": {
-    "label": "登陸艇",
-    "weapon": "多用途登陸艇",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "潛艦",
-    "weapon": "212A型",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "颱風 Tranche 4",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "F-35A 閃電II",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "虎式 UHT",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "Heron TP",
     "mods": {}
    }
   }
@@ -1575,39 +1163,9 @@
     "weapon": "SAMP/T 曼巴",
     "mods": {}
    },
-   "destroyer": {
-    "label": "巡防艦",
-    "weapon": "FREMM 阿基坦級",
-    "mods": {}
-   },
-   "missileboat": {
-    "label": "巡邏艦",
-    "weapon": "POM 遠洋巡邏艦",
-    "mods": {}
-   },
-   "lst": {
-    "label": "突擊艦",
-    "weapon": "西北風級 LHD",
-    "mods": {}
-   },
-   "submarine": {
-    "label": "核潛艦",
-    "weapon": "梭魚級",
-    "mods": {}
-   },
-   "fighter": {
-    "label": "戰鬥機",
-    "weapon": "飆風 Rafale",
-    "mods": {}
-   },
-   "attacker": {
-    "label": "攻擊機",
-    "weapon": "幻象2000D",
-    "mods": {}
-   },
-   "gunship": {
-    "label": "武裝直升機",
-    "weapon": "虎式 HAD-F",
+   "drone": {
+    "label": "無人機操作員",
+    "weapon": "MQ-9A Block 5 死神",
     "mods": {}
    }
   }

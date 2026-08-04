@@ -5197,6 +5197,14 @@ func _click(sp: Vector2) -> void:
 # 開火（part＝瞄準部位，GDD/01 §4）。AI 與迎擊一律 body（不瞄部位）。
 func _fire(shooter, target, part := "body") -> void:
 	var dist_px := Vector2(target["wx"] - shooter["wx"], target["wy"] - shooter["wy"]).length()
+	# 測試模式印出「誰打誰」：先前日誌只看得到 HP 在掉，看不出**哪個兵種真的開過火**。
+	# 新兵種上場時這條特別重要——武裝無人機的存在意義就是「能攻擊人」，
+	# 沒有這一行就只能靠 HP 數字猜（靜默通過在本專案已造成三次假通過）。
+	if _test_mode:
+		print("[fire] %s(%s) → %s(%s) 距離 %.1fm"
+				% [String(shooter["cls"]), "我方" if shooter["side"] == player_side else "敵方",
+				String(target["cls"]), "我方" if target["side"] == player_side else "敵方",
+				dist_px * WORLD_SCALE])
 	shooter["node"].shoot_at(target["node"])
 	shooter["fired"] = true      # 每次行動只能開火一次；CP 在下令時就扣過了（GDD/01 §1-2）
 	ui.update_hud(turn, "player" if st == St.CMD else "enemy", cp, _hud_wx())
@@ -7608,7 +7616,7 @@ func _build_ground() -> void:
 	Unit.water_sampler = func(p: Vector3) -> float: return terrain.water_depth_world(p)
 	# 艦艇浮力用的水面高度：與 Terrain 畫水面用同一個常數，兩邊不可各寫各的
 	# （否則船會浮在「畫出來的水面」以外的高度）
-	Unit.sea_level_sampler = func(_p: Vector3) -> float: return BattleTerrain.WATER_SURFACE_Y
+	# （艦艇移除後不再需要注入水面取樣器——2026-08-04）
 	# 聲音遮蔽：音源到鏡頭之間有牆就變悶（Audio.sfx3d 用）
 	Audio.los_check = func(p: Vector3) -> bool:
 		if cam == null:

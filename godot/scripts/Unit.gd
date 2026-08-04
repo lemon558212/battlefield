@@ -234,7 +234,7 @@ static func _forward_fix(model: Node) -> float:
 # 載具（履帶/艦艇/航空）走完全不同的分支：沒有骨架、沒有人形動畫、沒有持槍 IK。
 # 判斷讀 data/class_base.json 的 mobility，不寫死兵種名（鐵律 3）。
 static func is_vehicle_cls(c: String) -> bool:
-	return GameData.class_base.get(c, {}).get("mobility", "foot") in ["tracked", "naval", "air"]
+	return GameData.class_base.get(c, {}).get("mobility", "foot") in ["tracked", "air"]
 
 static func spawn(model_path: String, p_cls: String, p_side: int, is_player: bool) -> Unit:
 	var u := Unit.new()
@@ -822,11 +822,6 @@ func _track_path(t: float, sgn: float) -> Vector3:
 # 3.0×1.75，而驅逐艦畫成 18m 長，等於船身大半沒有實體（同「坦克圓形碰撞」那條教訓）。
 var veh_hl := 3.00
 var veh_hw := 1.75
-# 艦艇：浮在水面而不是踩海床。_draft＝吃水深度（水面到船底），
-# sea_level_sampler 由 Main 注入（回傳該點的水面世界高度）。
-var _is_naval := false
-var _draft := 0.9
-static var sea_level_sampler: Callable = Callable()
 # 航空：在巡航高度飛。直升機低、固定翼高（壓縮尺度，與射程 10.5m 同一套設計例外）。
 var _is_air := false
 var _fly_alt := 12.0
@@ -847,17 +842,13 @@ func _build_vehicle(p_cls: String, is_player: bool) -> void:
 	# ⚠⚠ 先前這裡沒有任何分支：驅逐艦、潛艇、戰鬥機**全部都被畫成坦克**。
 	#   海空單位有自己的剪影，走各自的建造函式（鐵律 0：現實怎樣就怎樣）。
 	var mob: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
-	if mob == "naval":
-		_is_naval = true
-		# 吃水：大艦深、小艇淺、潛艦最深（半潛航狀態）
-		_draft = {"destroyer": 1.1, "missileboat": 0.6, "lst": 0.8,
-				"submarine": 1.5}.get(p_cls, 0.9)
-		_build_ship(root, p_cls, is_player)
-		return
 	if mob == "air":
 		_is_air = true
-		_fly_alt = 6.0 if p_cls == "gunship" else 14.0   # 直升機低空、固定翼高空
-		_build_aircraft(root, p_cls, is_player)
+		# 無人機巡航高度 10m：比建築高（飛得過去）、又低到看得清地面目標。
+		# ⚠ 這個數字與 Main._flies_over_solids 的 8m 門檻是同一件事的兩半——
+		#   高於門檻＝地面障礙碰不到它。改高度時要一起看。
+		_fly_alt = 10.0
+		_build_drone(root, is_player)
 		return
 	veh_hl = 3.00
 	veh_hw = 1.75
@@ -1359,13 +1350,9 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 	if not has_hull_box:
 		print("[vehart] %s 只有整件模型，碰撞盒含砲塔（無法分離砲管）" % p_cls)
 	var mob2: String = GameData.class_base.get(p_cls, {}).get("mobility", "tracked")
-	if mob2 == "naval":
-		_is_naval = true
-		_draft = {"destroyer": 1.1, "missileboat": 0.6, "lst": 0.8,
-				"submarine": 1.5}.get(p_cls, 0.9)
-	elif mob2 == "air":
+	if mob2 == "air":
 		_is_air = true
-		_fly_alt = 6.0 if p_cls == "gunship" else 14.0
+		_fly_alt = 10.0
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 	# ⚠ 一併印**真實尺寸**：VehicleProbe 量的是各 mesh 區域盒轉到世界後的外接框，
@@ -1375,242 +1362,89 @@ func _try_build_from_art(root: Node3D, p_cls: String, vl: Dictionary, is_player:
 			% [p_cls, "車體+砲塔" if has_split else "整件", want_len, k,
 			box.size.z * k, box.size.x * k, box.size.y * k])
 	return true
-
-# ---------- 艦艇（naval）----------
-# ⚠ 尺度：真驅逐艦約 130m，放在 90m 的戰場上不可能。故沿用本專案既有的
-#   壓縮尺度慣例（射程 10.5m／視野 10m 是經核定的設計例外，GDD/00），
-#   艦艇壓到 18m 級。這是**明文記錄的例外**，不是忘了照現實做。
-func _build_ship(root: Node3D, p_cls: String, is_player: bool) -> void:
-	var body := _mat(Color(0.38, 0.42, 0.45), 0.30, 0.60) if is_player \
-			else _mat(Color(0.45, 0.33, 0.31), 0.30, 0.60)
-	var dark := _mat(Color(0.12, 0.13, 0.15), 0.45, 0.55)
-	var steel := _mat(Color(0.26, 0.28, 0.30), 0.60, 0.45)
-	var deck_m := _mat(Color(0.30, 0.31, 0.29), 0.15, 0.85)
-	var L: float = {"destroyer": 18.0, "missileboat": 10.0, "lst": 14.0,
-			"submarine": 15.0}.get(p_cls, 14.0)
-	var W: float = {"destroyer": 3.2, "missileboat": 2.8, "lst": 4.0,
-			"submarine": 2.4}.get(p_cls, 3.0)
-	veh_hl = L * 0.5
-	veh_hw = W * 0.5
-	if p_cls == "submarine":
-		# 潛艦：圓柱耐壓殼＋帆罩＋艉舵，水線很低
-		var pressure := _cyl(W * 0.5, L * 0.86, body)
-		pressure.rotation_degrees.x = 90
-		pressure.position = Vector3(0, 0.55, 0)
-		root.add_child(pressure)
-		var bow := _conemesh(W * 0.5, 0.15, L * 0.16, body)
-		bow.rotation_degrees.x = 90
-		bow.position = Vector3(0, 0.55, L * 0.50)
-		root.add_child(bow)
-		var sail := _box(0.9, 1.9, 3.2, body); sail.position = Vector3(0, 1.55, 1.0)
-		root.add_child(sail)
-		var scope := _cyl(0.07, 1.6, dark); scope.position = Vector3(0.18, 3.1, 0.6)
-		root.add_child(scope)
-		for sgn in [-1.0, 1.0]:                       # 帆罩水平舵
-			var plane := _box(2.0, 0.10, 0.6, steel)
-			plane.position = Vector3(sgn * 1.2, 1.5, 1.2)
-			root.add_child(plane)
-		var rudder := _box(0.12, 2.0, 1.2, steel)
-		rudder.position = Vector3(0, 0.9, -L * 0.46); root.add_child(rudder)
-		if not is_player:
-			_tint(root, Color(0.9, 0.2, 0.16), 0.25)
-		return
-	# 水面艦：艦身（艏部收尖）＋甲板＋上層建築＋桅桿＋煙囪＋主砲
-	var hull := _box(W, 1.5, L * 0.82, body); hull.position.y = 0.75
+# ---------- 武裝無人機（air）----------
+# 使用者 2026-08-04 拍板：**不做飛機也不做軍艦**，空中兵種一律換成武裝無人機。
+# 現實對照：MQ-9 級中空長航時無人機翼展 20m，放在 70×50m 的戰場上不合理；
+# 本作採四旋翼構型（機身 2.2m 級、掛兩枚小型導引彈），這是**戰術級**無人機的尺度，
+# 與「射程 10.5m／視野 10m」同一套經核定的壓縮尺度（GDD/00）。
+# ⚠ 尺寸與碰撞盒由 vehicle_look.json 的 drone 那一組控制，不可在這裡寫死。
+func _build_drone(root: Node3D, is_player: bool) -> void:
+	var body := _mat(Color(0.30, 0.33, 0.36), 0.40, 0.45) if is_player 			else _mat(Color(0.42, 0.30, 0.28), 0.40, 0.45)
+	var dark := _mat(Color(0.10, 0.11, 0.12), 0.35, 0.55)
+	var steel := _mat(Color(0.24, 0.26, 0.28), 0.60, 0.40)
+	var glass := _mat(Color(0.18, 0.30, 0.38), 0.20, 0.15)
+	veh_hl = 1.1
+	veh_hw = 1.1
+	# 中央機身：扁平艙體（電池與航電在下、酬載在腹部）
+	var hull := _box(0.72, 0.26, 1.05, body)
+	hull.position = Vector3(0, 0.0, 0)
 	root.add_child(hull)
-	# 艦艏：⚠ 圓錐接在方形艦體上會讀成「甲板上躺了一顆飛彈」（實拍抓到）。
-	#   真船艏是**平面收窄的楔形**，而且艏柱前傾。用 5 段逐級收窄的箱體做，
-	#   與方形艦體同高、同一種面，銜接才連續。
-	# ⚠ 甲板線（上緣）必須保持水平，往上收的是**船底**（艏部吃水變淺）。
-	#   讓上緣跟著降就變成一排往下掉的階梯（實拍抓到）。分 9 段才夠平順。
-	var bow_len: float = L * 0.24
-	var deck_top: float = 0.75 + 0.75                      # 艦體上緣的世界高度
-	for bi in 9:
-		var k: float = float(bi) / 8.0                     # 0=接艦體、1=艏尖
-		var seg_w: float = W * lerpf(1.0, 0.14, k * k)     # 平方＝前段收得快，像真船的水線
-		var seg_h: float = 1.5 * lerpf(1.0, 0.55, k)
-		var seg := _box(seg_w, seg_h, bow_len / 9.0 + 0.05, body)
-		seg.position = Vector3(0, deck_top - seg_h * 0.5,
-				L * 0.41 + bow_len * k * 0.98)
-		root.add_child(seg)
-	var stem := _box(0.22, 1.8, 0.9, body)                 # 前傾艏柱
-	stem.rotation_degrees.x = -24.0
-	stem.position = Vector3(0, 1.05, L * 0.63); root.add_child(stem)
-	var deck := _box(W * 0.96, 0.18, L * 0.86, deck_m)
-	deck.position = Vector3(0, 1.52, 0); root.add_child(deck)
-	# 舷牆（甲板邊緣的立面）：沒有它甲板像一塊漂浮的板子
-	for sgn2 in [-1.0, 1.0]:
-		var bul := _box(0.12, 0.55, L * 0.8, body)
-		bul.position = Vector3(sgn2 * W * 0.48, 1.80, 0); root.add_child(bul)
-	# 上層建築：兩層階梯狀後退
-	var sup1 := _box(W * 0.72, 1.5, L * 0.30, body)
-	sup1.position = Vector3(0, 2.35, L * 0.04); root.add_child(sup1)
-	var sup2 := _box(W * 0.52, 1.2, L * 0.16, body)
-	sup2.position = Vector3(0, 3.65, L * 0.06); root.add_child(sup2)
-	var bridge := _box(W * 0.56, 0.7, 1.3, dark)     # 艦橋窗
-	bridge.position = Vector3(0, 3.5, L * 0.13); root.add_child(bridge)
-	# 桅桿＋雷達（旋轉平面天線是軍艦最強的剪影訊號）
-	var mast := _cyl(0.10, 3.2, steel); mast.position = Vector3(0, 5.8, L * 0.02)
-	root.add_child(mast)
-	var radar := _box(1.9, 0.5, 0.10, steel); radar.position = Vector3(0, 6.9, L * 0.02)
-	radar.rotation_degrees.z = 12.0; root.add_child(radar)
-	for yi in 2:                                      # 桅桿橫桁
-		var yard := _box(2.2, 0.07, 0.07, steel)
-		yard.position = Vector3(0, 5.0 + float(yi) * 0.9, L * 0.02)
-		root.add_child(yard)
-	# 煙囪（含頂部黑口）
-	var funnel := _box(W * 0.34, 1.5, 1.1, body)
-	funnel.position = Vector3(0, 3.0, -L * 0.10); root.add_child(funnel)
-	var fcap := _box(W * 0.30, 0.14, 0.95, dark)
-	fcap.position = Vector3(0, 3.78, -L * 0.10); root.add_child(fcap)
-	# 主砲塔（可轉向，接 _aim_turret）
-	_turret = Node3D.new(); _turret.name = "Turret"
-	_turret.position = Vector3(0, 1.70, L * 0.30); root.add_child(_turret)
-	var gun_house := _box(1.7, 1.0, 2.0, body); gun_house.position.y = 0.5
-	_turret.add_child(gun_house)
-	_barrel_len = 3.0
-	var gun_barrel := _cyl(0.10, _barrel_len, dark)
-	gun_barrel.rotation_degrees.x = 90
-	gun_barrel.position = Vector3(0, 0.66, 1.0 + _barrel_len * 0.5)
-	_turret.add_child(gun_barrel)
-	if p_cls == "missileboat":                        # 飛彈艇：後甲板箱型發射器
-		for mi in 4:
-			var cell := _box(0.55, 0.55, 1.9, steel)
-			cell.position = Vector3((float(mi % 2) - 0.5) * 0.7, 2.05,
-					-L * 0.26 - float(mi / 2) * 0.7)
-			cell.rotation_degrees.x = -14.0
-			root.add_child(cell)
-	elif p_cls == "lst":                              # 登陸艦：艏門＋跳板
-		var ramp := _box(W * 0.7, 0.16, 3.0, steel)
-		ramp.position = Vector3(0, 1.05, L * 0.50)
-		ramp.rotation_degrees.x = 16.0; root.add_child(ramp)
-	else:                                             # 驅逐艦：垂直發射井格
-		for ci in 8:
-			var vls := _box(0.42, 0.10, 0.42, dark)
-			vls.position = Vector3((float(ci % 4) - 1.5) * 0.5, 1.66,
-					-L * 0.20 - float(ci / 4) * 0.5)
-			root.add_child(vls)
+	var spine := _box(0.34, 0.16, 1.25, body)
+	spine.position = Vector3(0, 0.14, 0)
+	root.add_child(spine)
+	# 機鼻收窄：無人機沒有駕駛艙，朝向全靠機身輪廓表現
+	var nose := _conemesh(0.30, 0.06, 0.42, body)
+	nose.rotation_degrees.x = 90
+	nose.position = Vector3(0, 0.02, 0.72)
+	root.add_child(nose)
+	# 光電球（雲台）：掛在機腹前段，這是無人機最好認的特徵
+	var gimbal := _sphere(0.20, dark)
+	gimbal.position = Vector3(0, -0.20, 0.42)
+	root.add_child(gimbal)
+	var lens := _cyl(0.075, 0.06, glass)
+	lens.rotation_degrees.x = 90
+	lens.position = Vector3(0, -0.22, 0.60)
+	root.add_child(lens)
+	# 四支旋翼臂＋旋翼盤（對角配置）
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			var arm := _box(0.09, 0.07, 1.05, steel)
+			arm.position = Vector3(sx * 0.36, 0.06, sz * 0.36)
+			arm.rotation_degrees.y = 45.0 * sx * sz
+			root.add_child(arm)
+			var pod := _cyl(0.10, 0.14, dark)
+			pod.position = Vector3(sx * 0.78, 0.12, sz * 0.78)
+			root.add_child(pod)
+			# ⚠ 旋翼不可以畫成實心圓盤（第一版實拍：整台像四塊黑板，掛彈與光電球
+			#   全被圓盤蓋住看不見）。改成真正的兩片槳葉＋槳轂——靜態畫面下
+			#   「槳葉」比「模糊圓盤」好認得多，剪影也不會糊成一片。
+			var hub := _cyl(0.06, 0.06, steel)
+			hub.position = Vector3(sx * 0.78, 0.20, sz * 0.78)
+			root.add_child(hub)
+			for bi in 2:
+				var blade := _box(0.86, 0.012, 0.075, dark)
+				blade.position = Vector3(sx * 0.78, 0.21, sz * 0.78)
+				blade.rotation_degrees.y = 32.0 + 90.0 * float(bi) + 18.0 * sx * sz
+				root.add_child(blade)
+			# 起落腳架
+			var leg := _cyl(0.03, 0.34, steel)
+			leg.position = Vector3(sx * 0.30, -0.24, sz * 0.30)
+			root.add_child(leg)
+	# 掛彈：兩枚小型導引彈（這是「武裝」無人機，看得出來掛了東西才合理）
+	for sx2 in [-1.0, 1.0]:
+		var pylon := _box(0.05, 0.10, 0.16, steel)
+		pylon.position = Vector3(sx2 * 0.26, -0.16, 0.05)
+		root.add_child(pylon)
+		var msl := _cyl(0.055, 0.62, body)
+		msl.rotation_degrees.x = 90
+		msl.position = Vector3(sx2 * 0.26, -0.26, 0.10)
+		root.add_child(msl)
+		var msl_nose := _conemesh(0.055, 0.01, 0.14, dark)
+		msl_nose.rotation_degrees.x = 90
+		msl_nose.position = Vector3(sx2 * 0.26, -0.26, 0.48)
+		root.add_child(msl_nose)
+		for fin_s in [-1.0, 1.0]:
+			var fin := _box(0.012, 0.10, 0.14, dark)
+			fin.position = Vector3(sx2 * 0.26 + fin_s * 0.05, -0.26, -0.18)
+			root.add_child(fin)
+	# 天線（資料鏈）
+	var ant := _cyl(0.012, 0.28, steel)
+	ant.position = Vector3(0, 0.30, -0.35)
+	root.add_child(ant)
 	if not is_player:
 		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 
-# ---------- 航空（air）----------
-# 同樣走壓縮尺度：戰機翼展壓到 8m 級。gunship＝旋翼機，剪影完全不同。
-func _build_aircraft(root: Node3D, p_cls: String, is_player: bool) -> void:
-	var body := _mat(Color(0.40, 0.44, 0.47), 0.35, 0.45) if is_player \
-			else _mat(Color(0.47, 0.34, 0.32), 0.35, 0.45)
-	var dark := _mat(Color(0.12, 0.13, 0.15), 0.45, 0.5)
-	var steel := _mat(Color(0.26, 0.28, 0.30), 0.6, 0.4)
-	var glass := _mat(Color(0.20, 0.34, 0.42), 0.25, 0.12)
-	if p_cls == "gunship":
-		veh_hl = 4.6
-		veh_hw = 1.3
-		# 機身：細長艙＋尾樑
-		var cab := _box(1.7, 1.8, 4.2, body); cab.position = Vector3(0, 2.2, 0.8)
-		root.add_child(cab)
-		var nose := _conemesh(0.85, 0.18, 1.6, body)
-		nose.rotation_degrees.x = 90
-		nose.position = Vector3(0, 2.1, 3.5); root.add_child(nose)
-		var canopy := _box(1.5, 0.9, 1.8, glass); canopy.position = Vector3(0, 2.75, 2.2)
-		root.add_child(canopy)
-		var boom := _box(0.55, 0.55, 4.0, body); boom.position = Vector3(0, 2.4, -2.6)
-		root.add_child(boom)
-		var tail_fin := _box(0.12, 1.5, 1.0, body); tail_fin.position = Vector3(0, 3.2, -4.3)
-		root.add_child(tail_fin)
-		# 主旋翼（四片）＋尾旋翼
-		var rotor_mast := _cyl(0.12, 0.6, steel); rotor_mast.position = Vector3(0, 3.4, 0.8)
-		root.add_child(rotor_mast)
-		for bi in 4:
-			var blade := _box(0.32, 0.07, 5.4, dark)
-			blade.position = Vector3(0, 3.7, 0.8)
-			blade.rotation_degrees.y = float(bi) * 45.0
-			root.add_child(blade)
-		for tbi in 2:
-			var tblade := _box(0.10, 1.8, 0.05, dark)
-			tblade.position = Vector3(0.22, 3.3, -4.3)
-			tblade.rotation_degrees.x = float(tbi) * 90.0
-			root.add_child(tblade)
-		# 短翼掛架＋火箭巢＋起落橇
-		for sgn in [-1.0, 1.0]:
-			var stub := _box(2.0, 0.16, 0.9, body); stub.position = Vector3(sgn * 1.2, 2.1, 0.9)
-			root.add_child(stub)
-			var pod := _cyl(0.30, 1.3, steel); pod.rotation_degrees.x = 90
-			pod.position = Vector3(sgn * 1.9, 1.85, 1.0); root.add_child(pod)
-			var skid := _box(0.10, 0.10, 3.0, steel)
-			skid.position = Vector3(sgn * 1.0, 1.15, 0.9); root.add_child(skid)
-			var strut := _box(0.09, 0.5, 0.09, steel)
-			strut.position = Vector3(sgn * 1.0, 1.45, 1.6); root.add_child(strut)
-		if not is_player:
-			_tint(root, Color(0.9, 0.2, 0.16), 0.25)
-		return
-	# 固定翼。⚠ 攻擊機不是「戰鬥機加掛炸彈」——兩者的設計目的不同，外形也不同：
-	#   戰鬥機＝追求速度，後掠翼、單發、尖機鼻；
-	#   攻擊機＝低速滯空對地，平直長翼（升力大、盤旋穩）、雙發動機艙、鈍頭機砲。
-	#   舊版兩者共用同一副機體，VehicleProbe 的「剪影不可雷同」斷言當場抓到。
-	var is_atk: bool = (p_cls == "attacker")
-	var sweep: float = -8.0 if is_atk else -22.0       # 攻擊機幾乎平直翼
-	var span: float = 4.4 if is_atk else 3.4           # 翼展更大
-	veh_hl = 4.4
-	veh_hw = span + 1.5
-	var fus := _cyl(0.70 if is_atk else 0.62, 6.6 if is_atk else 7.4, body)
-	fus.rotation_degrees.x = 90
-	fus.position = Vector3(0, 2.2, 0); root.add_child(fus)
-	if is_atk:
-		# 鈍頭＋機鼻機砲（攻擊機的招牌）
-		var snout := _cyl(0.70, 1.2, body); snout.rotation_degrees.x = 90
-		snout.position = Vector3(0, 2.2, 3.9); root.add_child(snout)
-		var cannon := _cyl(0.13, 2.2, dark); cannon.rotation_degrees.x = 90
-		cannon.position = Vector3(0, 2.05, 5.2); root.add_child(cannon)
-	else:
-		var nose2 := _conemesh(0.62, 0.10, 1.8, body); nose2.rotation_degrees.x = 90
-		nose2.position = Vector3(0, 2.2, 4.5); root.add_child(nose2)
-	# 座艙：攻擊機用高視野氣泡罩（對地要看得到地面）
-	var canopy2 := _box(1.15 if is_atk else 0.95, 0.80 if is_atk else 0.62,
-			1.8 if is_atk else 2.2, glass)
-	canopy2.position = Vector3(0, 2.85 if is_atk else 2.72, 2.2 if is_atk else 1.9)
-	root.add_child(canopy2)
-	for sgn2 in [-1.0, 1.0]:
-		var wing := _box(span, 0.16, 2.4 if is_atk else 2.0, body)
-		wing.position = Vector3(sgn2 * span * 0.58, 2.05, -0.3)
-		wing.rotation_degrees.y = sgn2 * sweep
-		root.add_child(wing)
-		var tip := _box(0.10, 0.5, 0.9, body)             # 翼端掛架
-		tip.position = Vector3(sgn2 * (span + 0.1), 2.12, -0.3); root.add_child(tip)
-		var htail := _box(1.5, 0.12, 1.0, body)
-		htail.position = Vector3(sgn2 * 1.0, 2.15, -3.1)
-		htail.rotation_degrees.y = sgn2 * (-6.0 if is_atk else -18.0); root.add_child(htail)
-		if is_atk:
-			# 雙發動機艙掛在機身兩側後段（攻擊機最強的剪影訊號）
-			var nac := _cyl(0.52, 2.2, steel); nac.rotation_degrees.x = 90
-			nac.position = Vector3(sgn2 * 1.15, 2.55, -2.1); root.add_child(nac)
-			var nac_in := _cyl(0.40, 0.25, dark); nac_in.rotation_degrees.x = 90
-			nac_in.position = Vector3(sgn2 * 1.15, 2.55, -1.0); root.add_child(nac_in)
-			var nac_out := _cyl(0.40, 0.25, dark); nac_out.rotation_degrees.x = 90
-			nac_out.position = Vector3(sgn2 * 1.15, 2.55, -3.2); root.add_child(nac_out)
-			for pi3 in 3:                                  # 翼下多掛架（對地彈藥）
-				var pyl := _cyl(0.13, 1.4, steel); pyl.rotation_degrees.x = 90
-				pyl.position = Vector3(sgn2 * (1.3 + float(pi3) * 1.1), 1.80, -0.1)
-				root.add_child(pyl)
-		else:
-			var pylon := _cyl(0.14, 1.8, steel); pylon.rotation_degrees.x = 90
-			pylon.position = Vector3(sgn2 * 1.8, 1.82, 0.1); root.add_child(pylon)
-			var intake := _box(0.5, 0.7, 1.4, dark)
-			intake.position = Vector3(sgn2 * 0.85, 2.05, 1.2); root.add_child(intake)
-	if is_atk:
-		# 雙垂尾（H 型尾翼，攻擊機常見）
-		for sgn6 in [-1.0, 1.0]:
-			var vt2 := _box(0.12, 1.4, 1.3, body)
-			vt2.position = Vector3(sgn6 * 1.55, 2.85, -3.2); root.add_child(vt2)
-	else:
-		var vtail := _box(0.14, 1.7, 1.6, body); vtail.position = Vector3(0, 3.05, -3.0)
-		root.add_child(vtail)
-		var nozzle := _cyl(0.55, 0.9, steel); nozzle.rotation_degrees.x = 90
-		nozzle.position = Vector3(0, 2.2, -3.9); root.add_child(nozzle)
-		var flame_ring := _cyl(0.44, 0.2, dark); flame_ring.rotation_degrees.x = 90
-		flame_ring.position = Vector3(0, 2.2, -4.3); root.add_child(flame_ring)
-	if not is_player:
-		_tint(root, Color(0.9, 0.2, 0.16), 0.25)
 
-# 砲塔轉向目標（載具沒有骨架，瞄準就是轉砲塔）
 func _aim_turret(delta: float) -> void:
 	if _turret == null:
 		return
@@ -1705,6 +1539,18 @@ func _box(x: float, y: float, z: float, mat: Material) -> MeshInstance3D:
 	var m := BoxMesh.new()
 	m.size = Vector3(x, y, z)
 	mi.mesh = m
+	mi.material_override = mat
+	return mi
+
+# 球體（無人機的光電球雲台）。原本沒有這支，載具幾何都是方塊與圓柱拼的。
+func _sphere(r: float, mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = r
+	sm.height = r * 2.0
+	sm.radial_segments = 12
+	sm.rings = 6
+	mi.mesh = sm
 	mi.material_override = mat
 	return mi
 
@@ -1825,14 +1671,10 @@ const VEH_HW := 1.75
 #   凸丘（車跨在峰上）→ 平均較低，仍然踩在峰頂，兩端懸空＝現實就是這樣
 func _support_height() -> float:
 	var gy: float = float(ground_sampler.call(global_position))
-	# ⚠ 艦艇浮在水面，不是踩在海床上（鐵律 0：現實怎樣就怎樣）。
-	#   先前所有載具一律取地形高度 → 驅逐艦沉到海床，深水區整艘泡在水面下。
-	#   吃水線＝水面往下 _draft 公尺；水太淺（不足吃水）就擱淺在海床上，
-	#   這正是真實的「擱淺」，不需要另外寫規則。
-	if _is_naval:
-		var surf: float = float(sea_level_sampler.call(global_position)) \
-				if sea_level_sampler.is_valid() else 0.0
-		return maxf(gy + _draft, surf - _draft)
+	# ⚠ 2026-08-04：艦艇兵種已全部移除（使用者拍板「不做戰艦」）。
+	#   這裡原本有一段吃水浮力（水面高 - 吃水深度，治「驅逐艦沉到海床」），
+	#   沒有艦艇之後是死碼，故移除。地形的 naval 通行成本規則仍留著，
+	#   將來要加船時，浮力要連同 _draft／sea_level_sampler 一起接回來。
 	# 航空單位在巡航高度飛，不是貼著地面爬（先前戰機沿地形起伏「開」過戰場）。
 	# 高度隨地形抬升，才不會撞山。
 	if _is_air:
