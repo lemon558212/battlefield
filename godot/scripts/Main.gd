@@ -7242,13 +7242,27 @@ func _settle(pos: Vector3, radius: float, ignore) -> Vector3:
 	var mh: float = map_data.get("h", 600)
 	var hx: float = mw * 0.5 * WORLD_SCALE
 	var hz: float = mh * 0.5 * WORLD_SCALE
-	# 限制①：只有真的貼在邊界帶上才啟動（原始症狀就只發生在那條線）
 	var near_x: float = minf(absf(p.x + hx), absf(p.x - hx))
 	var near_z: float = minf(absf(p.z + hz), absf(p.z - hz))
-	if minf(near_x, near_z) > 1.6:
-		return p
-	var inward := Vector3((1.0 if p.x < 0.0 else -1.0) if near_x <= near_z else 0.0, 0.0,
-			0.0 if near_x <= near_z else (1.0 if p.z < 0.0 else -1.0))
+	# ⚠⚠ 2026-08-04（walk ch01 FAILS=20，20 筆全在同一座標 px(1108,236)）：
+	#   限制①原本是「只有貼著邊界（1.6m 內）才啟動逃生」，於是**在地圖內部被夾住的人
+	#   完全沒有逃生路徑**——實拍是人卡在一輛卡車殘骸裡出不來，走查因此只抵達 129 段
+	#   中的 7 段（卡住之後整段走查就廢了）。
+	#   邊界帶那條限制的用意是「別亂推」，不是「內部不准逃」。改成：
+	#     · 貼邊界 → 逃生方向以「往場內」為主（原行為不變）
+	#     · 在內部 → 逃生方向改用**解算想推的方向**（那就是離開障礙的方向）
+	#   距離上限 2.1m、不可退進深水這兩條**維持不變**——ch07 那 3357 筆的教訓是
+	#   「逃生不可送進另一種不合法狀態」，換方向不違反它，放寬距離才會。
+	var inward: Vector3
+	if minf(near_x, near_z) <= 1.6:
+		inward = Vector3((1.0 if p.x < 0.0 else -1.0) if near_x <= near_z else 0.0, 0.0,
+				0.0 if near_x <= near_z else (1.0 if p.z < 0.0 else -1.0))
+	else:
+		var want: Vector3 = _resolve_solids(p, radius, ignore)
+		var away := Vector3(want.x - p.x, 0.0, want.z - p.z)
+		if away.length() < 0.0001:
+			return p              # 解算也說不出往哪推＝真的沒被夾住，維持原位
+		inward = away.normalized()
 	# ⚠⚠ 2026-08-02（stress ch09 海圖）：逃生方向不能只有「垂直邊界往場內」一個。
 	#   那張圖的邊界外緣是一條可站的窄地、往內就是深水，於是限制③ 在第一步就
 	#   break，單位停在原地＝「陷進實體」，迭代再多次也無解。
