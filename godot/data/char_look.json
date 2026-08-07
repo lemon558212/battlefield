@@ -1,19 +1,21 @@
 {
- "_doc": "角色外觀換裝表：用內建 Quaternius 3D 模型，依各角色立繪配色重新上色（2026-07-24 使用者裁定放棄立繪上戰場）。色值取自 godot/assets/portraits/<cls>.png 的髮/上衣/下身區域中位色。materials 依模型內具名材質(Hair/Skin/Eye/各衣著色)分部位套用。",
+ "_doc": "角色外觀換裝表：用內建 Quaternius 3D 模型，依各角色立繪配色重新上色（2026-07-24 使用者裁定放棄立繪上戰場）。色值取自 godot/assets/portraits/<cls>.png 的髮/上衣/下身區域中位色。materials 依模型內具名材質(Hair/Skin/Eye/各衣著色)分部位套用。 ｜2026-08-07：sniper 由立繪本人模型改回分件式骨架，理由見 sniper._note_2026_08_07。cape 欄位＝分段程序化披風（Cape.gd），有自己的關節與彈簧鏈。",
  "sniper": {
   "name": "韓沐霜",
   "hair": "#2b2622",
   "coat": "#3c3c3d",
   "lower": "#c9c7c0",
   "accent": "#8d8f96",
-  "base": "res://assets/models/chars/tripo_han.glb",
-  "own_look": true,
+  "base": "res://assets/models/chars/hr_w_Swat.fbx",
+  "own_look": false,
   "head": "boonie",
   "pack": "slim",
   "build": [
    0.97,
    1.02
-  ]
+  ],
+  "cape": "long",
+  "_note_2026_08_07": "立繪本人模型 tripo_han.glb 已退場：量測證實是單一焊死網格（15133 頂點焊接後 8016，連通元件 1 個＝身體/武器/雙手/頭髮/披風同一塊三角網），41 根骨裡一根衣襬骨都沒有 → 披風不可能飄、手握不住可換武器、foot IK 也套不上（骨頭世界座標與蒙皮渲染位置差 2.2m）。改回分件式 hr_w_Swat 骨架；立繪識別度改由 Cape.gd 的分段披風＋本表配色承擔。"
  },
  "rifleman": {
   "name": "丁小滿",

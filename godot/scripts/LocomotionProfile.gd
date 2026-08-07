@@ -64,9 +64,14 @@ extends Resource
 @export var stride_run: float = 1.50
 @export var stride_sprint: float = 2.00
 @export var stride_crouch: float = 0.62
-## 播放倍率夾限：超出這個範圍代表動畫本身選錯了，硬拉只會變成快轉／慢動作
+## 播放倍率夾限。
+## ⚠ 這不只是安全帶，它是**動作資產與移動速度不匹配的警報線**：
+##   實測 UAL Jog_Fwd 的原生速度只有約 1.26 m/s（作者是照慢跑做的），
+##   而本專案的戰術移動速度是 3.0 m/s ⇒ 需要 2.4 倍才對得上腳步。
+##   夾在 1.9 的結果是「同步已盡力、但仍差 25%」＝殘留滑步。
+##   治本要動的是資產或速度設定，不是這兩個數字（見報告「尚缺少的動畫資產」）。
 @export var cadence_min: float = 0.55
-@export var cadence_max: float = 1.90
+@export var cadence_max: float = 2.40
 
 # ---------- 動畫混合 ----------
 @export_group("動畫混合")
@@ -78,18 +83,17 @@ extends Resource
 
 # ---------- 腳步 IK ----------
 @export_group("腳步 IK")
-## 總開關。
-## ★★2026-08-07 預設關閉，理由寫清楚免得後人以為只是忘了打開：
+## 總開關（開啟，但 Unit._apply_foot_ik 只讓 Quaternius/hr_ 骨架通過）。
+## ★★2026-08-07 血淚，寫下來免得有人把那道骨架限制當成多餘的保護而拿掉：
 ##   foot IK 需要「骨頭的世界座標」，而它是用
 ##       Skeleton3D.global_transform * get_bone_global_pose(i)
 ##   算出來的。這個值**不保證等於蒙皮後網格實際渲染的位置**——當 MeshInstance3D
 ##   與 Skeleton3D 的變換不一致時（tripo 立繪本人模型就是），兩者會差一大截。
-##   實測 tripo_han：角色原點 y=0.14m，但髖骨讀出來 y=-2.05m，差 2.2m。
-##   在這個前提下把腳「貼」到地面，等於把整具骨架往地底拉 → 畫面上人整個不見了。
-##   要真正打開，先解決空間對齊（把 skin bind pose 納入換算），並且在
-##   `-- locochk` 量到「靜止時兩腳踝離地誤差 < 0.12m」之後再說。
-##   在那之前，斜坡上的腿部適應由 Unit._legs_to_slope() 的近似法負責（既有行為）。
-@export var foot_ik_enabled: bool = false
+##   實測 tripo_han：角色原點 y=0.14m，但髖骨讀出來 y=-2.05m，差了 2.2m。
+##   在那個前提下把腳「貼」到地面，等於把整具骨架往地底拉 → 畫面上人整個不見了。
+##   要擴到其他骨架系，先解決空間對齊（把 skin bind pose 納入換算），
+##   並且在 `-- locochk` 量到「靜止時兩腳踝離地誤差 < 0.12m」之後再說。
+@export var foot_ik_enabled: bool = true
 ## IK 權重（0~1）。1＝完全貼地；留一點餘裕可避免動畫本身的抬腳被壓掉
 @export var foot_ik_strength: float = 0.85
 ## 腳踝離地高度（公尺）：腳踝骨不是腳底，貼地要扣掉這一段

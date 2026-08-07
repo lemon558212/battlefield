@@ -32,12 +32,24 @@ var speed := 0.0                  # velocity.length()
 var target_speed := 0.0           # 這一幀想要達到的速度
 var gait := "idle"                # idle / walk / run / sprint / crouch_walk
 var yaw_err := 0.0                # 目前朝向與目標朝向的差（rad）
-var angular_speed := 0.0          # 這一幀實際轉了多少（rad/s）
+var angular_speed := 0.0          # 這一幀實際轉了多少（rad/s，**帶正負號**：正＝往左轉）
+                                  # 披風側甩、鏡頭回饋都要知道轉向，取絕對值會兩邊都甩同一側
 var turn_in_place := false        # true＝角度差太大，先轉身不前進
 var cadence_scale := 1.0          # 這一幀套給 AnimationPlayer 的 speed_scale
 var grounded := true
 
 var _gait_hold := 0.0             # 目前步態已經維持了多久
+# 執行期量到的「原生速度」（步態 → m/s）：這支片段以 1.0 倍播放時，
+# 身體要移動多快，接觸中的腳才會在世界座標裡靜止不動。
+#
+# ★為什麼不是量步幅（2026-08-07 我自己踩的推導坑，寫下來免得再犯）：
+#   第一版想「量腳踝前後擺幅當步幅」。錯的——擺幅 A 與步幅 s 的關係是
+#       A = (接觸期占比) × 2s
+#   走路接觸期約 60%、慢跑約 35%，占比根本不是常數，所以 A 換算不回 s。
+#   （實測 Jog_Fwd 擺幅 1.23m，用 A=s 去算會低估 18%，反而比原本的估計值更差。）
+#   而踏頻同步真正需要的從來就不是步幅，是「接觸腳往後掃的速度」——
+#   那個值可以**直接量**，不必經過步幅、也不必知道接觸期占比。
+var native_measured := {}
 
 
 func _init(profile: LocomotionProfile = null) -> void:
@@ -103,7 +115,7 @@ func step_yaw(cur_yaw: float, target_yaw: float, delta: float) -> float:
 	if absf(err) < ease and ease > 0.0001:
 		rate *= maxf(absf(err) / ease, 0.12)
 	var step: float = clampf(err, -rate * delta, rate * delta)
-	angular_speed = absf(step) / maxf(delta, 0.0001)
+	angular_speed = step / maxf(delta, 0.0001)
 	return wrapf(cur_yaw + step, -PI, PI)
 
 
@@ -190,13 +202,20 @@ func cadence(clip_len: float) -> float:
 	if gait == "idle" or clip_len <= 0.01 or speed <= 0.001:
 		cadence_scale = 1.0
 		return 1.0
-	var stride: float = p.stride_of(gait)
-	var native: float = (2.0 / clip_len) * stride
+	# 量到的優先（直接、無假設）；還沒量到時才用「2 步/週期 × 估計步幅」暫代。
+	var native: float = float(native_measured.get(gait, 0.0))
+	if native <= 0.01:
+		native = (2.0 / clip_len) * p.stride_of(gait)
 	if native <= 0.01:
 		cadence_scale = 1.0
 		return 1.0
 	cadence_scale = clampf(speed / native, p.cadence_min, p.cadence_max)
 	return cadence_scale
+
+
+# 由 Unit 在量完之後回填（見 Unit._calibrate_native）
+func set_native(g: String, mps: float) -> void:
+	native_measured[g] = clampf(mps, 0.3, 8.0)
 
 
 # 目前步態下、走一步的距離（公尺）。腳步聲與濺水用同一個尺，

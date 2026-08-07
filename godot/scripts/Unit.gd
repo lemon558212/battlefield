@@ -530,6 +530,8 @@ func _apply_palette(model: Node, look: Dictionary) -> void:
 
 # ---------- 裝具與體型（GDD/06 外觀 v2）----------
 const GEAR := preload("res://scripts/Gear.gd")
+const CAPE := preload("res://scripts/Cape.gd")
+var _cape: CharCape = null     # 分段披風（有自己的關節，才可能飄；理由見 Cape.gd 檔頭）
 const HEAD_BONES := ["Head", "head"]
 const SPINE_BONES := ["Spine2", "Chest", "Spine1", "Spine", "spine_02", "Spine02", "Spine01"]
 var _gear_fix: Array = []      # [{mount, node}]：進場景樹後做縮放/朝向補償（同槍械的坑）
@@ -573,6 +575,28 @@ func _attach_gear(model: Node, p_cls: String, is_player: bool) -> void:
 		sk.add_child(mount)
 		mount.add_child(node)
 		_gear_fix.append({"m": mount, "n": node, "off": spec[2]})
+	# ---- 披風（2026-08-07）----
+	# 立繪本人模型那條路已經證實走不通（單一焊死網格、零衣襬骨），改成掛一件
+	# **自己有關節**的分段披風在胸椎上。掛點與縮放補償完全沿用既有裝具那一套，
+	# 不另寫一份——「BoneAttachment 世界縮放非 1」的坑已經在槍上踩過了。
+	var cape_item: String = String(look.get("cape", ""))
+	if cape_item != "" and cape_item != "none":
+		var cbone := ""
+		for b in SPINE_BONES:
+			if sk.find_bone(b) >= 0:
+				cbone = b
+				break
+		if cbone == "":
+			print("[gear] FAIL 披風找不到掛骨 ", str(SPINE_BONES))
+		else:
+			# 相位用兵種名雜湊：同隊多人時披風不會整齊劃一地擺動（那立刻穿幫）
+			_cape = CAPE.build(main_c, acc_c, float(hash(p_cls) % 628) * 0.01)
+			var cm := BoneAttachment3D.new()
+			cm.name = "CapeMount"
+			cm.bone_name = cbone
+			sk.add_child(cm)
+			cm.add_child(_cape)
+			_gear_fix.append({"m": cm, "n": _cape, "off": Vector3(0.0, 0.17, -0.05)})
 
 # 裝具縮放/朝向補償：BoneAttachment 世界縮放非 1（此類模型 100 倍，同槍械的坑）。
 # 一次性：頭盔跟著頭骨轉，之後不再重算。朝向對齊 Unit 本體（+Z＝臉的朝向）。
@@ -1631,6 +1655,7 @@ func _clip_len(key: String) -> float:
 # 會被踏頻同步調整播放倍率的片段（其餘一律 1.0 倍，否則開槍/受擊/死亡會變快轉）
 const LOCO_KEYS := ["walk", "run", "sprint", "crouch_walk"]
 var _loco_state := "idle"
+static var _no_cadence := "nocadence" in OS.get_cmdline_user_args()
 
 func _play(key: String, blend := 0.2) -> void:
 	if anim == null or not anim_names.has(key): return
@@ -1666,9 +1691,20 @@ func _drive_locomotion_anim(delta: float, allow_crouch_walk: bool) -> void:
 	var blend: float = loco.blend_time(_loco_state, g)
 	_play(g, blend)
 	_loco_state = g
+	_calibrate_native(g)
 	# speed_scale 每幀都要重算：速度會被涉水/負重/受傷/體力連續改變，
 	# 只在切換步態時算一次，慢下來的過程照樣會打滑。
-	anim.speed_scale = loco.cadence(_clip_len(g))
+	# `-- locochk nocadence` ＝關掉踏頻同步跑一次，用來證明這條到底買到多少。
+	# 沒有對照組的「比值 0.64」是沒有意義的數字。
+	# ★校正期間必須把倍率釘在 1.0（2026-08-07 A/B 對照抓到的回饋迴路）：
+	#   一邊用「暫定的原生速度」調整播放倍率、一邊拿播出來的腳速反推原生速度，
+	#   兩者互相餵食會自我放大——同一支片段兩次跑出 1.26 與 2.49 兩個答案，
+	#   而且開同步反而比不開更滑（比值 0.619 vs 0.432）。
+	#   校正只花約兩個動畫週期，一支片段一輩子一次，代價可以接受。
+	if _no_cadence or not _native_ready(g):
+		anim.speed_scale = 1.0
+	else:
+		anim.speed_scale = loco.cadence(_clip_len(g))
 
 # 一次性動作（工兵修理/治療、佔領據點…）：播完之前不會被待機狀態蓋掉。
 # ⚠ 直接呼叫 _play 沒用——_process 每幀都會把 shoot/hit/crouch/空 狀態打回 idle。
@@ -2134,7 +2170,12 @@ func _coast(delta: float) -> void:
 		loco.kill_velocity()
 		_vel = Vector3.ZERO
 		return
-	loco.brake(delta, false)
+	# ★用「主動煞停」而不是「無摩擦滑行」（2026-08-07 walk ch01 回歸抓到）：
+	#   第一版用 decel=4.6 滑行，從 3 m/s 要滑 0.98m 才停。走查測試立刻抓到
+	#   **慣性把人帶進 1.06m 深的水裡** 2 次（基準線 0 次）。
+	#   物理上也是這樣才對：鬆開方向鍵代表「我要停」，人會主動收腳、不是變成冰塊。
+	#   brake_decel=6.5 → 0.46s、0.69m，減速看得出來但不會把人送進危險裡。
+	loco.brake(delta, true)
 	_vel = loco.velocity
 	if loco.speed > 0.02:
 		var mv: Vector3 = loco.frame_move(delta)
@@ -2428,6 +2469,98 @@ func loco_debug() -> String:
 	return "%s | 蹲%.2f 趴%.2f 落%.1f" % [s, _crouch, _prone, _fall_v]
 
 
+# ★踏頻原生速度的執行期量測（2026-08-07 第二版）。
+#
+# 要問的問題只有一句：**這支動畫以 1.0 倍播放時，身體要走多快，踩在地上的那隻腳
+# 才會在世界座標裡不動？** 那個速度就是這支片段的「原生速度」，
+# 而 speed_scale = 實際速度 / 原生速度。
+#
+# 量法完全不需要步幅，也不需要知道接觸期占多久：
+#   接觸中的那隻腳，在**身體座標系**裡是往後掃的，掃的速率就等於身體該有的速度。
+#   兩隻腳取「往後掃得比較快的那一隻」＝正在接觸的那一隻（另一隻在往前擺盪）。
+#   再除掉當下的 speed_scale，就還原成 1.0 倍時的值。
+#   最後取中位數：慢跑有騰空期（兩腳都往前），那些幀的值是負的，直接排除。
+#
+# ⚠ 第一版量的是「腳踝前後擺幅」當步幅，那是錯的推導——擺幅 = 接觸期占比 × 2×步幅，
+#   占比走路 0.6、慢跑 0.35，不是常數。詳見 Locomotion.native_measured 的註解。
+static var _native_cal := {}     # clip 名 → 1.0 倍時的原生速度（m/s）
+var _cal_key := ""
+var _cal_t := 0.0
+var _cal_prev: Array = []
+var _cal_samples: Array = []
+
+# 這支片段的原生速度量好了沒（沒量好之前一律 1.0 倍播，見上面的回饋迴路註解）
+func _native_ready(g: String) -> bool:
+	return anim != null and anim_names.has(g) and _native_cal.has(String(anim_names[g]))
+
+
+func _calibrate_native(g: String) -> void:
+	if loco == null or anim == null or not anim_names.has(g):
+		return
+	var clip: String = String(anim_names[g])
+	if _native_cal.has(clip):
+		loco.set_native(g, float(_native_cal[clip]))
+		return
+	var la: Array = ankle_local()
+	if la.size() != 2:
+		return
+	var dt: float = get_process_delta_time()
+	if _cal_key != clip:
+		_cal_key = clip
+		_cal_t = 0.0
+		_cal_samples = []
+		_cal_prev = la
+		return
+	# 每隻腳在身體座標系往後的速度（+Z 是前，所以往後是 -dz）
+	var back := -1e9
+	for i in 2:
+		var dz: float = (la[i] as Vector3).z - (_cal_prev[i] as Vector3).z
+		back = maxf(back, -dz / maxf(dt, 0.0001))
+	_cal_prev = la
+	# 還原成 1.0 倍播放時的值
+	var sc: float = maxf(anim.speed_scale, 0.05)
+	if back > 0.05:
+		_cal_samples.append(back / sc)
+	_cal_t += dt
+	if _cal_t < maxf(_clip_len(g) * 2.0, 0.7) or _cal_samples.size() < 20:
+		return
+	_cal_samples.sort()
+	var nat: float = float(_cal_samples[int(_cal_samples.size() * 0.5)])
+	nat = clampf(nat, 0.3, 8.0)
+	_native_cal[clip] = nat
+	loco.set_native(g, nat)
+	print("[cadence] %s 量到原生速度 %.2f m/s（舊估計法會給 %.2f）"
+			% [clip, nat, (2.0 / maxf(_clip_len(g), 0.01)) * loco_profile().stride_of(g)])
+
+
+# 動畫診斷：目前播哪支片段、長度多少、被調成幾倍速、算出來的原生速度是多少。
+# 「腳為什麼還在滑」只有三個可能：片段沒在播、倍率算錯、或腿根本沒被驅動。
+# 這一行同時把前兩個可能量出來，剩下的就只剩第三個。
+func anim_debug() -> Dictionary:
+	var g: String = loco.gait if loco != null else "?"
+	var clip: String = String(anim_names.get(g, ""))
+	var ln: float = _clip_len(g) if clip != "" else 0.0
+	var stride: float = loco_profile().stride_of(g)
+	return {
+		"gait": g, "clip": clip, "len": ln,
+		"scale": anim.speed_scale if anim != null else 1.0,
+		"playing": anim.is_playing() if anim != null else false,
+		"cur": String(anim.current_animation) if anim != null else "",
+		"native": (2.0 / ln * stride) if ln > 0.01 else 0.0,
+		"stride": stride,
+	}
+
+
+# 腳踝在**角色自身座標系**的位置（不含身體位移）。
+# 世界座標的腳踝＝身體位移＋腿的擺動，兩者混在一起就看不出腿到底有沒有在動。
+func ankle_local() -> Array:
+	var a: Array = ankle_points()
+	if a.size() != 2:
+		return []
+	var inv: Transform3D = global_transform.affine_inverse()
+	return [inv * (a[0] as Vector3), inv * (a[1] as Vector3)]
+
+
 func loco_speed() -> float:
 	return loco.speed if loco != null else 0.0
 
@@ -2460,6 +2593,11 @@ func _process(delta: float) -> void:
 	if _retarget:
 		_on_skeleton_updated()
 	_recoil = maxf(0.0, _recoil - delta * RECOIL_DECAY)
+	# 披風次級運動：餵**自身座標系**的速度（+Z 前、+X 右）與帶號角速度。
+	# ⚠ 不可以餵世界速度：那樣往北跑與往南跑會把布掀向相反的兩邊。
+	if _cape != null:
+		_cape.tick(delta, global_transform.basis.inverse() * loco.velocity,
+				loco.angular_speed, _dead)
 	_update_crouch(delta)
 	if _dead:
 		_die_fade -= delta
@@ -3036,7 +3174,10 @@ func _apply_foot_ik() -> void:
 	#   換骨架就是錯的。foot IK 完全不吃 rest 姿勢——它只讀「骨頭現在在哪」再解餘弦定理，
 	#   骨名也由 Retarget._bone() 的 ALT 表翻譯過。所以三系骨架都能安全套用。
 	#   （實測代價：先前擋掉的結果是**使用者最在意的韓沐霜剛好是唯一沒有 foot IK 的角色**。）
-	if _rig.rig_kind() == "?":
+	# 使用者 2026-08-07 裁定：先只修 hr_/Quaternius 骨架。
+	# tripo 系的 bone world pose 與蒙皮渲染位置差 2.2m（實測），空間對齊做好之前
+	# 一律不套——那條路的代價已經付過一次（「人物不見了」）。
+	if _rig.rig_kind() != "quaternius":
 		return
 	if not foot_ik.is_ready():
 		foot_ik.bind(_rig, ground_sampler)

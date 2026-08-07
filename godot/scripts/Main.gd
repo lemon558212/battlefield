@@ -613,8 +613,15 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 #   每幀取兩隻腳踝的世界座標；離地 < 6cm 視為「踩在地上」。
 #   踩著的那隻腳如果還在水平位移，位移量就是實打實的滑步，無從狡辯。
 #   評分用比值：planted_slide / body_move。腳完全不滑＝0，腳跟著身體一起滑＝1。
-const LOCO_PLANT_H := 0.06        # 腳踝離地多少以內算「踩在地上」
-const LOCO_SLIDE_FAIL := 0.45     # 滑步比值超過這個就算不及格
+# ★滑步指標（2026-08-07 第二版，第一版有門檻依賴的弱點）。
+#   第一版：先用「腳踝離地 < 6cm」判斷哪隻腳踩著，再累加它的水平位移。
+#   問題是那個門檻跟骨架尺度、姿勢都有關——蹲行時腳本來就抬不高，
+#   擺盪中的腳也被算成踩地，比值被灌水到 0.48（看起來像滑步，其實是量錯）。
+#   第二版直接用步態的物理定義：**任何時刻至少有一隻腳是靜止的**。
+#       slide = Σ min(|Δ左腳|, |Δ右腳|) / Σ |Δ身體|
+#   完美步行→0（總有一隻腳釘著），整個人平移滑行→1（兩隻腳都跟著身體走）。
+#   不需要任何門檻，也不吃骨架尺度。
+const LOCO_SLIDE_FAIL := 0.35     # 滑步比值超過這個就算不及格
 const LOCO_SNAP_FAIL := 22.0      # 單幀轉向超過幾度算「瞬間轉向」
 
 var _lc_fail := 0
@@ -637,8 +644,9 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 	var planted_frames := 0
 	var max_snap := 0.0            # 單幀最大轉向（度）
 	var max_pen := 0.0             # 腳最深陷進地面幾公尺
-	var min_h := 1e9               # 這段期間腳踝離地的最低值（＝踩地時的高度）
-	var rec: Array = []            # [離地高, 該幀水平位移]
+	var min_h := 1e9               # 這段期間腳踝離地的最低值（診斷用）
+	var step_mv := [0.0, 0.0]      # 這一幀左右腳各自的水平位移
+	var foot_v := [[], []]         # 左右腳每幀的世界速度（m/s）
 	var gait_switch := 0
 	var speeds: Array = []
 	var prev_pos: Vector3 = u.global_position
@@ -670,12 +678,16 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 				max_pen = maxf(max_pen, -h)
 				min_h = minf(min_h, h)
 				var pa: Vector3 = prev_ank[i]
-				# ⚠ 不可以在這裡就用固定門檻判「有沒有踩地」——每一系骨架的腳踝骨
-				#   離地高度不同（Quaternius 約 2cm、tripo 約 15cm）。第一版寫死 0.06m，
-				#   結果 tripo 骨架**一幀都沒被判成踩地**，滑步斷言整段被跳過，
-				#   日誌卻印出「滑動 0.00m 比值 0.000」＝漂亮的假通過。
-				#   改成先全部記下來，量完再用「這隻腳自己的最低點 + 5cm」當門檻。
-				rec.append([h, Vector2(a.x - pa.x, a.z - pa.z).length()])
+				step_mv[i] = Vector2(a.x - pa.x, a.z - pa.z).length()
+			# ⚠ 不可以用「每幀取比較不動的那一隻腳」——慢跑有**騰空期**，
+			#   那幾幀兩隻腳都跟著身體飛，min() 必然等於身體位移，
+			#   於是連完美的跑步動畫都會被判成滑步（實測結構性下限 0.7 左右）。
+			#   改成把每隻腳每幀的速度全部記下來，量完取**低百分位**：
+			#   接觸期的腳速該接近 0，取第 20 百分位就抓得到那一段，
+			#   而且完全不受騰空期比例影響。
+			foot_v[0].append(step_mv[0] / maxf(dt, 0.0001))
+			foot_v[1].append(step_mv[1] / maxf(dt, 0.0001))
+			planted_frames += 1
 		prev_ank = ank
 	for k in hold_keys:
 		_press_key(k, false)
@@ -683,18 +695,24 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 	for s in speeds:
 		avg += float(s)
 	avg = avg / maxf(float(speeds.size()), 1.0)
-	# 踩地門檻＝這段期間量到的最低踝高 + 5cm（自適應，不吃骨架尺度差異）
-	var plant_th: float = (min_h + 0.05) if min_h < 1e8 else 0.06
-	for r in rec:
-		if float(r[0]) <= plant_th:
-			planted_frames += 1
-			slide += float(r[1])
+	# 接觸期腳速＝兩隻腳各取第 20 百分位，再取兩者較小者（總有一隻腳真的踩著）。
+	var contact_v := -1.0
+	for fi in 2:
+		var arr: Array = foot_v[fi]
+		if arr.size() < 8:
+			continue
+		arr.sort()
+		var pv: float = float(arr[int(arr.size() * 0.20)])
+		contact_v = pv if contact_v < 0.0 else minf(contact_v, pv)
+	# 滑步比值＝接觸期腳速 / 身體平均速度。0＝腳真的釘住，1＝腳跟著身體一起滑。
+	var body_v: float = body_move / maxf(t, 0.0001)
+	slide = contact_v if contact_v >= 0.0 else 0.0
 	return {
-		"plant_th": plant_th, "min_h": min_h,
+		"contact_v": contact_v, "body_v": body_v, "min_h": min_h, "plant_th": 0.0,
 		"body": body_move, "slide": slide, "planted": planted_frames,
 		"snap": max_snap, "pen": max_pen, "switch": gait_switch,
 		"avg_speed": avg, "secs": t,
-		"ratio": slide / maxf(body_move, 0.0001),
+		"ratio": (contact_v / maxf(body_v, 0.05)) if contact_v >= 0.0 else -1.0,
 	}
 
 
@@ -733,20 +751,53 @@ func _locochk() -> void:
 	_lc_say(to_full > 0.15 and to_full < 1.2,
 			"加速到 2.7 m/s 花了 %.2fs（合理區間 0.15~1.2s）" % to_full)
 
-	# ---------- ② 等速跑：量滑步 ----------
+	# ---------- ② 等速跑：量滑步（順便連拍，讓「動態」有畫面可以對照）----------
+	# 使用者的驗收標準是「實際看過」，而靜態單張證明不了披風有沒有在飄、
+	# 腳有沒有在踏——本專案已經在這件事上吃過虧（見 lessons L-001~L-003）。
+	for shot_i in 4:
+		await _lc_sample(u, 0.30, [KEY_W])
+		await _snap("res://locochk_run%d.png" % shot_i)
+	# ---- 動畫診斷：先確定「片段有在播、倍率算對、腿真的在動」----
+	_press_key(KEY_W, true)
+	await get_tree().create_timer(0.4).timeout
+	var ad: Dictionary = u.anim_debug()
+	var lz_min := 1e9
+	var lz_max := -1e9
+	var lt := 0.0
+	while lt < 1.2:
+		await get_tree().process_frame
+		lt += get_process_delta_time()
+		var la: Array = u.ankle_local()
+		if la.size() == 2:
+			lz_min = minf(lz_min, (la[0] as Vector3).z)
+			lz_max = maxf(lz_max, (la[0] as Vector3).z)
+	_press_key(KEY_W, false)
+	var swing: float = (lz_max - lz_min) if lz_max > -1e8 else -1.0
+	print("[locochk] 動畫 步態=%s 片段=%s(播放中=%s 目前=%s) 長度=%.2fs 倍率=%.2f 步幅=%.2fm 原生速=%.2fm/s"
+			% [ad["gait"], ad["clip"], str(ad["playing"]), ad["cur"], ad["len"],
+			ad["scale"], ad["stride"], ad["native"]])
+	print("[locochk] 左腳踝在**身體座標系**的前後擺幅 = %.3fm（＝腿實際擺動的行程）" % swing)
+	# 一個跑步循環裡，腳相對身體前後應該掃過將近一個步幅。掃不到＝腿根本沒在擺，
+	# 那麼不管倍率調多少，畫面上都只會是「一個定住的姿勢被平移」＝滑步。
+	_lc_say(swing > 0.35,
+			"腿的擺動行程 %.3fm（應接近一個步幅 %.2fm；<0.35m＝腿沒在動，倍率再準也沒用）"
+			% [swing, float(ad["stride"])])
+	await get_tree().create_timer(0.5).timeout
 	var run_s: Dictionary = await _lc_sample(u, 2.5, [KEY_W])
-	print("[locochk] 跑步 位移%.2fm 站立腳滑動%.2fm 比值%.3f 平均速%.2f 步態切換%d 最大單幀轉向%.1f° 踩地幀%d(門檻%.3fm 最低踝高%.3fm)"
-			% [run_s["body"], run_s["slide"], run_s["ratio"], run_s["avg_speed"],
-			run_s["switch"], run_s["snap"], int(run_s["planted"]),
-			float(run_s["plant_th"]), float(run_s["min_h"])])
+	print("[locochk] 跑步 位移%.2fm 身體速%.2f 接觸期腳速%.2fm/s 比值%.3f 步態切換%d 最大單幀轉向%.1f° 取樣%d幀"
+			% [run_s["body"], run_s["body_v"], run_s["contact_v"], run_s["ratio"],
+			run_s["switch"], run_s["snap"], int(run_s["planted"])])
 	# ★斷言不可以「量不到就跳過」——那正是上一版印出漂亮 0.000 卻什麼都沒測的原因。
 	#   量不到踩地幀本身就是 FAIL：代表這支量測對這個兵種是壞的。
+	# ★量不到就是 FAIL，不可以靜默跳過——那正是第一版印出漂亮 0.000
+	#   卻其實一幀都沒量到的原因（假通過比沒測更糟）。
 	_lc_say(int(run_s["planted"]) > 0,
-			"跑步期間量到 %d 幀踩地（=0 代表量測對這副骨架失效，不是「沒有滑步」）"
+			"跑步期間量到 %d 幀腳部資料（=0 代表量測對這副骨架失效，不是「沒有滑步」）"
 			% int(run_s["planted"]))
 	if int(run_s["planted"]) > 0:
 		_lc_say(float(run_s["ratio"]) < LOCO_SLIDE_FAIL,
-				"跑步滑步比值 %.3f（<%.2f 才算腳有踩住地面）" % [run_s["ratio"], LOCO_SLIDE_FAIL])
+				"跑步滑步比值 %.3f（<%.2f；0＝總有一隻腳釘在地上，1＝兩腳跟著身體滑）"
+				% [run_s["ratio"], LOCO_SLIDE_FAIL])
 		_lc_say(float(run_s["pen"]) < 0.08,
 				"跑步時腳最深陷地 %.3fm（<0.08m）" % run_s["pen"])
 	_lc_say(int(run_s["switch"]) <= 2,
@@ -779,10 +830,14 @@ func _locochk() -> void:
 	u.stance_cmd = "crouch"
 	await get_tree().create_timer(0.8).timeout
 	var cr_s: Dictionary = await _lc_sample(u, 2.2, [KEY_W])
-	print("[locochk] 蹲行 位移%.2fm 滑動%.2fm 比值%.3f 平均速%.2f"
-			% [cr_s["body"], cr_s["slide"], cr_s["ratio"], cr_s["avg_speed"]])
-	_lc_say(int(cr_s["planted"]) > 0, "蹲行期間量到 %d 幀踩地" % int(cr_s["planted"]))
-	if int(cr_s["planted"]) > 0:
+	print("[locochk] 蹲行 位移%.2fm 身體速%.2f 接觸期腳速%.2fm/s 比值%.3f"
+			% [cr_s["body"], cr_s["body_v"], cr_s["contact_v"], cr_s["ratio"]])
+	# ⚠ 走不動就不可以拿滑步比值來評分：分母是身體位移，接近 0 時比值會爆成天文數字
+	#   （實測某輪 92.1），那是「測試站位卡住」不是「動作壞掉」。要分辨得出來。
+	_lc_say(float(cr_s["body"]) > 0.6,
+			"蹲行實際走了 %.2fm（<0.6m 代表被地形卡住，這一項量不準）" % float(cr_s["body"]))
+	_lc_say(int(cr_s["planted"]) > 0, "蹲行期間量到 %d 幀腳部資料" % int(cr_s["planted"]))
+	if int(cr_s["planted"]) > 0 and float(cr_s["body"]) > 0.6:
 		_lc_say(float(cr_s["ratio"]) < LOCO_SLIDE_FAIL,
 				"蹲行滑步比值 %.3f（<%.2f）" % [cr_s["ratio"], LOCO_SLIDE_FAIL])
 	_lc_say(float(cr_s["avg_speed"]) < 2.0 and float(cr_s["avg_speed"]) > 0.4,
