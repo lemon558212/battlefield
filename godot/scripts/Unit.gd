@@ -2583,6 +2583,11 @@ func anim_debug() -> Dictionary:
 	}
 
 
+# 動畫播放頭目前在第幾秒（驗證 speed_scale 有沒有真的生效用）
+func anim_pos() -> float:
+	return anim.current_animation_position if anim != null else -1.0
+
+
 # 腳踝在**角色自身座標系**的位置（不含身體位移）。
 # 世界座標的腳踝＝身體位移＋腿的擺動，兩者混在一起就看不出腿到底有沒有在動。
 func ankle_local() -> Array:

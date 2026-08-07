@@ -801,6 +801,30 @@ func _locochk() -> void:
 			% [ad["gait"], ad["clip"], str(ad["playing"]), ad["cur"], ad["len"],
 			ad["scale"], ad["stride"], ad["native"]])
 	print("[locochk] 左腳踝在**身體座標系**的前後擺幅 = %.3fm（＝腿實際擺動的行程）" % swing)
+	# ★驗證 speed_scale 是否真的生效：量播放頭在 1 秒內前進了幾秒。
+	#   倍率 1.5 就該前進 1.5 秒。量到 1.0 代表倍率**根本沒作用**——
+	#   那樣的話所有踏頻同步都是空的，而且從畫面上完全看不出來。
+	_press_key(KEY_W, true)
+	var p0: float = u.anim_pos()
+	var clen: float = float(u.anim_debug()["len"])
+	var pt := 0.0
+	var wrapped := 0
+	var pprev: float = p0
+	while pt < 1.0:
+		await get_tree().process_frame
+		pt += get_process_delta_time()
+		var pc: float = u.anim_pos()
+		if pc < pprev - 0.01:
+			wrapped += 1
+		pprev = pc
+	_press_key(KEY_W, false)
+	var advanced: float = (pprev - p0) + float(wrapped) * clen
+	var real_rate: float = advanced / maxf(pt, 0.0001)
+	var want_rate: float = float(u.anim_debug()["scale"])
+	print("[locochk] 播放倍率驗證：設定=%.2f 實測=%.2f（1 秒內播放頭前進 %.2f 秒，繞回 %d 次）"
+			% [want_rate, real_rate, advanced, wrapped])
+	_lc_say(absf(real_rate - want_rate) < 0.25,
+			"speed_scale 實際生效：設定 %.2f vs 實測 %.2f（差 <0.25）" % [want_rate, real_rate])
 	# 一個跑步循環裡，腳相對身體前後應該掃過將近一個步幅。掃不到＝腿根本沒在擺，
 	# 那麼不管倍率調多少，畫面上都只會是「一個定住的姿勢被平移」＝滑步。
 	_lc_say(swing > 0.35,
