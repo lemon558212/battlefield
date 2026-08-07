@@ -625,6 +625,7 @@ const LOCO_SLIDE_FAIL := 0.35     # 滑步比值超過這個就算不及格
 const LOCO_SNAP_FAIL := 22.0      # 單幀轉向超過幾度算「瞬間轉向」
 
 var _lc_fail := 0
+var _lc_unit = null            # 量測對象（_lc_sample 要補 AP 用）
 var _lc_lines: Array = []
 
 func _lc_say(ok: bool, msg: String) -> void:
@@ -637,6 +638,9 @@ func _lc_say(ok: bool, msg: String) -> void:
 # 量一段時間內的滑步／轉向／步態切換。回傳統計字典。
 # hold_keys：這段期間按住哪些鍵（空陣列＝不按，量停步）。
 func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
+	# 每段開始前把 AP 補滿：這支測的是動作品質，不該被回合資源限制打斷
+	if _lc_unit != null:
+		_lc_unit["ap"] = 999999.0
 	for k in hold_keys:
 		_press_key(k, true)
 	var body_move := 0.0
@@ -721,17 +725,22 @@ func _locochk() -> void:
 	_lc_lines.clear()
 	if not await _boot_to_battle("locochk", 3): _quit_test(1); return
 	var pu = _deployed[0]
-	pu["ap"] = 999999.0
-	pu["ap_max"] = 999999.0
 	pu["node"].auto_stance = false
 	pu["node"].stance_cmd = "stand"
 	_begin_action(pu)
+	# ⚠⚠ AP 一定要在 _begin_action **之後**設：它會把 ap 重設成 ap_max。
+	#   第一版設在前面，於是實際上跑的是預設 100 AP——跑步那一段就把 AP 用完了，
+	#   之後轉向、蹲行全部量到「位移 0.00m」，看起來像動作壞掉，其實是我的測試沒油。
+	#   （驗收截圖右下角那個「AP 23 / 100」就是證據，我第一次沒看懂它。）
+	pu["ap"] = 999999.0
+	pu["ap_max"] = 999999.0
 	# 進第三人稱（使用者實際操控的狀態；不進去就只是在測 AI 路徑）
 	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
 	await get_tree().create_timer(0.6).timeout
 	var u = pu["node"]
 	if u.ankle_points().is_empty():
 		print("[locochk] 這個兵種沒有可量測的腿骨（非 Quaternius 骨架），改測其他項目")
+	_lc_unit = pu
 	print("[locochk] 第三人稱=%s 兵種=%s" % ["是" if cam.is_tps() else "否", String(pu["cls"])])
 
 	# ---------- ① 起步：不可以一幀就到全速 ----------
@@ -757,6 +766,9 @@ func _locochk() -> void:
 	for shot_i in 4:
 		await _lc_sample(u, 0.30, [KEY_W])
 		await _snap("res://locochk_run%d.png" % shot_i)
+	# ⚠ 試過「每段開始前把角色瞬移回起點」——**不行**：位移會被 _action_tick 當成
+	#   行動消耗，AP 與行動狀態一起失效，之後所有按鍵都沒反應（實測轉向量到 0.0°）。
+	#   改成後面幾段一律「沿原路往回走」（KEY_S），那條路是剛剛才走過的，保證是通的。
 	# ---- 動畫診斷：先確定「片段有在播、倍率算對、腿真的在動」----
 	_press_key(KEY_W, true)
 	await get_tree().create_timer(0.4).timeout
@@ -818,10 +830,23 @@ func _locochk() -> void:
 
 	# ---------- ④ 原地大角度轉向：不可以瞬間甩頭 ----------
 	await get_tree().create_timer(0.4).timeout
+	# ⚠⚠ 這一項我連續寫壞兩次，兩次都是**靜默通過**，記在這裡當教訓：
+	#   第一版按 KEY_S ——第三人稱的 S 是「後退」不是「轉身」，只轉了 27°。
+	#   第二版改成用合成滑鼠位移轉鏡頭再按 W ——鏡頭根本沒被轉動（TPS 的滑鼠視角
+	#   不吃這種合成事件），結果是「位移 3.96m、轉了 0°」，而斷言
+	#   `單幀最大轉 0.0° < 22°` **照樣印 OK**。
+	#   一個在「什麼都沒發生」時也會通過的斷言，比沒有斷言更糟。
+	#   第三版改用點擊移動下真實命令（那也是本遊戲的主要移動方式），
+	#   並且**先斷言「真的轉了超過 120°」**，轉不到就直接 FAIL。
+	u.stop()
+	await get_tree().create_timer(0.3).timeout
 	var yaw_before: float = u.rotation.y
-	var turn_s: Dictionary = await _lc_sample(u, 1.6, [KEY_S])   # 往後＝180° 反向
+	u.move_to(u.global_position - u.facing_dir() * 6.0)     # 正後方 6m＝必須轉 180°
+	var turn_s: Dictionary = await _lc_sample(u, 2.6, [])
 	var turned: float = absf(rad_to_deg(wrapf(u.rotation.y - yaw_before, -PI, PI)))
 	print("[locochk] 反向 轉了%.0f° 最大單幀%.1f° 位移%.2fm" % [turned, turn_s["snap"], turn_s["body"]])
+	_lc_say(turned > 120.0,
+			"下令走向正後方後實際轉了 %.0f°（>120° 才代表這一項真的測到東西）" % turned)
 	_lc_say(float(turn_s["snap"]) < LOCO_SNAP_FAIL,
 			"180° 反向時單幀最大轉 %.1f°（<%.0f°＝沒有瞬間轉向）" % [turn_s["snap"], LOCO_SNAP_FAIL])
 
@@ -829,7 +854,10 @@ func _locochk() -> void:
 	await get_tree().create_timer(0.3).timeout
 	u.stance_cmd = "crouch"
 	await get_tree().create_timer(0.8).timeout
-	var cr_s: Dictionary = await _lc_sample(u, 2.2, [KEY_W])
+	# 同樣改用點擊移動：按鍵路徑會被鏡頭朝向、地形卡位干擾，量到的常常是 0
+	u.stop()
+	u.move_to(u.global_position + u.facing_dir() * 5.0)
+	var cr_s: Dictionary = await _lc_sample(u, 2.6, [])
 	print("[locochk] 蹲行 位移%.2fm 身體速%.2f 接觸期腳速%.2fm/s 比值%.3f"
 			% [cr_s["body"], cr_s["body_v"], cr_s["contact_v"], cr_s["ratio"]])
 	# ⚠ 走不動就不可以拿滑步比值來評分：分母是身體位移，接近 0 時比值會爆成天文數字

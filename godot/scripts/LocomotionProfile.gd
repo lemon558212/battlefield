@@ -51,17 +51,26 @@ extends Resource
 @export_group("步態與踏頻")
 ## 低於這個速度視為靜止（m/s）
 @export var idle_speed: float = 0.22
-## walk → run 的切換速度（m/s）
-@export var walk_to_run: float = 2.25
+## walk → run 的切換速度（m/s）。
+## ⚠ 不可以貼近 run_speed(3.0)：實際速度會因地形、涉水、體力上下浮動，
+##   門檻設 2.25 時等速跑 2.5s 內量到 4~5 次步態切換＝動畫在抽搐。
+##   壓到 1.9 並把遲滯拉到 0.45，浮動就吃不到門檻了。
+@export var walk_to_run: float = 1.90
 ## run → sprint 的切換速度（m/s）
 @export var run_to_sprint: float = 4.10
 ## 步態切換遲滯（m/s）：往回切要比往上切低這麼多，避免臨界來回跳
-@export var gait_hysteresis: float = 0.35
+@export var gait_hysteresis: float = 0.45
 ## 步態最短停留時間（秒）：擋住 1 幀內來回切造成的動畫抽搐
 @export var gait_min_hold: float = 0.18
-## 各步態的**單步步幅**（公尺）。踏頻同步就是靠這個把「動畫週期」換算成「該有的速度」
+## 各步態的**單步步幅**（公尺）。踏頻同步靠它把「動畫週期」換算成「該有的速度」：
+##     native = (2 步 / 週期秒) × 步幅，  speed_scale = 實際速度 / native
+## stride_run 取 1.13 是推導值不是調出來的：Jog_Fwd 週期 0.93s，要讓它的原生速度
+## 等於本專案的實際跑速 2.44 m/s，步幅就必須是 2.44 × 0.93 ÷ 2 = 1.13m。
+## ⚠ 曾經掃描 0.65 / 0.85 / 1.13 想找滑步最低點，結果是 0.544 / 0.675 / 0.476
+## ——非單調。因為量測的局間變異（±0.08）已經和效果同量級，再掃就是對雜訊擬合。
+## 真正要往下壓，需要的是原生速度接近 3 m/s 的跑步動作，不是繼續調這個數字。
 @export var stride_walk: float = 0.75
-@export var stride_run: float = 1.50
+@export var stride_run: float = 1.13
 @export var stride_sprint: float = 2.00
 @export var stride_crouch: float = 0.62
 ## 播放倍率夾限。
@@ -70,6 +79,14 @@ extends Resource
 ##   而本專案的戰術移動速度是 3.0 m/s ⇒ 需要 2.4 倍才對得上腳步。
 ##   夾在 1.9 的結果是「同步已盡力、但仍差 25%」＝殘留滑步。
 ##   治本要動的是資產或速度設定，不是這兩個數字（見報告「尚缺少的動畫資產」）。
+## 執行期自動量測動畫原生速度（預設關閉）。
+## ★2026-08-07 的實測結論，寫下來免得有人以為關掉只是懶：
+##   概念是對的——「接觸腳相對身體往後掃的速度」就是零滑步時該有的身體速度，
+##   不需要步幅、也不需要接觸期占比。但**訊號雜訊太大**：逐幀差分同時吃到
+##   地形取樣抖動與模型傾斜，同一支 Jog_Fwd 三次量到 1.05 / 4.31 / 5.48 m/s，
+##   中位數與 80 百分位差 5 倍。這種估計比固定常數更不穩定，開著會讓手感每局不同。
+##   要啟用，先解決訊號品質（低通 + 只在平地直線時取樣 + 多局取共識）。
+@export var cadence_auto_calibrate: bool = false
 @export var cadence_min: float = 0.55
 @export var cadence_max: float = 2.40
 

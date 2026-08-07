@@ -1701,7 +1701,7 @@ func _drive_locomotion_anim(delta: float, allow_crouch_walk: bool) -> void:
 	#   兩者互相餵食會自我放大——同一支片段兩次跑出 1.26 與 2.49 兩個答案，
 	#   而且開同步反而比不開更滑（比值 0.619 vs 0.432）。
 	#   校正只花約兩個動畫週期，一支片段一輩子一次，代價可以接受。
-	if _no_cadence or not _native_ready(g):
+	if _no_cadence or (loco_profile().cadence_auto_calibrate and not _native_ready(g)):
 		anim.speed_scale = 1.0
 	else:
 		anim.speed_scale = loco.cadence(_clip_len(g))
@@ -1887,6 +1887,23 @@ func water_depth() -> float:
 	if not water_sampler.is_valid() or _is_vehicle:
 		return 0.0        # 載具涉水另有規則（履帶車可涉 1m），目前不套
 	return float(water_sampler.call(global_position))
+
+
+# 涉水上限（與 BattleTerrain.WADE_MAX 同步；改一邊要改兩邊）
+const WADE_LIMIT := 1.05
+
+# 下一步會不會踏進「深到走不動」的水裡（鐵律 0：現實怎樣就怎樣）。
+# ⚠ 這條規則本來應該由地形的深水圍欄負責，但 Main.gd:97 的註解自己承認：
+#   「_blockers = [] 會把它整個清掉——所以深水從來沒有真的擋過人」。
+#   wade_mul() 只讓人變慢，沒有任何東西阻止他一路走到滅頂。
+#   走查測試量到 1.056m / 1.078m（上限 1.05m）就是這個洞的現形——
+#   舊碼沒被抓到只是因為路線剛好差了幾公分，不是舊碼比較安全。
+# ⚠ 只擋「越走越深」：已經站在深水裡的人必須走得出來，否則會被自己的規則鎖死。
+func wade_blocked(next_pos: Vector3) -> bool:
+	if _is_vehicle or _dead or not water_sampler.is_valid():
+		return false
+	var d_next: float = float(water_sampler.call(next_pos))
+	return d_next > WADE_LIMIT and d_next > water_depth()
 
 # 負重（鐵律 0⑤）：背 12kg 機槍與彈藥的人跟輕裝偵察兵不可能同速。
 # 用 class_base 既有的 mobility 欄位當重量級別，不另外發明資料。
@@ -2179,6 +2196,10 @@ func _coast(delta: float) -> void:
 	_vel = loco.velocity
 	if loco.speed > 0.02:
 		var mv: Vector3 = loco.frame_move(delta)
+		if wade_blocked(global_position + mv):
+			loco.kill_velocity()
+			_vel = Vector3.ZERO
+			mv = Vector3.ZERO
 		global_position += mv
 		_tick_steps(mv.length())
 	_drive_locomotion_anim(delta, false)
@@ -2253,6 +2274,10 @@ func move_dir(dir: Vector3, delta: float) -> void:
 	loco.accelerate(d, d_spd, delta)
 	_vel = loco.velocity
 	var mv: Vector3 = loco.frame_move(delta)
+	if wade_blocked(global_position + mv):
+		loco.brake(delta, true)      # 走到及胸就停，不繼續往裡面走
+		_vel = loco.velocity
+		mv = Vector3.ZERO
 	global_position += mv
 	_tick_steps(mv.length())
 	# ★動畫必須跟著**實際位移**，不是跟著按鍵。被牆或雜物擋住時人根本沒有前進，
@@ -2495,6 +2520,8 @@ func _native_ready(g: String) -> bool:
 
 
 func _calibrate_native(g: String) -> void:
+	if not loco_profile().cadence_auto_calibrate:
+		return          # 預設關閉，理由見 LocomotionProfile.cadence_auto_calibrate
 	if loco == null or anim == null or not anim_names.has(g):
 		return
 	var clip: String = String(anim_names[g])
@@ -2525,7 +2552,12 @@ func _calibrate_native(g: String) -> void:
 	if _cal_t < maxf(_clip_len(g) * 2.0, 0.7) or _cal_samples.size() < 20:
 		return
 	_cal_samples.sort()
-	var nat: float = float(_cal_samples[int(_cal_samples.size() * 0.5)])
+	# ★取高百分位、不是中位數（2026-08-07 用擺幅做交叉驗算抓到的）。
+	#   接觸期腳往後掃的速度是一個**平台值**，擺盪期與騰空期的值遠低於它，
+	#   取中位數會被那些幀拉下來——實測給出 1.05 m/s，但腳踝擺幅 1.263m ÷ 週期 0.93s
+	#   已經蘊含 native ≥ 1.36 m/s，中位數在數學上就不可能對。
+	#   第 80 百分位落在平台上，同時避開單幀雜訊造成的極大值。
+	var nat: float = float(_cal_samples[int(_cal_samples.size() * 0.80)])
 	nat = clampf(nat, 0.3, 8.0)
 	_native_cal[clip] = nat
 	loco.set_native(g, nat)
@@ -2677,6 +2709,12 @@ func _process(delta: float) -> void:
 		var mv: Vector3 = loco.frame_move(delta)
 		if mv.length() > dist:
 			mv = d                            # 這一幀會衝過頭：停在目標上，不要來回震盪
+		if wade_blocked(global_position + mv):
+			loco.brake(delta, true)
+			_vel = loco.velocity
+			mv = Vector3.ZERO
+			_move_target = null               # 目的地在深水裡＝到不了，別卡在那裡空轉
+			arrived.emit()
 		global_position += mv
 		_tick_steps(mv.length())
 		_drive_locomotion_anim(delta, true)
