@@ -682,8 +682,11 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 		prev_yaw = u.rotation.y
 		speeds.append(u.loco_speed())
 		var g: String = u.loco_gait()
+		# ⚠ 前 0.4 秒不計：從靜止起步時「idle → walk」是**應該發生**的轉換，
+		#   把它算成抽搐等於要求角色不准起步。要抓的是等速段裡的來回跳。
 		if g != prev_gait:
-			gait_switch += 1
+			if t > 0.4:
+				gait_switch += 1
 			prev_gait = g
 		var ank: Array = u.ankle_points()
 		if ank.size() == 2 and prev_ank.size() == 2:
@@ -757,6 +760,12 @@ func _locochk() -> void:
 
 	# ---------- ① 起步：不可以一幀就到全速 ----------
 	var t0 := Time.get_ticks_msec()
+	# ⚠ 目標速度**不可以寫死**：run_speed 是可調參數（2026-08-07 由 3.0 改成 2.0），
+	#   寫死 2.7 的結果是測試永遠到不了門檻、逾時後報「加速花了 2.01s」＝
+	#   看起來像加速度壞掉，其實是我的測試拿舊常數在量新設定。
+	#   取設定值的 85%：那是「已經進入等速段」的合理判準，跟著參數走。
+	var pf0: LocomotionProfile = Unit.loco_profile()
+	var target_v: float = pf0.run_speed * 0.85
 	_press_key(KEY_W, true)
 	var to_full := 0.0
 	var first_frame_speed := -1.0
@@ -765,12 +774,14 @@ func _locochk() -> void:
 		to_full += get_process_delta_time()
 		if first_frame_speed < 0.0:
 			first_frame_speed = u.loco_speed()
-		if u.loco_speed() > 2.7:
+		if u.loco_speed() > target_v:
 			break
-	_lc_say(first_frame_speed < 1.0,
-			"起步第一幀速度 %.2f m/s（應遠小於全速 3.0＝有加速度）" % first_frame_speed)
+	_lc_say(first_frame_speed < pf0.run_speed * 0.35,
+			"起步第一幀速度 %.2f m/s（應遠小於全速 %.1f＝有加速度）"
+			% [first_frame_speed, pf0.run_speed])
 	_lc_say(to_full > 0.15 and to_full < 1.2,
-			"加速到 2.7 m/s 花了 %.2fs（合理區間 0.15~1.2s）" % to_full)
+			"加速到 %.2f m/s（設定值的 85%%）花了 %.2fs（合理區間 0.15~1.2s）"
+			% [target_v, to_full])
 
 	# ---------- ② 等速跑：量滑步（順便連拍，讓「動態」有畫面可以對照）----------
 	# 使用者的驗收標準是「實際看過」，而靜態單張證明不了披風有沒有在飄、
@@ -914,11 +925,26 @@ func _locochk() -> void:
 	print("[locochk] 狀態列：", ik_line)
 	var ank: Array = u.ankle_points()
 	if ank.size() == 2:
-		var worst := 0.0
-		for a in ank:
-			var gy: float = float(Unit.ground_sampler.call(a))
-			worst = maxf(worst, absf((a.y - gy) - 0.085))
-		_lc_say(worst < 0.12, "靜止時兩腳踝離地誤差最大 %.3fm（<0.12m＝有踩到地）" % worst)
+		# ⚠ 不可以拿「離地高度」去比一個寫死的踝高常數（舊版比 0.085m）：
+		#   踝高每一系骨架都不同，FootIK 已經改成**執行期自動校正**（hr_ 骨架量到 0.020m），
+		#   測試卻還在用設定檔那個 0.085 當基準，於是量到的「誤差」有一半是常數本身的偏差。
+		#   要驗的其實是兩件事，兩件都不需要知道踝高是多少：
+		#     ① 兩腳踩得一樣實（左右離地高度差很小）← foot IK 有沒有在補地形落差
+		#     ② 沒有一隻腳陷進土裡或吊在半空（離地高度落在合理帶內）
+		var hl: float = ank[0].y - float(Unit.ground_sampler.call(ank[0]))
+		var hr: float = ank[1].y - float(Unit.ground_sampler.call(ank[1]))
+		# ⚠ 不可以要求「兩腳一樣高」——開/關 foot IK 兩種情況下左右差都是 0.14~0.23m，
+		#   那是**待機動作本身**把重心放在一隻腿上（真人放鬆站姿就是這樣），不是缺陷。
+		#   FootIK 的 max() 規則刻意不把抬起的腳硬拉下來，那是正確的設計。
+		#   真正該驗的是「承重的那隻腳有沒有確實踩在地面上」：
+		#     foot IK 關 → 較低腳 -0.043m（陷進土裡 4.3cm）
+		#     foot IK 開 → 較低腳 +0.009m（正確踩地）
+		#   這個 5cm 的差距就是 foot IK 買到的東西。
+		_lc_say(minf(hl, hr) > -0.02 and minf(hl, hr) < 0.10,
+				"承重腳離地 %.3fm（-0.02~0.10m＝確實踩在地上、沒陷進土裡）" % minf(hl, hr))
+		_lc_say(maxf(hl, hr) < 0.35,
+				"另一隻腳離地 %.3fm（<0.35m＝放鬆站姿可以，但不能整條吊在空中）"
+				% maxf(hl, hr))
 
 	await _snap("res://locochk_end.png")
 	print("[locochk] ---- 總結 ----")
