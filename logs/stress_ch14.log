@@ -1,1 +1,112 @@
-BATCH-20260802-111331 PENDING
+BATCH-20260805-001132
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
+[stress] 1 主選單 → 劇情戰役
+[stress] 2 章節 14
+[stress] 3 簡報 → 出擊
+[stress] 4 對話：連點推進 (st=3)
+[diff] 地形加碼（×0.93）：彈坑 +7、工事 +5
+[poles] 桿=21 電線段=192
+[edge] 剔除邊界帶障礙 0 個（安全帶 1.62m，深水圍欄不剔）
+[city] 街廓建築 68 棟、網格 3 種
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] engineer 重定向骨對數=20
+[look] spawn mortar side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mortar 重定向骨對數=20
+[look] spawn specops side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] specops 重定向骨對數=20
+[look] spawn sam side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sam 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[diff] 敵方載具池：{ "land": ["tank"], "air": ["drone"] }（依作戰域輪流取：["land", "air"]）
+[diff] tank 落點外移 120px（6m）找到合法地形（mob=tracked）
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[diff] drone 落點外移 80px（4m）找到合法地形（mob=air）
+[look] spawn drone side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[diff] tank 落點外移 240px（12m）找到合法地形（mob=tracked）
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[diff] 第 14 章：敵步兵 11、敵載具 3/3（實際/難度表）、掩體 0.71 集火 0.65 側翼 0.54 地形 0.93
+[stress]   對話結束 st=4 (應為 DEPLOY=4)
+[stress] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn mg side=0 player_side=0 mp=res://assets/models/chars/hr_m_Adventurer.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn rifleman side=0 player_side=0 mp=res://assets/models/chars/hr_m_Soldier.fbx
+[rig] rifleman 重定向骨對數=20
+[stress]   已部署數=3 OK
+[stress] 6 開始戰鬥
+[stress]   st=5 (應為 CMD=5)
+[terrchk] 實戰 wrap：wade=0.00m slope=0.03 elev=-0.20m crater=false
+[veh] tank 頂著障礙空轉，停車改路 px=(1929,541)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,690)
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP2440 最近敵距80.4m
+[veh] tank 頂著障礙空轉，停車改路 px=(1928,541)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,690)
+[stress] 回合2 我方開火累計0 我方HP300 敵方HP2440 最近敵距64.9m
+[veh] tank 頂著障礙空轉，停車改路 px=(1926,542)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,689)
+[stress] 回合3 我方開火累計0 我方HP300 敵方HP2440 最近敵距38.2m
+[veh] tank 頂著障礙空轉，停車改路 px=(1925,542)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,689)
+[stress] 回合4 我方開火累計0 我方HP300 敵方HP2440 最近敵距19.1m
+[veh] tank 頂著障礙空轉，停車改路 px=(1923,542)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,689)
+[stress] 回合5 我方開火累計0 我方HP300 敵方HP2428 最近敵距6.1m
+[fire] sniper(我方) → at(敵方) 距離 11.9m
+[fire] mg(我方) → at(敵方) 距離 5.6m
+[fire] rifleman(我方) → at(敵方) 距離 5.6m
+[veh] tank 頂著障礙空轉，停車改路 px=(1922,543)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,688)
+[stress] 回合6 我方開火累計3 我方HP300 敵方HP2406 最近敵距5.6m
+[fire] sniper(我方) → at(敵方) 距離 11.9m
+[fire] mg(我方) → at(敵方) 距離 5.8m
+[fire] rifleman(我方) → at(敵方) 距離 5.4m
+[veh] tank 頂著障礙空轉，停車改路 px=(1920,543)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,688)
+[stress] 回合7 我方開火累計6 我方HP300 敵方HP2384 最近敵距5.4m
+[fire] sniper(我方) → at(敵方) 距離 11.9m
+[fire] mg(我方) → at(敵方) 距離 5.9m
+[fire] rifleman(我方) → at(敵方) 距離 5.5m
+[veh] tank 頂著障礙空轉，停車改路 px=(1917,543)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,688)
+[stress] 回合8 我方開火累計9 我方HP300 敵方HP2330 最近敵距43.5m
+[veh] tank 頂著障礙空轉，停車改路 px=(1639,519)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,687)
+[stress] 回合9 我方開火累計9 我方HP300 敵方HP2330 最近敵距38.3m
+[veh] tank 頂著障礙空轉，停車改路 px=(1635,519)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,687)
+[weather] 回合 11 22:00 → 雨
+[stress] 回合10 我方開火累計9 我方HP300 敵方HP2330 最近敵距28.5m
+[veh] tank 頂著障礙空轉，停車改路 px=(1630,519)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,687)
+[weather] 回合 12 22:00 → 濃霧
+[stress] 回合11 我方開火累計9 我方HP300 敵方HP2330 最近敵距21.9m
+[fire] sniper(我方) → rifleman(敵方) 距離 9.3m
+[veh] tank 頂著障礙空轉，停車改路 px=(1627,519)
+[veh] tank 頂著障礙空轉，停車改路 px=(2140,687)
+[stress] 回合12 我方開火累計10 我方HP300 敵方HP2290 最近敵距6.4m
+[stress] ch14 回合=12 我方存活=3 敵方存活=13 取樣=935 最差幀=92ms 結局=回合上限
+[selftest] saved res://qa/stress_ch14_end.png
+[stress] ch14 FAILS=0
+[stress] DONE

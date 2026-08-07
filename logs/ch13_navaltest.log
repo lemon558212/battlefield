@@ -1,0 +1,73 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=25 story=15
+[stress] 1 主選單 → 劇情戰役
+[stress] 2 章節 13
+[stress] 3 簡報 → 出擊
+[stress] 4 對話：連點推進 (st=3)
+[diff] 地形加碼（×0.85）：彈坑 +6、工事 +4
+[water] 深水圍欄 74 根樁（水深 > 1.05m 的邊界）
+[poles] 桿=6 電線段=60
+[edge] 剔除邊界帶障礙 0 個（安全帶 1.62m，深水圍欄不剔）
+[rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] engineer 重定向骨對數=20
+[look] spawn mortar side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mortar 重定向骨對數=20
+[look] spawn specops side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] specops 重定向骨對數=20
+[look] spawn sam side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sam 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[diff] 敵方載具池：{ "land": ["tank"], "air": ["fighter", "attacker", "gunship"], "sea": ["destroyer", "lst", "missileboat", "submarine"] }（依作戰域輪流取：["land", "sea", "air"]）
+[diff] tank 落點外移 160px（8m）找到合法地形（mob=tracked）
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[diff] destroyer 在 82m 內找不到合法落點（mob=naval、半長 9.0m）　剔除：同側 193、離玩家太近 158、地形不可通行 3098、塞不下 9、與其他載具太近 0
+[diff] missileboat 在 82m 內找不到合法落點（mob=naval、半長 5.0m）　剔除：同側 193、離玩家太近 158、地形不可通行 3098、塞不下 9、與其他載具太近 0
+[diff] lst 在 82m 內找不到合法落點（mob=naval、半長 7.0m）　剔除：同側 193、離玩家太近 158、地形不可通行 3098、塞不下 9、與其他載具太近 0
+[diff] submarine 在 82m 內找不到合法落點（mob=naval、半長 7.5m）　剔除：同側 193、離玩家太近 158、地形不可通行 3098、塞不下 9、與其他載具太近 0
+[diff] tank 落點外移 320px（16m）找到合法地形（mob=tracked）
+[diff] destroyer 在這張圖沒有合法落點，改放 tank
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[look] spawn fighter side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] fighter 轉正 rot_deg=(-25.6, 75.9, 28.4)
+[vehart] fighter 只有整件模型，碰撞盒含砲塔（無法分離砲管）
+[vehart] fighter 用立繪生成模型（整件，車長 9.8m，縮放 4.913，實體 9.8×8.0×4.2m）
+[diff] 第 13 章：敵步兵 11、敵載具 3/3（實際/難度表）、掩體 0.66 集火 0.59 側翼 0.48 地形 0.85
+[stress]   對話結束 st=4 (應為 DEPLOY=4)
+[stress] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn mg side=0 player_side=0 mp=res://assets/models/chars/hr_m_Adventurer.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn rifleman side=0 player_side=0 mp=res://assets/models/chars/hr_m_Soldier.fbx
+[rig] rifleman 重定向骨對數=20
+[stress]   已部署數=3 OK
+[stress] 6 開始戰鬥
+[stress]   st=5 (應為 CMD=5)
+[terrchk] 實戰 wrap：wade=0.00m slope=0.02 elev=-0.00m crater=false
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP2570 最近敵距24.9m
+[stress] 回合2 我方開火累計3 我方HP210 敵方HP2463 最近敵距3.8m
+[stress] 回合3 我方開火累計4 我方HP0 敵方HP2462 最近敵距50000000000000000.0m
+[stress] ch13 回合=3 我方存活=0 敵方存活=14 取樣=197 最差幀=65ms 結局=打完
+[selftest] saved res://qa/stress_ch13_end.png
+[stress] ch13 FAILS=0
+[stress] DONE

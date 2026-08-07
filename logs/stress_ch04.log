@@ -1,8 +1,9 @@
-BATCH-20260802-111331
+BATCH-20260805-001132
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
-[GameData] nations=14 classes=17 maps=25 story=15
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
 [stress] 1 主選單 → 劇情戰役
 [stress] 2 章節 04
 [stress] 3 簡報 → 出擊
@@ -34,21 +35,28 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.03 elev=-0.04m crater=false
-[stress] 回合1 我方開火累計0 我方HP300 敵方HP540 最近敵距16.5m
-[stress] 回合2 我方開火累計3 我方HP289 敵方HP475 最近敵距4.9m
-[stress] 回合3 我方開火累計6 我方HP227 敵方HP475 最近敵距0.7m
-[stress] 回合4 我方開火累計9 我方HP201 敵方HP466 最近敵距0.7m
-[stress] 回合5 我方開火累計12 我方HP173 敵方HP440 最近敵距0.7m
-[stress] 回合6 我方開火累計14 我方HP156 敵方HP440 最近敵距0.7m
-[stress] 回合7 我方開火累計16 我方HP146 敵方HP388 最近敵距0.7m
-[weather] 回合 9 10:00 → 雨
-[stress] 回合8 我方開火累計18 我方HP133 敵方HP310 最近敵距1.5m
-[weather] 回合 10 11:00 → 晴
-[stress] 回合9 我方開火累計20 我方HP133 敵方HP310 最近敵距0.7m
-[stress] 回合10 我方開火累計22 我方HP133 敵方HP303 最近敵距0.7m
-[stress] 回合11 我方開火累計24 我方HP133 敵方HP281 最近敵距0.7m
-[stress] 回合12 我方開火累計26 我方HP133 敵方HP259 最近敵距0.7m
-[stress] ch04 回合=12 我方存活=2 敵方存活=3 取樣=129 最差幀=57ms 結局=回合上限
+[fire] rifleman(敵方) → mg(我方) 距離 9.4m
+[stress] 回合1 我方開火累計0 我方HP283 敵方HP540 最近敵距9.4m
+[fire] sniper(我方) → rifleman(敵方) 距離 3.2m
+[fire] mg(我方) → rifleman(敵方) 距離 2.1m
+[fire] rifleman(我方) → rifleman(敵方) 距離 2.6m
+[fire] assault(敵方) → mg(我方) 距離 4.9m
+[stress] 回合2 我方開火累計3 我方HP143 敵方HP440 最近敵距4.9m
+[fire] sniper(我方) → assault(敵方) 距離 0.8m
+[fire] mg(我方) → assault(敵方) 距離 0.9m
+[fire] rifleman(我方) → assault(敵方) 距離 0.8m
+[stress] 回合3 我方開火累計6 我方HP80 敵方HP310 最近敵距1.7m
+[fire] sniper(我方) → at(敵方) 距離 0.7m
+[fire] mg(我方) → at(敵方) 距離 0.8m
+[fire] rifleman(我方) → at(敵方) 距離 0.7m
+[stress] 回合4 我方開火累計9 我方HP80 敵方HP200 最近敵距10.3m
+[fire] sniper(我方) → sniper(敵方) 距離 3.1m
+[stress] 回合5 我方開火累計10 我方HP80 敵方HP120 最近敵距12.1m
+[stress] 回合6 我方開火累計10 我方HP25 敵方HP120 最近敵距17.6m
+[fire] rifleman(我方) → mg(敵方) 距離 10.0m
+[fire] mg(敵方) → rifleman(我方) 距離 8.6m
+[stress] 回合7 我方開火累計11 我方HP12 敵方HP120 最近敵距8.6m
+[stress] ch04 回合=8 我方存活=0 敵方存活=1 取樣=317 最差幀=54ms 結局=打完
 [selftest] saved res://qa/stress_ch04_end.png
 [stress] ch04 FAILS=0
 [stress] DONE

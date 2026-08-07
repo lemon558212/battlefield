@@ -1,8 +1,9 @@
-BATCH-20260802-040806
+BATCH-20260805-011428
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
-[GameData] nations=14 classes=17 maps=25 story=15
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
 [walk] 1 主選單 → 劇情戰役
 [walk] 2 章節 02
 [walk] 3 簡報 → 出擊
@@ -26,7 +27,7 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [walk]   st=5 (應為 CMD=5)
 [walk] 路線 150 個取樣點（10 列 × 15 行，間距 5.5m），地圖 77×54 m
 [walk] 起點 px(18,18)（第 0 個點；前面的都在海裡或障礙裡）
-[walk] 走完 149 段，抵達 53 段；共 6383 次取樣檢查
+[walk] 走完 149 段，抵達 52 段；共 6472 次取樣檢查
 [walk][陷進實體(人在障礙裡)] 0 次 OK
 [walk][浮空或陷地(>0.3m)] 0 次 OK
 [walk][走進深水(>1.35m)] 0 次 OK

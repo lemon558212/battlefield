@@ -1,8 +1,9 @@
-BATCH-20260802-111331
+BATCH-20260805-001132
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
-[GameData] nations=14 classes=17 maps=25 story=15
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
 [stress] 1 主選單 → 劇情戰役
 [stress] 2 章節 01
 [stress] 3 簡報 → 出擊
@@ -30,20 +31,41 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.13 elev=0.13m crater=false
-[stress] 回合1 我方開火累計0 我方HP270 敵方HP310 最近敵距14.9m
-[stress] 回合2 我方開火累計1 我方HP52 敵方HP299 最近敵距2.8m
-[stress] 回合3 我方開火累計3 我方HP52 敵方HP221 最近敵距0.7m
-[weather] 回合 5 06:00 → 雨
-[stress] 回合4 我方開火累計4 我方HP52 敵方HP221 最近敵距0.7m
-[stress] 回合5 我方開火累計6 我方HP52 敵方HP221 最近敵距0.7m
-[weather] 回合 7 08:00 → 晴
-[stress] 回合6 我方開火累計8 我方HP49 敵方HP134 最近敵距2.7m
-[stress] 回合7 我方開火累計9 我方HP49 敵方HP134 最近敵距0.7m
-[stress] 回合8 我方開火累計10 我方HP49 敵方HP125 最近敵距0.7m
-[stress] 回合9 我方開火累計11 我方HP49 敵方HP120 最近敵距14.7m
-[stress] 回合10 我方開火累計12 我方HP49 敵方HP120 最近敵距7.1m
-[stress] 回合11 我方開火累計13 我方HP1 敵方HP120 最近敵距2.1m
-[stress] ch01 回合=12 我方存活=0 敵方存活=1 取樣=289 最差幀=29ms 結局=打完
+[stress] 回合1 我方開火累計0 我方HP270 敵方HP310 最近敵距14.2m
+[fire] rifleman(我方) → sniper(敵方) 距離 6.8m
+[fire] sniper(敵方) → sniper(我方) 距離 17.2m
+[fire] at(敵方) → rifleman(我方) 距離 6.0m
+[stress] 回合2 我方開火累計1 我方HP93 敵方HP291 最近敵距3.5m
+[fire] sniper(我方) → sniper(敵方) 距離 9.8m
+[fire] engineer(我方) → at(敵方) 距離 0.7m
+[stress] 回合3 我方開火累計3 我方HP93 敵方HP213 最近敵距0.7m
+[fire] engineer(我方) → at(敵方) 距離 0.7m
+[stress] 回合4 我方開火累計4 我方HP93 敵方HP204 最近敵距0.7m
+[fire] engineer(我方) → at(敵方) 距離 0.7m
+[weather] 回合 6 06:00 → 濃霧
+[stress] 回合5 我方開火累計5 我方HP93 敵方HP195 最近敵距0.7m
+[fire] sniper(我方) → at(敵方) 距離 0.8m
+[fire] engineer(我方) → at(敵方) 距離 0.7m
+[stress] 回合6 我方開火累計7 我方HP93 敵方HP195 最近敵距0.7m
+[fire] sniper(我方) → at(敵方) 距離 0.7m
+[fire] engineer(我方) → mg(敵方) 距離 4.6m
+[fire] mg(敵方) → engineer(我方) 距離 4.7m
+[weather] 回合 8 08:00 → 晴
+[stress] 回合7 我方開火累計9 我方HP63 敵方HP120 最近敵距4.7m
+[fire] sniper(我方) → mg(敵方) 距離 5.3m
+[fire] engineer(我方) → mg(敵方) 距離 0.8m
+[fire] mg(敵方) → engineer(我方) 距離 1.9m
+[stress] 回合8 我方開火累計11 我方HP51 敵方HP40 最近敵距1.8m
+[fire] engineer(我方) → mg(敵方) 距離 0.7m
+[fire] mg(敵方) → engineer(我方) 距離 2.4m
+[stress] 回合9 我方開火累計12 我方HP42 敵方HP40 最近敵距2.4m
+[fire] engineer(我方) → mg(敵方) 距離 0.7m
+[fire] mg(敵方) → engineer(我方) 距離 2.2m
+[stress] 回合10 我方開火累計13 我方HP24 敵方HP40 最近敵距2.2m
+[fire] engineer(我方) → mg(敵方) 距離 0.7m
+[fire] mg(敵方) → engineer(我方) 距離 2.4m
+[stress] 回合11 我方開火累計14 我方HP6 敵方HP40 最近敵距2.4m
+[stress] ch01 回合=12 我方存活=0 敵方存活=1 取樣=320 最差幀=46ms 結局=打完
 [selftest] saved res://qa/stress_ch01_end.png
 [stress] ch01 FAILS=0
 [stress] DONE

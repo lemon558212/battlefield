@@ -1,1 +1,53 @@
-BATCH-20260802-040806 PENDING
+BATCH-20260805-011428
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
+[walk] 1 主選單 → 劇情戰役
+[walk] 2 章節 07
+[walk] 3 簡報 → 出擊
+[walk] 4 對話：連點推進 (st=3)
+[diff] 地形加碼（×0.40）：彈坑 +3、工事 +2
+[water] 深水圍欄 112 根樁（水深 > 1.05m 的邊界）
+[poles] 桿=9 電線段=72
+[edge] 剔除邊界帶障礙 0 個（安全帶 1.62m，深水圍欄不剔）
+[city] 街廓建築 68 棟、網格 3 種
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] engineer 重定向骨對數=20
+[diff] 敵方載具池：{ "land": ["tank"], "air": ["drone"] }（依作戰域輪流取：["land", "air"]）
+[diff] tank 落點外移 40px（2m）找到合法地形（mob=tracked）
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[diff] 第 7 章：敵步兵 7、敵載具 1/1（實際/難度表）、掩體 0.39 集火 0.26 側翼 0.12 地形 0.40
+[walk]   對話結束 st=4 (應為 DEPLOY=4)
+[walk] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
+[rig] sniper 重定向骨對數=20
+[walk]   已部署數=1 OK
+[walk] 6 開始戰鬥
+[walk]   st=5 (應為 CMD=5)
+[walk] 路線 204 個取樣點（12 列 × 17 行，間距 5.5m），地圖 93×65 m
+[walk] 起點 px(18,18)（第 0 個點；前面的都在海裡或障礙裡）
+[walk] 走完 203 段，抵達 54 段；共 16157 次取樣檢查
+[walk][陷進實體(人在障礙裡)] 0 次 OK
+[walk][浮空或陷地(>0.3m)] 0 次 OK
+[walk][走進深水(>1.35m)] 0 次 OK
+[walk][卡死(目標是空地卻走不到)] 0 次 OK
+[walk][鏡頭穿牆] 0 次 OK
+[walk][走出地圖] 0 次 OK
+[walk] ch07 FAILS=0（拍了 0 張現場照）
+[walk] DONE

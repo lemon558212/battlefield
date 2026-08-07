@@ -1,0 +1,122 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
+
+[GameData] nations=14 classes=17 maps=25 story=15
+[stress] 1 主選單 → 劇情戰役
+[stress] 2 章節 10
+[stress] 3 簡報 → 出擊
+[stress] 4 對話：連點推進 (st=3)
+[diff] 地形加碼（×0.62）：彈坑 +4、工事 +3
+[water] 深水圍欄 94 根樁（水深 > 1.05m 的邊界）
+[poles] 桿=8 電線段=84
+[edge] 剔除邊界帶障礙 0 個（安全帶 1.62m，深水圍欄不剔）
+[rockmat] 型別=ORMMaterial3D albedo_tex=true normal_tex=true triplanar=true tint=(0.6388, 0.5776, 0.4969, 1.0)
+[look] spawn mg side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn at side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] at 重定向骨對數=20
+[look] spawn sniper side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn assault side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] assault 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn rifleman side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] rifleman 重定向骨對數=20
+[look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] engineer 重定向骨對數=20
+[look] spawn mortar side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] mortar 重定向骨對數=20
+[look] spawn specops side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
+[rig] specops 重定向骨對數=20
+[diff] 敵方載具池：{ "land": ["tank"], "sea": ["destroyer", "lst", "missileboat", "submarine"] }（依作戰域輪流取：["land", "sea"]）
+[diff] tank 落點外移 80px（4m）找到合法地形（mob=tracked）
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[diff] destroyer 落點外移 720px（36m）找到合法地形（mob=naval）
+[look] spawn destroyer side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] destroyer 轉正 rot_deg=(3.4, 0.0, 0.0)
+[vehart] destroyer 引擎內切分砲塔：車體 37017 面／砲塔 5418 面（切面 62% 高）
+[vehart] destroyer 用立繪生成模型（車體+砲塔，車長 18.0m，縮放 9.466，實體 18.0×4.4×8.7m）
+[diff] 第 10 章：敵步兵 9、敵載具 2/2（實際/難度表）、掩體 0.53 集火 0.43 側翼 0.30 地形 0.62
+[stress]   對話結束 st=4 (應為 DEPLOY=4)
+[stress] 5 部署：點卡片 → 點藍框放置
+[look] spawn sniper side=0 player_side=0 mp=res://assets/models/chars/hr_w_Swat.fbx
+[rig] sniper 重定向骨對數=20
+[look] spawn mg side=0 player_side=0 mp=res://assets/models/chars/hr_m_Adventurer.fbx
+[rig] mg 重定向骨對數=20
+[look] spawn rifleman side=0 player_side=0 mp=res://assets/models/chars/hr_m_Soldier.fbx
+[rig] rifleman 重定向骨對數=20
+[stress]   已部署數=3 OK
+[stress] 6 開始戰鬥
+[stress]   st=5 (應為 CMD=5)
+[terrchk] 實戰 wrap：wade=0.00m slope=0.08 elev=0.05m crater=false
+[weather] 回合 2 23:00 → 晴
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP2430 最近敵距49.9m
+[weather] 回合 3 22:00 → 濃霧
+[stress] 回合2 我方開火累計0 我方HP300 敵方HP2430 最近敵距42.3m
+[weather] 回合 4 23:00 → 晴
+[stress] 回合3 我方開火累計0 我方HP300 敵方HP2430 最近敵距40.7m
+[weather] 回合 5 22:00 → 濃霧
+[stress] 回合4 我方開火累計0 我方HP300 敵方HP2430 最近敵距38.9m
+[weather] 回合 6 23:00 → 晴
+[stress] 回合5 我方開火累計0 我方HP300 敵方HP2430 最近敵距33.8m
+[weather] 回合 7 22:00 → 濃霧
+[stress] 回合6 我方開火累計0 我方HP300 敵方HP2430 最近敵距38.7m
+[weather] 回合 8 23:00 → 晴
+[stress] 回合7 我方開火累計0 我方HP300 敵方HP2430 最近敵距40.3m
+[weather] 回合 9 22:00 → 濃霧
+[stress] 回合8 我方開火累計0 我方HP300 敵方HP2430 最近敵距38.6m
+ERROR: BUG: Unreferenced static string to 0: markers
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _compression
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _request_gizmo_for_id
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: .
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: Physics2DConstraintSolveIslands
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: Physics2DConstraintSetup
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: Physics3DConstraintSolveIslands
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: Physics3DConstraintSetup
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: servers
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: luminance_buffers
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: color_upscaled
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: quarter_texture
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: sky_buffers
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: half_texture
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: mip_level
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: rb_ssr
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: ssr
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: reflection
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: back_color
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: back_depth
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: VRS
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: sdfgi
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _enter_world
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: Variant
+   at: unref (core/string/string_name.cpp:117)
+ERROR: 7 RID allocations of type '23NavMeshGeometryParser2D' were leaked at exit.
+ERROR: 6 RID allocations of type '23NavMeshGeometryParser3D' were leaked at exit.
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools11BucketLargeE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)

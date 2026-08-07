@@ -1,8 +1,9 @@
-BATCH-20260802-111331
+BATCH-20260805-001132
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
-[GameData] nations=14 classes=17 maps=25 story=15
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
 [stress] 1 主選單 → 劇情戰役
 [stress] 2 章節 09
 [stress] 3 簡報 → 出擊
@@ -28,9 +29,12 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [rig] engineer 重定向骨對數=20
 [look] spawn mortar side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] mortar 重定向骨對數=20
-[look] spawn fighter side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
-[diff] attacker 落點外移 80px 找到合法地形（mob=air）
-[look] spawn attacker side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[diff] 敵方載具池：{ "land": ["tank"], "air": ["drone"] }（依作戰域輪流取：["land", "air"]）
+[diff] tank 落點外移 80px（4m）找到合法地形（mob=tracked）
+[look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
+[look] spawn drone side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
 [diff] 第 9 章：敵步兵 8、敵載具 2/2（實際/難度表）、掩體 0.48 集火 0.37 側翼 0.24 地形 0.55
 [stress]   對話結束 st=4 (應為 DEPLOY=4)
 [stress] 5 部署：點卡片 → 點藍框放置
@@ -44,23 +48,51 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.10 elev=0.16m crater=false
+[fire] sniper(我方) → rifleman(敵方) 距離 0.8m
+[fire] mg(我方) → rifleman(敵方) 距離 0.7m
+[fire] rifleman(我方) → assault(敵方) 距離 0.8m
+[fire] rifleman(敵方) → sniper(我方) 距離 4.5m
 [weather] 回合 2 11:00 → 晴
-[stress] 回合1 我方開火累計2 我方HP290 敵方HP1270 最近敵距0.7m
-[stress] 回合2 我方開火累計4 我方HP285 敵方HP1246 最近敵距0.5m
+[stress] 回合1 我方開火累計3 我方HP228 敵方HP1260 最近敵距0.7m
+[fire] sniper(我方) → rifleman(敵方) 距離 0.7m
+[fire] mg(我方) → rifleman(敵方) 距離 0.7m
+[fire] rifleman(我方) → rifleman(敵方) 距離 0.7m
+[fire] engineer(敵方) → rifleman(我方) 距離 4.2m
+[fire] mortar(敵方) → rifleman(我方) 距離 3.9m
+[stress] 回合2 我方開火累計6 我方HP108 敵方HP1176 最近敵距0.7m
+[fire] mg(我方) → rifleman(敵方) 距離 0.7m
+[fire] rifleman(我方) → rifleman(敵方) 距離 0.7m
+[fire] rifleman(敵方) → rifleman(我方) 距離 1.3m
+[fire] mortar(敵方) → mg(我方) 距離 5.5m
 [weather] 回合 4 10:00 → 濃霧
-[stress] 回合3 我方開火累計7 我方HP158 敵方HP983 最近敵距0.7m
+[stress] 回合3 我方開火累計8 我方HP93 敵方HP1128 最近敵距2.3m
+[fire] mg(我方) → at(敵方) 距離 0.8m
+[fire] drone(敵方) → mg(我方) 距離 6.8m
+[fire] engineer(敵方) → mg(我方) 距離 6.3m
 [weather] 回合 5 11:00 → 晴
-[stress] 回合4 我方開火累計9 我方HP144 敵方HP928 最近敵距0.7m
-[stress] 回合5 我方開火累計11 我方HP108 敵方HP883 最近敵距0.7m
+[stress] 回合4 我方開火累計9 我方HP93 敵方HP1092 最近敵距0.8m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] engineer(敵方) → mg(我方) 距離 6.4m
+[fire] rifleman(敵方) → mg(我方) 距離 6.4m
+[stress] 回合5 我方開火累計10 我方HP65 敵方HP1067 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] engineer(敵方) → mg(我方) 距離 6.2m
 [weather] 回合 7 10:00 → 濃霧
-[stress] 回合6 我方開火累計13 我方HP108 敵方HP784 最近敵距0.7m
+[stress] 回合6 我方開火累計11 我方HP65 敵方HP1060 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] engineer(敵方) → mg(我方) 距離 6.6m
+[fire] rifleman(敵方) → mg(我方) 距離 6.2m
 [weather] 回合 8 11:00 → 晴
-[stress] 回合7 我方開火累計15 我方HP77 敵方HP748 最近敵距0.7m
-[stress] 回合8 我方開火累計17 我方HP58 敵方HP739 最近敵距0.7m
-[weather] 回合 10 10:00 → 濃霧
-[stress] 回合9 我方開火累計18 我方HP24 敵方HP697 最近敵距0.7m
-[stress] 回合10 我方開火累計19 我方HP0 敵方HP682 最近敵距50000000000000000.0m
-[stress] ch09 回合=10 我方存活=0 敵方存活=7 取樣=40 最差幀=59ms 結局=打完
+[stress] 回合7 我方開火累計12 我方HP48 敵方HP1047 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] drone(敵方) → mg(我方) 距離 10.5m
+[fire] rifleman(敵方) → mg(我方) 距離 6.5m
+[fire] engineer(敵方) → mg(我方) 距離 6.5m
+[stress] 回合8 我方開火累計13 我方HP48 敵方HP1018 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] at(敵方) → mg(我方) 距離 1.5m
+[stress] 回合9 我方開火累計14 我方HP0 敵方HP1011 最近敵距50000000000000000.0m
+[stress] ch09 回合=9 我方存活=0 敵方存活=7 取樣=22 最差幀=57ms 結局=打完
 [selftest] saved res://qa/stress_ch09_end.png
 [stress] ch09 FAILS=0
 [stress] DONE

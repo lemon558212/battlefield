@@ -1,8 +1,9 @@
-BATCH-20260802-111331
+BATCH-20260805-001132
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
-[GameData] nations=14 classes=17 maps=25 story=15
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
 [stress] 1 主選單 → 劇情戰役
 [stress] 2 章節 03
 [stress] 3 簡報 → 出擊
@@ -36,18 +37,50 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [terrchk] 實戰 wrap：wade=0.00m slope=0.32 elev=-0.06m crater=false
 [weather] 回合 2 11:00 → 晴
 [stress] 回合1 我方開火累計0 我方HP300 敵方HP540 最近敵距14.7m
-[stress] 回合2 我方開火累計2 我方HP273 敵方HP441 最近敵距6.1m
+[fire] sniper(我方) → rifleman(敵方) 距離 7.4m
+[fire] mg(我方) → rifleman(敵方) 距離 8.4m
+[fire] assault(敵方) → sniper(我方) 距離 4.9m
+[fire] at(敵方) → sniper(我方) 距離 6.1m
+[fire] sniper(敵方) → mg(我方) 距離 18.8m
+[stress] 回合2 我方開火累計2 我方HP187 敵方HP445 最近敵距5.9m
+[fire] mg(我方) → assault(敵方) 距離 0.7m
+[fire] rifleman(我方) → assault(敵方) 距離 1.0m
 [weather] 回合 4 10:00 → 雨
-[stress] 回合3 我方開火累計5 我方HP207 敵方HP421 最近敵距0.7m
+[stress] 回合3 我方開火累計4 我方HP157 敵方HP428 最近敵距0.7m
+[fire] mg(我方) → assault(敵方) 距離 0.7m
+[fire] rifleman(我方) → assault(敵方) 距離 0.7m
 [weather] 回合 5 11:00 → 晴
-[stress] 回合4 我方開火累計8 我方HP207 敵方HP330 最近敵距4.6m
-[stress] 回合5 我方開火累計11 我方HP158 敵方HP200 最近敵距7.8m
+[stress] 回合4 我方開火累計6 我方HP151 敵方HP411 最近敵距0.7m
+[fire] mg(我方) → assault(敵方) 距離 0.7m
+[fire] rifleman(我方) → assault(敵方) 距離 0.7m
+[stress] 回合5 我方開火累計8 我方HP138 敵方HP315 最近敵距1.8m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] rifleman(我方) → at(敵方) 距離 1.0m
 [weather] 回合 7 10:00 → 雨
-[stress] 回合6 我方開火累計14 我方HP119 敵方HP129 最近敵距0.8m
+[stress] 回合6 我方開火累計10 我方HP138 敵方HP300 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] rifleman(我方) → at(敵方) 距離 0.7m
 [weather] 回合 8 11:00 → 晴
-[stress] 回合7 我方開火累計16 我方HP107 敵方HP85 最近敵距4.7m
-[stress] 回合8 我方開火累計18 我方HP75 敵方HP0 最近敵距50000000000000000.0m
-[stress] ch03 回合=8 我方存活=2 敵方存活=0 取樣=218 最差幀=56ms 結局=打完
+[stress] 回合7 我方開火累計12 我方HP138 敵方HP285 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] rifleman(我方) → at(敵方) 距離 0.7m
+[stress] 回合8 我方開火累計14 我方HP138 敵方HP263 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] rifleman(我方) → at(敵方) 距離 0.7m
+[weather] 回合 10 10:00 → 雨
+[stress] 回合9 我方開火累計16 我方HP138 敵方HP263 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] rifleman(我方) → at(敵方) 距離 0.7m
+[weather] 回合 11 11:00 → 晴
+[stress] 回合10 我方開火累計18 我方HP138 敵方HP256 最近敵距0.7m
+[fire] mg(我方) → at(敵方) 距離 0.7m
+[fire] rifleman(我方) → at(敵方) 距離 0.7m
+[stress] 回合11 我方開火累計20 我方HP138 敵方HP205 最近敵距11.5m
+[fire] mg(我方) → sniper(敵方) 距離 3.9m
+[fire] rifleman(我方) → sniper(敵方) 距離 3.4m
+[weather] 回合 13 10:00 → 雨
+[stress] 回合12 我方開火累計22 我方HP103 敵方HP63 最近敵距3.4m
+[stress] ch03 回合=12 我方存活=2 敵方存活=2 取樣=192 最差幀=54ms 結局=回合上限
 [selftest] saved res://qa/stress_ch03_end.png
 [stress] ch03 FAILS=0
 [stress] DONE

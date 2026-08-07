@@ -1,0 +1,134 @@
+=== play 2026-08-05 00:09:44 ===
+/c/Users/User/AppData/Local/Temp/claude/C--Users-User-Desktop---/ce3cf3cb-ee5e-44c6-9073-5b5fd938b7a3/scratchpad/full_rerun.sh: line 7:  2154 Segmentation fault         "$G" --path godot/ -- play > logs/play.log 2>&1
+[play] FAILS=0
+=== stress 1..15 00:11:31 ===
+本批次 ID：BATCH-20260805-001132
+[gpuguard] 放行：無 Godot 行程，可用 VRAM 8151MB
+=== stress ch01  00:11:32 ===
+tools/run_stress_all_v2.sh: line 33:  2469 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch01 FAILS=0
+=== stress ch02  00:14:01 ===
+tools/run_stress_all_v2.sh: line 33:  2486 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch02 FAILS=0
+=== stress ch03  00:16:58 ===
+tools/run_stress_all_v2.sh: line 33:  2499 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch03 FAILS=0
+=== stress ch04  00:19:54 ===
+tools/run_stress_all_v2.sh: line 33:  2512 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch04 FAILS=0
+=== stress ch05  00:22:13 ===
+tools/run_stress_all_v2.sh: line 33:  2525 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch05 FAILS=0
+=== stress ch06  00:25:33 ===
+tools/run_stress_all_v2.sh: line 33:  2538 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch06 FAILS=0
+=== stress ch07  00:28:26 ===
+tools/run_stress_all_v2.sh: line 33:  2551 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch07 FAILS=0
+=== stress ch08  00:36:27 ===
+tools/run_stress_all_v2.sh: line 33:  2564 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch08 FAILS=0
+=== stress ch09  00:40:29 ===
+tools/run_stress_all_v2.sh: line 33:  2577 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch09 FAILS=0
+=== stress ch10  00:42:06 ===
+tools/run_stress_all_v2.sh: line 33:  2590 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch10 FAILS=0
+=== stress ch11  00:50:52 ===
+tools/run_stress_all_v2.sh: line 33:  2603 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch11 FAILS=0
+=== stress ch12  00:54:13 ===
+tools/run_stress_all_v2.sh: line 33:  2616 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch12 FAILS=0
+=== stress ch13  01:00:09 ===
+tools/run_stress_all_v2.sh: line 33:  2629 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch13 FAILS=0
+=== stress ch14  01:03:09 ===
+tools/run_stress_all_v2.sh: line 33:  2642 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch14 FAILS=0
+=== stress ch15  01:11:01 ===
+tools/run_stress_all_v2.sh: line 33:  2659 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[stress] ch15 FAILS=0
+=== 總表（stress ch1..ch15，只認 BATCH-20260805-001132）===
+[stress] ch01 FAILS=0 
+[stress] ch02 FAILS=0 
+[stress] ch03 FAILS=0 
+[stress] ch04 FAILS=0 
+[stress] ch05 FAILS=0 
+[stress] ch06 FAILS=0 
+[stress] ch07 FAILS=0 
+[stress] ch08 FAILS=0 
+[stress] ch09 FAILS=0 
+[stress] ch10 FAILS=0 
+[stress] ch11 FAILS=0 
+[stress] ch12 FAILS=0 
+[stress] ch13 FAILS=0 
+[stress] ch14 FAILS=0 
+[stress] ch15 FAILS=0 
+本批次：15 章 FAILS=0／0 章有 FAIL／0 章未完成／0 章有引擎紅字
+=== walk 1..15 01:14:28 ===
+本批次 ID：BATCH-20260805-011428
+[gpuguard] 放行：無 Godot 行程，可用 VRAM 8129MB
+=== walk ch01  01:14:28 ===
+tools/run_stress_all_v2.sh: line 33:  2870 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch01 FAILS=0（拍了 0 張現場照）
+=== walk ch02  01:39:25 ===
+tools/run_stress_all_v2.sh: line 33:  2894 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch02 FAILS=0（拍了 0 張現場照）
+=== walk ch03  02:02:28 ===
+tools/run_stress_all_v2.sh: line 33:  2904 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch03 FAILS=0（拍了 0 張現場照）
+=== walk ch04  02:25:08 ===
+tools/run_stress_all_v2.sh: line 33:  2917 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch04 FAILS=0（拍了 0 張現場照）
+=== walk ch05  02:50:35 ===
+tools/run_stress_all_v2.sh: line 33:  2930 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch05 FAILS=0（拍了 0 張現場照）
+=== walk ch06  03:16:46 ===
+tools/run_stress_all_v2.sh: line 33:  2947 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch06 FAILS=0（拍了 0 張現場照）
+=== walk ch07  03:44:02 ===
+tools/run_stress_all_v2.sh: line 33:  2960 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch07 FAILS=0（拍了 0 張現場照）
+=== walk ch08  04:41:45 ===
+tools/run_stress_all_v2.sh: line 33:  2973 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch08 FAILS=0（拍了 0 張現場照）
+=== walk ch09  05:26:25 ===
+tools/run_stress_all_v2.sh: line 33:  2986 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch09 FAILS=0（拍了 0 張現場照）
+=== walk ch10  05:42:56 ===
+tools/run_stress_all_v2.sh: line 33:  2999 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch10 FAILS=0（拍了 0 張現場照）
+=== walk ch11  06:29:52 ===
+tools/run_stress_all_v2.sh: line 33:  3012 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch11 FAILS=0（拍了 0 張現場照）
+=== walk ch12  06:57:05 ===
+tools/run_stress_all_v2.sh: line 33:  3025 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch12 FAILS=0（拍了 0 張現場照）
+=== walk ch13  07:34:14 ===
+tools/run_stress_all_v2.sh: line 33:  3038 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch13 FAILS=0（拍了 0 張現場照）
+=== walk ch14  08:41:27 ===
+tools/run_stress_all_v2.sh: line 33:  4127 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch14 FAILS=0（拍了 0 張現場照）
+=== walk ch15  17:10:55 ===
+tools/run_stress_all_v2.sh: line 33:  4411 Segmentation fault         "$G" --path godot/ -- "$MODE" "$ch" 2>&1
+[walk] ch15 FAILS=0（拍了 0 張現場照）
+=== 總表（walk ch1..ch15，只認 BATCH-20260805-011428）===
+[walk] ch01 FAILS=0（拍了 0 張現場照） 
+[walk] ch02 FAILS=0（拍了 0 張現場照） 
+[walk] ch03 FAILS=0（拍了 0 張現場照） 
+[walk] ch04 FAILS=0（拍了 0 張現場照） 
+[walk] ch05 FAILS=0（拍了 0 張現場照） 
+[walk] ch06 FAILS=0（拍了 0 張現場照） 
+[walk] ch07 FAILS=0（拍了 0 張現場照） 
+[walk] ch08 FAILS=0（拍了 0 張現場照） 
+[walk] ch09 FAILS=0（拍了 0 張現場照） 
+[walk] ch10 FAILS=0（拍了 0 張現場照） 
+[walk] ch11 FAILS=0（拍了 0 張現場照） 
+[walk] ch12 FAILS=0（拍了 0 張現場照） 
+[walk] ch13 FAILS=0（拍了 0 張現場照） 
+[walk] ch14 FAILS=0（拍了 0 張現場照） 
+[walk] ch15 FAILS=0（拍了 0 張現場照） 
+本批次：15 章 FAILS=0／0 章有 FAIL／0 章未完成／0 章有引擎紅字
+=== 全部結束 2026-08-05 18:02:39 ===

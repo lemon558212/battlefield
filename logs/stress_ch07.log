@@ -1,8 +1,9 @@
-BATCH-20260802-111331
+BATCH-20260805-001132
 Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
 Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 Laptop GPU
 
-[GameData] nations=14 classes=17 maps=25 story=15
+[GameData] nations=14 classes=11 maps=25 story=15
+[test] 固定亂數種子 20260804（測試結果要可重現）
 [stress] 1 主選單 → 劇情戰役
 [stress] 2 章節 07
 [stress] 3 簡報 → 出擊
@@ -26,9 +27,11 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [rig] rifleman 重定向骨對數=20
 [look] spawn engineer side=1 player_side=0 mp=res://assets/models/chars/hr_m_Suit.fbx
 [rig] engineer 重定向骨對數=20
-[diff] tank 落點外移 40px 找到合法地形（mob=tracked）
+[diff] 敵方載具池：{ "land": ["tank"], "air": ["drone"] }（依作戰域輪流取：["land", "air"]）
+[diff] tank 落點外移 40px（2m）找到合法地形（mob=tracked）
 [look] spawn tank side=1 player_side=0 mp=res://assets/models/chars/soldier.glb
-[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 3.107）
+[vehart] tank 引擎內切分砲塔：車體 27897 面／砲塔 15591 面（切面 46% 高）
+[vehart] tank 用立繪生成模型（車體+砲塔，車長 6.2m，縮放 4.248，實體 8.1×3.1×2.4m）
 [diff] 第 7 章：敵步兵 7、敵載具 1/1（實際/難度表）、掩體 0.39 集火 0.26 側翼 0.12 地形 0.40
 [stress]   對話結束 st=4 (應為 DEPLOY=4)
 [stress] 5 部署：點卡片 → 點藍框放置
@@ -42,19 +45,46 @@ Vulkan 1.4.329 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce RTX 5060 La
 [stress] 6 開始戰鬥
 [stress]   st=5 (應為 CMD=5)
 [terrchk] 實戰 wrap：wade=0.00m slope=0.02 elev=-0.06m crater=false
-[stress] 回合1 我方開火累計0 我方HP300 敵方HP1330 最近敵距40.4m
-[stress] 回合2 我方開火累計0 我方HP300 敵方HP1330 最近敵距22.4m
-[stress] 回合3 我方開火累計1 我方HP300 敵方HP1330 最近敵距14.2m
-[stress] 回合4 我方開火累計3 我方HP300 敵方HP1250 最近敵距8.9m
-[stress] 回合5 我方開火累計6 我方HP284 敵方HP1136 最近敵距7.9m
-[stress] 回合6 我方開火累計7 我方HP284 敵方HP1095 最近敵距28.5m
-[stress] 回合7 我方開火累計7 我方HP284 敵方HP1095 最近敵距21.5m
-[stress] 回合8 我方開火累計7 我方HP220 敵方HP1095 最近敵距16.9m
-[stress] 回合9 我方開火累計7 我方HP220 敵方HP1095 最近敵距16.9m
-[stress] 回合10 我方開火累計7 我方HP220 敵方HP1095 最近敵距16.9m
-[stress] 回合11 我方開火累計7 我方HP220 敵方HP1095 最近敵距16.9m
-[stress] 回合12 我方開火累計7 我方HP220 敵方HP1095 最近敵距16.9m
-[stress] ch07 回合=12 我方存活=2 敵方存活=7 取樣=408 最差幀=94ms 結局=回合上限
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1023)
+[stress] 回合1 我方開火累計0 我方HP300 敵方HP1330 最近敵距37.7m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[weather] 回合 3 10:00 → 濃霧
+[stress] 回合2 我方開火累計0 我方HP300 敵方HP1330 最近敵距22.3m
+[fire] sniper(我方) → assault(敵方) 距離 14.9m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[stress] 回合3 我方開火累計1 我方HP300 敵方HP1250 最近敵距14.9m
+[fire] sniper(我方) → assault(敵方) 距離 7.6m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[fire] at(敵方) → sniper(我方) 距離 8.9m
+[stress] 回合4 我方開火累計2 我方HP300 敵方HP1200 最近敵距8.9m
+[fire] sniper(我方) → at(敵方) 距離 6.2m
+[fire] mg(我方) → at(敵方) 距離 6.2m
+[fire] rifleman(我方) → at(敵方) 距離 6.3m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[fire] sniper(敵方) → sniper(我方) 距離 17.1m
+[stress] 回合5 我方開火累計5 我方HP300 敵方HP1110 最近敵距17.1m
+[fire] sniper(我方) → sniper(敵方) 距離 17.1m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[weather] 回合 7 14:00 → 晴
+[stress] 回合6 我方開火累計6 我方HP300 敵方HP1110 最近敵距17.1m
+[fire] sniper(我方) → sniper(敵方) 距離 17.1m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[stress] 回合7 我方開火累計7 我方HP300 敵方HP1110 最近敵距16.8m
+[fire] sniper(我方) → rifleman(敵方) 距離 16.7m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[stress] 回合8 我方開火累計8 我方HP300 敵方HP1027 最近敵距17.1m
+[fire] sniper(我方) → sniper(敵方) 距離 17.1m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[stress] 回合9 我方開火累計9 我方HP300 敵方HP1027 最近敵距17.1m
+[fire] sniper(我方) → sniper(敵方) 距離 17.1m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1024)
+[stress] 回合10 我方開火累計10 我方HP300 敵方HP1027 最近敵距17.1m
+[fire] sniper(我方) → sniper(敵方) 距離 17.1m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1025)
+[stress] 回合11 我方開火累計11 我方HP300 敵方HP947 最近敵距28.3m
+[veh] tank 頂著障礙空轉，停車改路 px=(1687,1025)
+[stress] 回合12 我方開火累計11 我方HP300 敵方HP947 最近敵距28.6m
+[stress] ch07 回合=12 我方存活=3 敵方存活=6 取樣=453 最差幀=72ms 結局=回合上限
 [selftest] saved res://qa/stress_ch07_end.png
 [stress] ch07 FAILS=0
 [stress] DONE
