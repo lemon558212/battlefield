@@ -88,6 +88,8 @@ const ALIGN_BONES := ["upperarm_l", "lowerarm_l", "upperarm_r", "lowerarm_r",
 # 診斷開關：`-- lookshots rigpart=torso` ＝只轉印軀幹，其餘骨頭留在 rest。
 # 空字串＝全部轉印（正常行為）。這是為了定位「哪一段的轉印把身體弄壞」。
 static var PART := _arg_part()
+# 只在帶 rigpose 參數時印（每幀都印會洗掉整份日誌）
+static var _diag_pose := "rigpose" in OS.get_cmdline_user_args()
 static func _arg_part() -> String:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("rigpart="):
@@ -222,6 +224,24 @@ func _ensure_align() -> void:
 				aligned += 1
 		_align.append(q)
 	_align_ok = true
+	# 診斷（2026-08-05，追「上身前傾 30~45°」）：把**每一對骨**的 rest 方向差都印出來，
+	# 不只印最大值。因為 ALIGN_BONES 只補正四肢，軀幹那幾根若也有大角度差，
+	# 差量轉印就會把差額一路累到上半身——但舊日誌只印「4/20 對需要補正」，
+	# 看不出軀幹到底差多少，等於把最關鍵的那段藏起來了。
+	if DBG or aligned > 0:
+		for pi2 in _pairs.size():
+			var p2: Array = _pairs[pi2]
+			var sd2: Vector3 = _bone_dir_rest(_src, p2[0])
+			var dd2: Vector3 = _bone_dir_rest(_dst, p2[1])
+			if sd2.length() < 0.0001 or dd2.length() < 0.0001:
+				continue
+			var sw2: Vector3 = (s_root * sd2).normalized()
+			var dw2: Vector3 = (d_root * dd2).normalized()
+			var dg: float = rad_to_deg(acos(clampf(sw2.dot(dw2), -1.0, 1.0)))
+			var seg: String = String(p2[2]) if p2.size() > 2 else "?"
+			var bn: String = String(p2[3]) if p2.size() > 3 else "?"
+			print("[rigdiff] %-10s %-12s rest 方向差 %6.1f°%s"
+					% [seg, bn, dg, "  ← 有補正" if (bn in ALIGN_BONES and dg > 45.0) else ""])
 	if DBG or aligned > 0:
 		print("[rig] rest 對齊：%d/%d 對骨需要補正（>45°），最大方向差 %.1f°"
 				% [aligned, _pairs.size(), max_deg])
@@ -289,6 +309,42 @@ func apply() -> void:
 		if dp >= 0:
 			parent_q = _dst.get_bone_global_pose(dp).basis.get_rotation_quaternion()
 		_dst.set_bone_pose_rotation(di, parent_q.inverse() * target_skel)
+		# 診斷（2026-08-05）：印出**這根骨實際被轉了多少、往哪邊倒**。
+		# rest 方向差（_ensure_align 那組）講的是「兩邊 rest 差多少」；
+		# 這裡講的是「轉印之後相對自己的 rest 轉了多少」——前傾是後者造成的。
+		# 兩個數字要分開看才追得下去。
+		if _diag_pose and p.size() > 3 and String(p[2]) == "torso":
+			var d_up: Vector3 = (d_rest_w * Vector3.UP).normalized()
+			var t_up: Vector3 = (target_w * Vector3.UP).normalized()
+			var turn: float = rad_to_deg(acos(clampf(d_up.dot(t_up), -1.0, 1.0)))
+			var lean: float = rad_to_deg(asin(clampf(t_up.z - d_up.z, -1.0, 1.0)))
+			print("[rigpose] %-12s 轉了 %5.1f 度（前後傾變化 %+5.1f 度，正=往前倒）"
+					% [String(p[3]), turn, lean])
+	# 診斷（rigpose）：印出**最終姿勢**下「骨盆→頭」這條線的傾角。
+	# ⚠ 這是唯一能回答「上身到底有沒有前傾」的數字——前面那些（rest 方向差、
+	#   每根骨轉了幾度）都只講局部。眼睛看渲染圖會被大衣輪廓與鏡頭角度騙。
+	if _diag_pose:
+		var hi := _bone("Hips")
+		var he := _bone("Head")
+		# ⚠ 找不到就要喊：tripo 的骨叫 Hip 不是 Hips，別名沒對上就會**靜默跳過**，
+		#   於是「所有角色都沒前傾」這個結論其實漏掉了唯一要驗的那個角色。
+		if hi < 0 or he < 0:
+			print("[rigtilt] ⚠ 量不到（Hips=%d Head=%d）骨架=%s，前三根骨：%s/%s/%s"
+					% [hi, he, _dst.name,
+					_dst.get_bone_name(0) if _dst.get_bone_count() > 0 else "-",
+					_dst.get_bone_name(1) if _dst.get_bone_count() > 1 else "-",
+					_dst.get_bone_name(2) if _dst.get_bone_count() > 2 else "-"])
+		if hi >= 0 and he >= 0:
+			var d_rootb := _dst.global_basis.orthonormalized().get_rotation_quaternion()
+			var pv: Vector3 = d_rootb * _dst.get_bone_global_pose(hi).origin
+			var hv: Vector3 = d_rootb * _dst.get_bone_global_pose(he).origin
+			var v: Vector3 = hv - pv
+			if v.length() > 0.0001:
+				print("[rigtilt] %s：骨盆→頭 與垂直夾角 %.1f 度，前後傾 %.1f 度（正=往前倒）"
+						% [_dst.get_bone_name(hi) + "→" + _dst.get_bone_name(he)
+						+ "（骨數 %d）" % _dst.get_bone_count(),
+						rad_to_deg(v.normalized().angle_to(Vector3.UP)),
+						rad_to_deg(atan2(v.z, v.y))])
 	# ⚠⚠ 位移轉印只對 Quaternius 骨架做（2026-08-02）。
 	#   旋轉走「相對自身 rest 的差量」，跨骨架相對安全；但**位移**依賴
 	#   _height_ratio 與兩邊 rest 的幾何比例，是最吃骨架結構的一步。
@@ -453,6 +509,12 @@ func ik_reach(upper: String, lower: String, hand: String, target_world: Vector3,
 # 在世界座標對單一骨骼疊加一段旋轉，用於瞄準時上半身/頭跟著俯仰。
 func add_world_rotation(bone: String, axis_world: Vector3, angle: float) -> void:
 	var bi := _bone(bone)
+	# 診斷（rigpose）：印出「要求哪根骨 → 實際找到哪根 → 轉幾度」。
+	# ⚠ 這類「靠別名表找骨頭」的呼叫在跨骨架時最危險：找不到就靜默 return
+	#   （姿勢整段消失），或找到**別的骨**（轉錯地方）。兩種都不會有錯誤訊息。
+	if _diag_pose:
+		print("[rigrot] 要求 %-10s → %s，角度 %.1f 度"
+				% [bone, ("找不到" if bi < 0 else _dst.get_bone_name(bi)), rad_to_deg(angle)])
 	if bi < 0 or is_zero_approx(angle):
 		return
 	var d_root := _dst.global_basis.get_rotation_quaternion()
@@ -607,6 +669,10 @@ func blend_pose(pose: Dictionary, weight: float, with_hips: bool = true) -> void
 # 以 rest 為基準，對骨骼施加一段固定角度（手寫姿勢用）。
 # 重定向在某些骨架會扭壞，手寫姿勢則完全可控——蹲/趴這種靜態姿勢用這個最穩。
 func bend_bone(bone: String, axis: int, degrees: float, weight: float = 1.0) -> void:
+	if _diag_pose:
+		var bi0 := _bone(bone)
+		print("[rigrot] bend %-10s → %s，軸 %d、角度 %.1f 度 ×%.2f"
+				% [bone, ("找不到" if bi0 < 0 else _dst.get_bone_name(bi0)), axis, degrees, weight])
 	var bi := _bone(bone)
 	if bi < 0 or weight <= 0.001:
 		return

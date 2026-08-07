@@ -6,8 +6,8 @@
   "coat": "#3c3c3d",
   "lower": "#c9c7c0",
   "accent": "#8d8f96",
-  "base": "res://assets/models/chars/hr_w_Swat.fbx",
-  "own_look": false,
+  "base": "res://assets/models/chars/tripo_han.glb",
+  "own_look": true,
   "head": "boonie",
   "pack": "slim",
   "build": [
