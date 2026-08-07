@@ -1946,6 +1946,7 @@ func _tick_stamina(delta: float, running: bool) -> void:
 const LOCO := preload("res://scripts/Locomotion.gd")
 const LOCO_PROFILE := preload("res://scripts/LocomotionProfile.gd")
 const FOOT_IK := preload("res://scripts/FootIK.gd")
+const HEAD_LOOK := preload("res://scripts/HeadLook.gd")
 const PROFILE_RES := "res://data/locomotion_default.tres"
 
 # 全體共用一份參數（Resource 只讀，不會互相污染）；找不到 .tres 就用程式預設值。
@@ -1960,6 +1961,11 @@ static func loco_profile() -> LocomotionProfile:
 
 var loco: Locomotion = null        # 速度／轉向／步態／踏頻（每個單位一份狀態）
 var foot_ik: FootIK = null         # 腳步貼地 IK
+var head_look: HeadLook = null     # 頭部注視
+# 注視目標（世界座標，null＝沒有）。由 Main 每 0.25 秒指派「看得見的最近威脅」。
+# 優先序：aim_point（正在瞄的人）> look_point（環境裡的威脅）——
+# 正在瞄準時眼睛當然是盯著準心，不會分心去看別人。
+var look_point = null
 var _vel := Vector3.ZERO           # 保留：外部若有讀 _vel 仍要拿得到值（= loco.velocity）
 
 func wade_mul() -> float:
@@ -2173,6 +2179,8 @@ func _ensure_loco() -> void:
 		loco = LOCO.new(loco_profile())
 	if foot_ik == null:
 		foot_ik = FOOT_IK.new(loco_profile())
+	if head_look == null:
+		head_look = HEAD_LOOK.new(loco_profile())
 
 
 # 鬆開方向鍵之後（GDD/07）。
@@ -2491,7 +2499,47 @@ func loco_debug() -> String:
 		return "loco 未初始化"
 	var s: String = "%s | %s" % [loco.debug_line(),
 			foot_ik.debug_line() if foot_ik != null else "footIK 無"]
+	s = "%s | %s" % [s, head_look.debug_line() if head_look != null else "注視 無"]
 	return "%s | 蹲%.2f 趴%.2f 落%.1f" % [s, _crouch, _prone, _fall_v]
+
+
+# 頭骨的世界朝向（量測用）。回傳 [頭骨世界座標, 用來看朝向的那個軸]；
+# 沒有頭骨就回空陣列。
+# ⚠ 為什麼不直接回「頭的正面向量」：每一系骨架的頭骨正面軸都不一樣
+#   （Quaternius 是 +Z、tripo 是 +X），寫死哪一軸就是在賭。量測端要的其實只是
+#   「同一個軸在兩種注視狀態下差了幾度」，那不需要知道哪一軸是正面——
+#   只要挑一個**水平分量夠大**的軸即可（Y 軸接近旋轉軸，投影出來會亂跳）。
+var _head_axis_i := -1             # head_axis() 選定的軸（只挑一次）
+func head_axis() -> Array:
+	if _rig == null:
+		return []
+	var pos: Vector3 = _rig.bone_pos("Head")
+	if pos == Vector3.ZERO:
+		return []
+	# 挑「最接近身體正面／背面」的那一根軸，而且只挑一次就記住。
+	# ⚠ 第一版挑的是「水平分量最大」的軸，結果挑到頭骨的**側向軸**——
+	#   它跟俯仰的旋轉軸（right_dir）幾乎平行，所以抬頭低頭時它根本不動：
+	#   偏轉量得到 120°、俯仰卻只量到 0.034，看起來像「俯仰沒實作」，
+	#   其實是拿了一根對俯仰完全瞎的尺。前後向的軸對偏轉與俯仰都有反應。
+	# ⚠ 兩次取樣如果挑到不同的軸，量出來的「頭轉了幾度」就是在比較兩根不同的軸
+	#   ＝憑空多出 90 度，所以選定後就固定。
+	if _head_axis_i < 0:
+		var f: Vector3 = facing_dir()
+		var best_d := 0.0
+		for ax in 3:
+			var v: Vector3 = _rig.bone_axis("Head", ax)
+			var flat := Vector3(v.x, 0.0, v.z)
+			var d: float = absf(flat.normalized().dot(f)) * flat.length()
+			if d > best_d:
+				best_d = d
+				_head_axis_i = ax
+		if best_d < 0.2:
+			_head_axis_i = -1
+			return []
+	var a: Vector3 = _rig.bone_axis("Head", _head_axis_i)
+	if a == Vector3.ZERO:
+		return []
+	return [pos, a]
 
 
 # ★踏頻原生速度的執行期量測（2026-08-07 第二版）。
@@ -3249,7 +3297,32 @@ func _on_skeleton_updated() -> void:
 		_rig.apply()
 	_aim_pose()
 	_apply_foot_ik()
+	_apply_head_look()
 	_in_pose = false
+
+
+# 頭部注視（2026-08-07）。順序在 _aim_pose 之後：趴姿那段自己會抬頭，
+# 反過來會被蓋掉；也在 foot IK 之後，理由只是「頭跟腳互不相干，排最後最單純」。
+func _apply_head_look() -> void:
+	if head_look == null or _rig == null or _is_vehicle:
+		return
+	if not head_look.is_ready():
+		head_look.bind(_rig)
+		if not head_look.is_ready():
+			return
+	# 權重＝「這一刻該不該用眼睛追東西」：
+	#   死了不看、趴著的抬頭另有一整套姿勢（_aim_pose 的 prone 段）不要兩邊搶。
+	var w := 1.0
+	if _dead:
+		w = 0.0
+	elif _prone > 0.05:
+		w = 1.0 - clampf(_prone, 0.0, 1.0)
+	# 遠處的人轉不轉頭看不出來，省下來（跟 foot IK 同一條 LOD 線）
+	if _cam_dist > head_look.p.ik_cull_distance:
+		w = 0.0
+	var tgt = aim_point if aim_point != null else look_point
+	head_look.apply(tgt, _rig.bone_pos("Head"), facing_dir(), right_dir(), w,
+			maxf(get_process_delta_time(), 0.0001))
 
 # 蹲姿：模型自帶動畫組沒有 crouch，改由 UAL 動作庫的 Crouch_Idle 重定向過來。
 # 只在第一個單位生成時算一次，結果存成靜態姿勢表全體共用（省掉每單位一份骨架與動畫播放器）。

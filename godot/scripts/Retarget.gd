@@ -568,6 +568,18 @@ func bone_pos(bone: String) -> Vector3:
 		return Vector3.ZERO
 	return _dst.global_transform * _dst.get_bone_global_pose(bi).origin
 
+# 讀骨頭在世界座標的某一個軸（0=X 1=Y 2=Z）。
+# 頭部注視的驗收要量「頭到底轉去哪」，而 bone_pos 只給位置——頭轉了 60 度
+# 位置幾乎不動，光看座標會以為什麼事都沒發生（本專案的假通過清單裡已經有
+# 「180° 轉向測試根本沒轉、斷言照樣 OK」這一筆）。
+func bone_axis(bone: String, axis: int) -> Vector3:
+	var bi := _bone(bone)
+	if bi < 0:
+		return Vector3.ZERO
+	var b: Basis = (_dst.global_transform * _dst.get_bone_global_pose(bi)).basis
+	var v: Vector3 = b[clampi(axis, 0, 2)]
+	return v.normalized() if v.length() > 0.0001 else Vector3.ZERO
+
 # 繞著某個世界座標的樞紐旋轉骨骼：朝向與位置一起轉。
 # 趴姿需要這個——hr_ 骨架的大腿掛在 Root，只轉髖部的話腿會留在原地站著，
 # 人就變成「上半身趴下、腿還立正」。

@@ -735,6 +735,25 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 	}
 
 
+# 頭骨朝向相對身體的水平偏角（度，正＝角色的右邊）。
+# ⚠ 一定要用「當下的」正面／右方去投影：如果拿量測開始時的朝向，
+#   身體只要有一點點自轉，量到的就是身體轉了多少，不是頭轉了多少。
+func _lc_head_yaw(u) -> float:
+	var ha: Array = u.head_axis()
+	if ha.size() != 2:
+		return 0.0
+	var v: Vector3 = ha[1]
+	var f: Vector3 = u.facing_dir()
+	var r: Vector3 = u.right_dir()
+	return rad_to_deg(atan2(v.dot(r), v.dot(f)))
+
+# 相對角色正面 deg 度（正＝右）、水平 8m、頭高 +dy 的一個世界座標點
+func _lc_look_pt(u, deg: float, dy: float) -> Vector3:
+	var a: float = deg_to_rad(deg)
+	var dir: Vector3 = u.facing_dir() * cos(a) + u.right_dir() * sin(a)
+	return u.global_position + Vector3(0, 1.55, 0) + dir * 8.0 + Vector3(0, dy, 0)
+
+
 func _locochk() -> void:
 	_lc_fail = 0
 	_lc_lines.clear()
@@ -945,6 +964,66 @@ func _locochk() -> void:
 		_lc_say(maxf(hl, hr) < 0.35,
 				"另一隻腳離地 %.3fm（<0.35m＝放鬆站姿可以，但不能整條吊在空中）"
 				% maxf(hl, hr))
+
+	# ---------- ⑦ 頭部注視：頭要真的轉去看目標，而且方向不能是反的 ----------
+	# ⚠ 必須先結束行動離開第三人稱：TPS 每幀把 aim_point 設成「鏡頭正前方 20m」，
+	#   而注視的優先序是 aim_point > look_point（正在瞄準時眼睛當然盯著準心）。
+	#   不離開就等於在測「頭有沒有朝正前方」＝永遠 0 度、什麼都測不到。
+	_end_action()
+	_look_auto = false          # 這一段由測試自己指定目標，不要被自動指派覆寫
+	await get_tree().create_timer(0.6).timeout
+	u.aim_point = null
+	u.look_point = null
+	await get_tree().create_timer(0.8).timeout
+	if u.head_axis().size() != 2:
+		_lc_say(false, "頭部注視：量不到頭骨朝向（沒有 Head 骨或軸幾乎垂直，這一項無法驗）")
+	else:
+		var sy0: float = _lc_head_yaw(u)          # 沒有目標時頭的朝向（基準）
+		u.look_point = _lc_look_pt(u, 60.0, 1.5)  # 右前方 60°
+		await get_tree().create_timer(1.2).timeout
+		var syr: float = _lc_head_yaw(u)
+		var ay_r: float = float(u.head_axis()[1].y)
+		u.look_point = _lc_look_pt(u, -60.0, 1.5) # 左前方 60°
+		await get_tree().create_timer(1.2).timeout
+		var syl: float = _lc_head_yaw(u)
+		# 實拍一張「正在往左看」的畫面：使用者的驗收標準是看得見，
+		# 而數字對、畫面歪（脖子被扭斷、頭穿進肩膀）是兩件事，只有圖看得出來。
+		await _snap("res://locochk_look.png")
+		var span: float = syr - syl
+		print("[locochk] 注視 基準%.1f° 看右%.1f° 看左%.1f° 差值%.1f°（理想 +120°）"
+				% [sy0, syr, syl, span])
+		# ① 真的有轉（防「什麼都沒發生也通過」）② 方向對（符號反了 span 會變負）
+		_lc_say(span > 60.0,
+				"左右各看 60° 時頭的朝向差 %.1f°（>60° 且為正＝有轉且方向正確；"
+				% span + "負值＝左右反了）")
+		# ③ 夾限：正後方的目標不可以把脖子轉到 180°
+		var pf1: LocomotionProfile = Unit.loco_profile()
+		u.look_point = _lc_look_pt(u, 165.0, 1.5)
+		await get_tree().create_timer(1.2).timeout
+		var syb: float = absf(_lc_head_yaw(u) - sy0)
+		_lc_say(syb <= pf1.look_yaw_max + 10.0,
+				"正後方 165° 的目標只把頭轉了 %.1f°（≤ 上限 %.0f°＋容差）"
+				% [syb, pf1.look_yaw_max])
+		# ④ 俯仰：往上看與往下看，頭骨的垂直分量要往相反方向跑。
+		#    ⚠ 不能直接斷言「axis.y 變大」——head_axis() 挑的軸不保證是「正面軸」，
+		#      也可能是背面軸（那樣抬頭時 y 反而變小）。所以用 ③ 已經驗過方向的
+		#      span 符號當作這根軸的極性，再要求上下兩次的差值符合那個極性。
+		var pol: float = signf(span)
+		u.look_point = _lc_look_pt(u, 0.0, 6.0)   # 前方高處
+		await get_tree().create_timer(1.2).timeout
+		var up_y: float = float(u.head_axis()[1].y)
+		u.look_point = _lc_look_pt(u, 0.0, -2.0)  # 前方低處
+		await get_tree().create_timer(1.2).timeout
+		var dn_y: float = float(u.head_axis()[1].y)
+		_lc_say((up_y - dn_y) * pol > 0.05,
+				"抬頭/低頭時頭骨垂直分量 %.3f → %.3f（差 %.3f，方向與極性 %.0f 相符）"
+				% [up_y, dn_y, up_y - dn_y, pol])
+		# ⑤ 沒有目標時頭要回正（不然頭會永遠歪著）
+		u.look_point = null
+		await get_tree().create_timer(1.5).timeout
+		var syn: float = absf(_lc_head_yaw(u) - sy0)
+		_lc_say(syn < 8.0, "目標消失後頭回正，殘留偏轉 %.1f°（<8°）" % syn)
+		print("[locochk] 注視狀態列：", u.loco_debug())
 
 	await _snap("res://locochk_end.png")
 	print("[locochk] ---- 總結 ----")
@@ -1584,6 +1663,25 @@ func _lookshots() -> void:
 	cam.yaw = 2.4
 	await get_tree().create_timer(0.8).timeout
 	await _snap("res://look_both.png")
+	# ---- 頭部注視特寫（2026-08-07）----
+	# locochk 已經量到「頭轉了 115.8°、左右對稱」，但數字對不代表畫面對：
+	# 脖子被扭斷、頭穿進肩膀、下巴陷進胸口都會量到同一組數字。這兩張是給人眼看的。
+	_look_auto = false
+	var lu = units[0]["node"]        # 我方第一位（rifleman）
+	cam.focus = lu.global_position + Vector3(0, 1.45, 0)
+	cam.dist = 3.0
+	cam.pitch_deg = 6.0
+	cam.yaw = PI
+	lu.aim_point = null
+	lu.look_point = null
+	await get_tree().create_timer(1.2).timeout
+	await _snap("res://look_head_front.png")
+	lu.look_point = lu.global_position + Vector3(0, 1.55, 0) \
+			+ (lu.facing_dir() * cos(deg_to_rad(65.0))
+			+ lu.right_dir() * sin(deg_to_rad(65.0))) * 8.0
+	await get_tree().create_timer(1.5).timeout
+	await _snap("res://look_head_side.png")
+	print("[lookchk] 注視特寫：", lu.loco_debug())
 	print("[lookchk] FAILS=%d" % fails)
 	print("[lookchk] DONE")
 	get_tree().quit(1 if fails > 0 else 0)
@@ -6222,12 +6320,55 @@ func _process(delta: float) -> void:
 	_weather_follow()
 	_action_tick(delta)
 	_intercept_tick(delta)
+	_look_tick(delta)
 	if st == St.ENEMY:
 		_enemy_t -= delta
 		_ai_t += delta
 		if _enemy_t <= 0:
 			_enemy_step()
 			_enemy_t = 0.25
+
+# ---------- 頭部注視目標指派（2026-08-07）----------
+# 誰在看誰是「戰場資訊」，Unit 自己沒有（它不知道別人在哪、看不看得見），
+# 所以由 Main 指派：每 0.25 秒給每個活著的單位一個 look_point ＝
+# 「視野內看得見的最近敵人」，沒有就 null（頭回正）。
+# ⚠ 頻率刻意壓到 4Hz：注視本身的平滑在 HeadLook（look_speed）裡做，
+#   這裡只需要「目標是誰」，每幀重算 O(n²) 純粹是白付。
+# ⚠ 視線檢查（_sight_clear）只對**最近的那一個**做：它會逐一掃障礙，
+#   對每個候選都跑等於把 O(n²) 變成 O(n²·障礙數)。看不見就當作沒有目標——
+#   「牆後面的敵人」本來就不該被看著（鐵律 0②：視線不可穿牆）。
+var _look_t := 0.0
+# 量測時要能自己指定注視目標。少了這個開關，測試設好的 look_point 會在
+# 0.25 秒內被這支覆寫掉，量到的永遠是「頭沒有轉」——而那看起來就像功能壞了。
+var _look_auto := true
+func _look_tick(delta: float) -> void:
+	if not _look_auto:
+		return
+	_look_t -= delta
+	if _look_t > 0.0:
+		return
+	_look_t = 0.25
+	for u in units:
+		if not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		var n = u["node"]
+		# 視距打折：注視是「注意到並盯著」，比「偵察得到」近得多。
+		# 視野邊緣那個小點沒有人會一直盯著看。
+		var sight: float = float(GameData.class_base.get(u["cls"], {}).get("sight", SIGHT)) * 0.6
+		var best = null
+		var bd: float = sight
+		for e in units:
+			if e["side"] == u["side"] or not e["alive"] or not is_instance_valid(e["node"]):
+				continue
+			var d: float = Vector2(float(e["wx"]) - float(u["wx"]),
+					float(e["wy"]) - float(u["wy"])).length()
+			if d < bd:
+				bd = d
+				best = e
+		if best != null and _sight_clear(u, best):
+			n.look_point = best["node"].global_position + Vector3(0, 1.45, 0)
+		else:
+			n.look_point = null
 
 # ---------- 原地飄移診斷（-- idledrift chNN）----------
 # 使用者 2026-08-02 回報「人物停在原地會小飄移」。每幀會動到單位 XZ 的路徑有四條
