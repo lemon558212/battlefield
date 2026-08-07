@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cwjnyufk24ntx"
-path="res://.godot/imported/gunship_1.png-ae04e9ce8767e47ace598d6906edd82d.ctex"
+path="res://.godot/imported/gunship_1.png-caa4292c707a029cc08174bc08029c7a.ctex"
 metadata={
 "vram_texture": false
 }
@@ -13,8 +13,8 @@ generator_parameters={
 
 [deps]
 
-source_file="res://assets/models/vehicles/gunship_1.png"
-dest_files=["res://.godot/imported/gunship_1.png-ae04e9ce8767e47ace598d6906edd82d.ctex"]
+source_file="res://output_textured/_retired/gunship_1.png"
+dest_files=["res://.godot/imported/gunship_1.png-caa4292c707a029cc08174bc08029c7a.ctex"]
 
 [params]
 

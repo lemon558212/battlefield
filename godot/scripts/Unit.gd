@@ -1628,8 +1628,16 @@ func _clip_len(key: String) -> float:
 		if a: return a.length
 	return 0.5
 
+# 會被踏頻同步調整播放倍率的片段（其餘一律 1.0 倍，否則開槍/受擊/死亡會變快轉）
+const LOCO_KEYS := ["walk", "run", "sprint", "crouch_walk"]
+var _loco_state := "idle"
+
 func _play(key: String, blend := 0.2) -> void:
 	if anim == null or not anim_names.has(key): return
+	# ★踏頻同步的安全閥：切到非移動片段時把播放倍率收回 1.0。
+	#   漏掉這行的後果是「用 1.7 倍速衝刺之後開槍」＝開槍動作也被快轉 1.7 倍。
+	if not (key in LOCO_KEYS) and anim.speed_scale != 1.0:
+		anim.speed_scale = 1.0
 	if _state == key and anim.is_playing(): return
 	var clip: String = anim_names[key]
 	if key in LOOP_KEYS:
@@ -1637,6 +1645,30 @@ func _play(key: String, blend := 0.2) -> void:
 		if a: a.loop_mode = Animation.LOOP_LINEAR
 	anim.play(clip, blend)
 	_state = key
+	if not (key in LOCO_KEYS):
+		_loco_state = "idle"
+
+
+# 移動動畫驅動（2026-08-07）——治滑步的落點就在這裡。
+# 三件事：① 依**實際速度**挑步態 ② 用與速度差相稱的淡入時間切換 ③ 鎖踏頻。
+# ⚠ 步態一律由 loco.speed（實際速度）決定，不是由按鍵或設定速度決定。
+#   被牆擋住時實際速度會掉到 0 → 自動回 idle，不會出現原地跑步。
+func _drive_locomotion_anim(delta: float, allow_crouch_walk: bool) -> void:
+	if anim == null or _dead or _is_vehicle or loco == null:
+		return
+	var crouching: bool = allow_crouch_walk and _crouch > 0.5 and _prone < 0.5
+	var g: String = loco.pick_gait(anim_names, crouching, delta)
+	if g == "idle" or not anim_names.has(g):
+		if anim.speed_scale != 1.0:
+			anim.speed_scale = 1.0
+		_loco_state = "idle"
+		return
+	var blend: float = loco.blend_time(_loco_state, g)
+	_play(g, blend)
+	_loco_state = g
+	# speed_scale 每幀都要重算：速度會被涉水/負重/受傷/體力連續改變，
+	# 只在切換步態時算一次，慢下來的過程照樣會打滑。
+	anim.speed_scale = loco.cadence(_clip_len(g))
 
 # 一次性動作（工兵修理/治療、佔領據點…）：播完之前不會被待機狀態蓋掉。
 # ⚠ 直接呼叫 _play 沒用——_process 每幀都會把 shoot/hit/crouch/空 狀態打回 idle。
@@ -1771,6 +1803,11 @@ const KNEE_PER_M := 46.0     # 每 1m 高度差要屈的膝角（度）——腿
 func _legs_to_slope() -> void:
 	if _is_vehicle or _dead or _rig == null or not ground_sampler.is_valid():
 		return
+	# ★2026-08-07：真 foot IK 上線後，這支只當**退路**。
+	#   兩者都跑會互相打架——一個按「骨盆左右的地面高度差」彎膝、一個按「腳實際踩到哪」
+	#   解 IK，寫的是同一批骨頭，疊起來腿會抖。誰接手就由誰全權負責。
+	if foot_ik != null and foot_ik.active:
+		return
 	var w: float = 1.0 - clampf(_prone, 0.0, 1.0)     # 趴著不做
 	if w < 0.02:
 		return
@@ -1847,9 +1884,30 @@ func _tick_stamina(delta: float, running: bool) -> void:
 # 加速度與慣性（鐵律 0：有質量的東西不會瞬間到全速、也不會瞬間停住）。
 # ⚠ 停止用較大的減速度：人煞停確實比起步快，而且拖太久會影響「停在障礙前幾公尺」
 #   這類量測的可讀性。3m/s 以 14m/s² 煞停＝滑行 0.32m，接近真實。
-const ACCEL := 9.0
-const DECEL := 14.0
-var _vel := Vector3.ZERO
+# ---------------------------------------------------------------------------
+# 運動系統（2026-08-07 動作流暢度升級）
+# ⚠ 舊碼在這裡是 `const ACCEL := 9.0` / `const DECEL := 14.0` 兩個常數，而且
+#   **DECEL 從宣告到刪除為止一次都沒被引用過**——這正是「停步像被關掉電源」的來源：
+#   _coast() 直接 `_vel = Vector3.ZERO`，一幀之內從 3 m/s 歸零。
+#   加減速、轉向、步態、踏頻現在全部搬到 Locomotion.gd，參數在 LocomotionProfile。
+const LOCO := preload("res://scripts/Locomotion.gd")
+const LOCO_PROFILE := preload("res://scripts/LocomotionProfile.gd")
+const FOOT_IK := preload("res://scripts/FootIK.gd")
+const PROFILE_RES := "res://data/locomotion_default.tres"
+
+# 全體共用一份參數（Resource 只讀，不會互相污染）；找不到 .tres 就用程式預設值。
+static var _shared_profile: LocomotionProfile = null
+static func loco_profile() -> LocomotionProfile:
+	if _shared_profile == null:
+		if ResourceLoader.exists(PROFILE_RES):
+			_shared_profile = load(PROFILE_RES) as LocomotionProfile
+		if _shared_profile == null:
+			_shared_profile = LOCO_PROFILE.new()
+	return _shared_profile
+
+var loco: Locomotion = null        # 速度／轉向／步態／踏頻（每個單位一份狀態）
+var foot_ik: FootIK = null         # 腳步貼地 IK
+var _vel := Vector3.ZERO           # 保留：外部若有讀 _vel 仍要拿得到值（= loco.velocity）
 
 func wade_mul() -> float:
 	var dep: float = water_depth()
@@ -1887,7 +1945,11 @@ func _tick_steps(moved: float) -> void:
 	if _prone > 0.5:
 		return                  # 匍匐沒有腳步聲（這正是趴著前進的價值）
 	_step_acc += moved
-	if _step_acc < STEP_LEN:
+	# 步幅跟著步態走（走 0.75m、跑 1.5m、衝刺 2.0m、蹲行 0.62m），不再是固定 STEP_LEN。
+	# 與踏頻同步用的是**同一個步幅**，所以「聽到的一步」與「動畫踏的一步」必然對得上——
+	# 這是把腳步聲掛在動畫事件上會得到的同一個結果，而且不必替每支片段標記幀。
+	var step_len: float = loco.step_length() if loco != null else STEP_LEN
+	if _step_acc < step_len:
 		return
 	_step_acc = 0.0
 	var dep: float = water_depth()
@@ -2051,9 +2113,52 @@ static func _ring_tex() -> GradientTexture2D:
 # ⚠ 2026-07-27 使用者規格：「不會有原地跑步，停下就停下，沒有按按鍵就不會走」。
 #   我先前為了「慣性」加了放開鍵後的滑行——那違反這條規格，已移除。
 #   起步仍保留加速度（那不會造成「沒按鍵還在動」），但**放開鍵就是立刻停**。
+# 建立運動狀態（延遲初始化：spawn 的呼叫順序在不同路徑上不一致，
+# 與其猜哪個入口最早，不如三個入口都保證拿得到）
+func _ensure_loco() -> void:
+	if loco == null:
+		loco = LOCO.new(loco_profile())
+	if foot_ik == null:
+		foot_ik = FOOT_IK.new(loco_profile())
+
+
+# 鬆開方向鍵之後（GDD/07）。
+# ⚠ 舊版是 `_vel = Vector3.ZERO`＝一幀之內從 3 m/s 停到 0。註解寫著「慣性」，
+#   實際上沒有任何慣性——這就是使用者說的「突然停住」。
+#   現在走 Locomotion.brake()，用 decel 把速度滑完，並且**滑行期間人是真的還在移動**，
+#   所以動畫、腳步聲、AP 結算全都自動跟著走完最後那一小段。
 func _coast(delta: float) -> void:
+	_ensure_loco()
 	_tick_stamina(delta, false)
-	_vel = Vector3.ZERO
+	if _dead or _is_vehicle:
+		loco.kill_velocity()
+		_vel = Vector3.ZERO
+		return
+	loco.brake(delta, false)
+	_vel = loco.velocity
+	if loco.speed > 0.02:
+		var mv: Vector3 = loco.frame_move(delta)
+		global_position += mv
+		_tick_steps(mv.length())
+	_drive_locomotion_anim(delta, false)
+
+# 這一刻「想要達到」的速度（m/s）。
+# ⚠ 以前這條式子被抄了兩份（move_dir 一份、_process 的點擊移動一份），
+#   而兩份不一樣：點擊移動那份漏掉了體力衰減。同一件事兩個算法，遲早會分岔——
+#   本專案已經在「浮空判定」上吃過一次同樣的虧。集中在這裡。
+# with_stamina=false 保留給點擊移動，維持原本的數值行為（避免動到 AP/回合時序）。
+func desired_speed(with_stamina := true) -> float:
+	var pf: LocomotionProfile = loco_profile()
+	var base: float = pf.run_speed * speed_mul
+	if speed_mul > 1.5:
+		base = minf(base, pf.sprint_speed)      # 加速行軍有上限，不是無限倍率
+	if _crouch > 0.5:
+		base = pf.run_speed * pf.crouch_mul     # 蹲行（舊碼的 0.45 寫死值）
+	base *= wade_mul() * load_mul() * hurt_mul()
+	if with_stamina:
+		base *= stamina_mul()
+	return maxf(base, 0.0)
+
 
 # 第三人稱直接操控（GDD/07）：每幀給一個世界方向就走，不設目的地。
 # 與點擊移動共用同一套 AP 扣除（Main._action_tick 量的是「實際位移」，兩種都吃得到）。
@@ -2069,8 +2174,11 @@ func move_dir(dir: Vector3, delta: float) -> void:
 	_shoot_target = null
 	_busy_until = 0.0
 	_dir_moving = true
+	_ensure_loco()
 	var d := Vector3(dir.x, 0, dir.z).normalized()
-	rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), minf(1.0, TURN_SPEED * 0.6 * delta))
+	# 轉向改走 Locomotion.step_yaw（角速度受限），不再用 lerp_angle 每幀吃固定比例。
+	# 差別在畫面上：大角度時不會第一幀甩過去一大截，小角度時也不會拖著慢慢收。
+	rotation.y = loco.step_yaw(rotation.y, atan2(d.x, d.z), delta)
 	# 趴著移動＝匍匐前進，不是趴著跑。播跑步動畫會讓腿在跑、手臂在擺，
 	# 而軀幹又被趴姿骨骼壓平——畫面上就是自由式游泳（使用者 2026-07-26 指正）。
 	if _prone > 0.5:
@@ -2098,10 +2206,14 @@ func move_dir(dir: Vector3, delta: float) -> void:
 		_play("idle")          # 腿與軀幹全交給 _aim_pose 的匍匐擺動，動畫層不要插手
 		return
 	_tick_stamina(delta, true)
-	var spd: float = WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul) 			* wade_mul() * load_mul() * hurt_mul() * stamina_mul()
-	_vel = _vel.move_toward(d * spd, ACCEL * delta)
-	global_position += _vel * delta
-	_tick_steps(_vel.length() * delta)
+	# 大角度轉向時先轉身、不前進（VC 本尊做法）。以前只有點擊移動有這條，
+	# 第三人稱直接操控是「原地 180° 甩過去同時全速衝出」＝畫面上人像被彈開。
+	var d_spd: float = 0.0 if loco.turn_in_place else desired_speed()
+	loco.accelerate(d, d_spd, delta)
+	_vel = loco.velocity
+	var mv: Vector3 = loco.frame_move(delta)
+	global_position += mv
+	_tick_steps(mv.length())
 	# ★動畫必須跟著**實際位移**，不是跟著按鍵。被牆或雜物擋住時人根本沒有前進，
 	#   卻照播跑步動畫＝原地跑步（使用者 2026-07-27 指正）。
 	#   淨位移由 Main 的碰撞解算之後才知道，所以看的是「上一小段實際走了多遠」。
@@ -2111,12 +2223,13 @@ func move_dir(dir: Vector3, delta: float) -> void:
 		_win_from = global_position
 		_move_win = 0.0
 	if _moved_recent < 0.03:
-		_play("idle")            # 推不動就站著推，不要空踩腳
+		# 推不動就站著推，不要空踩腳。順手把速度收掉——不然人「卡在牆上但速度是 3 m/s」，
+		# 一鬆開牆就會像彈簧一樣射出去。
+		loco.brake(delta, true)
+		_vel = loco.velocity
+		_play("idle")
 		return
-	if _crouch > 0.5 and anim_names.has("crouch_walk"):
-		_play("crouch_walk")
-	else:
-		_play("run" if anim_names.has("run") else "walk")
+	_drive_locomotion_anim(delta, true)
 
 # 目前姿勢的「眼睛高度」（GDD/07）：第三人稱鏡頭要跟著姿勢降下來。
 # 趴著時鏡頭還吊在站姿的 1.52m，人會被草叢淹沒、玩家看不到自己在哪（實拍到）。
@@ -2290,7 +2403,51 @@ func _update_crouch(delta: float) -> void:
 		_model.position.y = _model_base_y - 0.42 * _crouch   # 無骨架工具的模型：沿用舊權宜做法
 		_model.rotation.x = 0.0
 
+# ---------------------------------------------------------------- 量測介面
+# 「滑步修好了」必須拿數字證明，不能用看的（本專案已經有三次「看起來對、其實沒修好」）。
+# 量法：站立中的腳，它在世界座標上**不應該移動**。每幀量腳踝世界位置，
+# 只要那隻腳貼在地面（離地 < 3cm）而它又橫向位移了，位移量就是實打實的滑步。
+# 回傳 [左腳踝, 右腳踝] 世界座標；沒有骨架工具的模型回傳空陣列（呼叫端要能略過）。
+func ankle_points() -> Array:
+	if _rig == null:
+		return []
+	var l: Vector3 = _rig.leg_end("LowerLeg.L", "Foot.L")
+	var r: Vector3 = _rig.leg_end("LowerLeg.R", "Foot.R")
+	if l == Vector3.ZERO or r == Vector3.ZERO:
+		return []
+	return [l, r]
+
+
+# 目前運動狀態的單行摘要（Debug overlay 與測試日誌共用同一份文字，
+# 這樣「畫面上看到的」與「日誌裡記的」不會是兩套說法）
+func loco_debug() -> String:
+	if loco == null:
+		return "loco 未初始化"
+	var s: String = "%s | %s" % [loco.debug_line(),
+			foot_ik.debug_line() if foot_ik != null else "footIK 無"]
+	return "%s | 蹲%.2f 趴%.2f 落%.1f" % [s, _crouch, _prone, _fall_v]
+
+
+func loco_speed() -> float:
+	return loco.speed if loco != null else 0.0
+
+
+func loco_gait() -> String:
+	return loco.gait if loco != null else "?"
+
+
+var _cam_tick := 0
+
 func _process(delta: float) -> void:
+	_ensure_loco()
+	loco.grounded = absf(_fall_v) < 0.5
+	# 攝影機距離每 12 幀量一次就夠（IK LOD 用）。
+	# ⚠ 不可以每幀 get_camera_3d()：一張圖十幾個單位 × 60fps 就是每秒上千次節點查詢，
+	#   這正是「禁止每幀 get_node」那條的實例。
+	_cam_tick += 1
+	if _cam_tick % 12 == 0:
+		var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+		_cam_dist = cam.global_position.distance_to(global_position) if cam != null else -1.0
 	_stick_to_ground(delta)
 	_align_ring()
 	if _is_vehicle:
@@ -2350,30 +2507,41 @@ func _process(delta: float) -> void:
 			_busy_until = now + max(0.6, _clip_len("reload"))
 			return
 	if _move_target != null:
+		_ensure_loco()
 		var d: Vector3 = _move_target - global_position
 		d.y = 0.0
-		if d.length() < 0.15:
+		var dist: float = d.length()
+		# 抵達：距離夠近**而且已經慢下來**。
+		# ⚠ 舊版只看距離：人以 3 m/s 衝到 0.15m 然後同一幀速度歸零、動畫切 idle
+		#   ——這就是「像輪子滑出去然後突然停」的整段病因。
+		if dist < 0.05 or (dist < 0.15 and loco.speed < 0.7):
 			_move_target = null
+			loco.kill_velocity()
+			_vel = Vector3.ZERO
 			_play("idle")
 			arrived.emit()
 			return
 		# VC 做法：先轉身面向目標，面向差太大時原地轉身不前進（治「面向一個方向跑」）
 		var target_yaw := atan2(d.x, d.z)
-		rotation.y = lerp_angle(rotation.y, target_yaw, min(1.0, TURN_SPEED * delta))
-		var ang := absf(wrapf(target_yaw - rotation.y, -PI, PI))
-		if ang > 0.6:
-			_play("idle")        # 還沒轉正：原地轉身
+		rotation.y = loco.step_yaw(rotation.y, target_yaw, delta)
+		var want: float = 0.0
+		if not loco.turn_in_place:
+			# ★收腳（arrive steering）：剩餘距離 s 能容許的最高速度是 v=√(2·a·s)。
+			#   這是煞車距離公式的反解，不是手調的緩衝曲線——所以人是「算好距離收腳」，
+			#   減速過程剛好在目標點結束（鐵律 0⑤：用真實運動學，不用湊的）。
+			var pf: LocomotionProfile = loco_profile()
+			want = minf(desired_speed(false), sqrt(2.0 * pf.brake_decel * dist))
+		if want > 0.01:
+			loco.accelerate(d / maxf(dist, 0.0001), want, delta)
 		else:
-			var stp: float = (WALK_SPEED * (0.45 if _crouch > 0.5 else speed_mul)
-					* wade_mul() * load_mul() * hurt_mul()) * delta
-			global_position += d.normalized() * stp
-			_tick_steps(stp)
-			if _crouch > 0.5 and anim_names.has("crouch_walk"):
-				_play("crouch_walk")              # 蹲行：掩體後移動不站起來
-			elif speed_mul > 1.5 and anim_names.has("sprint"):
-				_play("sprint")                   # 加速行軍用衝刺動作，腳步才跟得上速度
-			else:
-				_play("run" if anim_names.has("run") else "walk")
+			loco.brake(delta, true)          # 還在原地轉身：把殘速收掉，不要邊轉邊漂
+		_vel = loco.velocity
+		var mv: Vector3 = loco.frame_move(delta)
+		if mv.length() > dist:
+			mv = d                            # 這一幀會衝過頭：停在目標上，不要來回震盪
+		global_position += mv
+		_tick_steps(mv.length())
+		_drive_locomotion_anim(delta, true)
 	# ⚠⚠ 條件不可以只看 `want_cover`（＝自動掩體判定）：玩家按 C 是寫 `stance_cmd`，
 	#   於是「_crouch 混合值到 1、但動畫還是站姿」——畫面上人根本沒有蹲下去。
 	#   ★而且 `-- play` 斷言 `_crouch == 1.00` 照樣通過（2026-07-27 連拍才抓到）：
@@ -2383,7 +2551,12 @@ func _process(delta: float) -> void:
 		_play("crouch")   # 有真人蹲姿動作（UAL Crouch_Idle 重定向）就直接播，不再用幾何硬湊
 		# ⚠ 趴著時不可以播蹲姿動畫：那支動作會寫滿全身骨骼，再被趴姿覆寫等於兩層打架
 	elif _state in IDLE_BACK:
-		_play("idle")
+		# ⚠ 還在慣性滑行時**不可以**強制切回 idle。
+		#   _coast() 這一幀才剛把移動動畫驅動起來，這裡再打回 idle，
+		#   減速那 0.6 秒就完全看不出來——停步又變回「一幀關掉電源」。
+		#   判準用實際速度，跟步態選擇同一把尺。
+		if loco == null or loco.speed <= loco.p.idle_speed:
+			_play("idle")
 
 # 載具每幀：沒有動畫狀態機，只有「轉向→前進」與砲塔瞄準。
 const VEH_ACCEL := 1.6         # 履帶車起步加速度（m/s²）
@@ -2850,6 +3023,38 @@ func _stow_gun(sk: Skeleton3D) -> void:
 	_gun_node.global_transform = Transform3D(b, anchor - b * _gun_grip)
 
 var _in_pose := false          # skeleton_updated 內改骨骼會再觸發信號，需防遞迴
+var _cam_dist := 0.0        # 到攝影機的距離（IK LOD 用，由 _process 週期更新）
+
+# 腳步貼地 IK（2026-08-07）。
+# ⚠ 順序：一定要在 _aim_pose **之後**。IK 是最後一道修正，它要修的正是
+#   「動畫 ＋ 蹲/趴程式化姿勢」合起來之後腳最終落在哪裡；跑在前面就會被蓋掉。
+func _apply_foot_ik() -> void:
+	if foot_ik == null or _rig == null or _is_vehicle or not ground_sampler.is_valid():
+		return
+	# ⚠ 這裡**不沿用** _aim_pose 的「只做 Quaternius」界線，而且理由是實質的：
+	#   _aim_pose 被擋住是因為它的持槍角度、pole vector 全是照 Quaternius 的 rest 手調的，
+	#   換骨架就是錯的。foot IK 完全不吃 rest 姿勢——它只讀「骨頭現在在哪」再解餘弦定理，
+	#   骨名也由 Retarget._bone() 的 ALT 表翻譯過。所以三系骨架都能安全套用。
+	#   （實測代價：先前擋掉的結果是**使用者最在意的韓沐霜剛好是唯一沒有 foot IK 的角色**。）
+	if _rig.rig_kind() == "?":
+		return
+	if not foot_ik.is_ready():
+		foot_ik.bind(_rig, ground_sampler)
+		if not foot_ik.is_ready():
+			return
+	# 權重＝「這一刻腳到底該不該踩在地上」：
+	#   趴著→腿由匍匐姿勢全權接管、死了→不該再站好、離地下墜→腳本來就不在地面上。
+	var w := 1.0
+	if _dead:
+		w = 0.0
+	elif _prone > 0.05:
+		w = 1.0 - clampf(_prone, 0.0, 1.0)
+	elif absf(_fall_v) > 0.5:
+		w = 0.0
+	foot_ik.apply(global_position, facing_dir(), right_dir(), w,
+			maxf(get_process_delta_time(), 0.0001), _cam_dist)
+
+
 func _on_skeleton_updated() -> void:
 	if _in_pose:
 		return
@@ -2859,6 +3064,7 @@ func _on_skeleton_updated() -> void:
 	if _retarget and _rig != null:
 		_rig.apply()
 	_aim_pose()
+	_apply_foot_ik()
 	_in_pose = false
 
 # 蹲姿：模型自帶動畫組沒有 crouch，改由 UAL 動作庫的 Crouch_Idle 重定向過來。

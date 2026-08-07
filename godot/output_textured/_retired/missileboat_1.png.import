@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cmq4752rpl0so"
-path="res://.godot/imported/missileboat_1.png-d2704f5955dcc3bd420b5e31633db280.ctex"
+path="res://.godot/imported/missileboat_1.png-09b8c9d72dd609e52e4a6827d578ee1a.ctex"
 metadata={
 "vram_texture": false
 }
@@ -13,8 +13,8 @@ generator_parameters={
 
 [deps]
 
-source_file="res://assets/models/vehicles/missileboat_1.png"
-dest_files=["res://.godot/imported/missileboat_1.png-d2704f5955dcc3bd420b5e31633db280.ctex"]
+source_file="res://output_textured/_retired/missileboat_1.png"
+dest_files=["res://.godot/imported/missileboat_1.png-09b8c9d72dd609e52e4a6827d578ee1a.ctex"]
 
 [params]
 

@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://cbnrfakk6ej1s"
-path="res://.godot/imported/missileboat.glb-bc5833d3e8f97e3c9646827c755bb85e.scn"
+path="res://.godot/imported/missileboat.glb-84fc15f3c4725d01033dde14a274dd09.scn"
 
 [deps]
 
-source_file="res://assets/models/vehicles/missileboat.glb"
-dest_files=["res://.godot/imported/missileboat.glb-bc5833d3e8f97e3c9646827c755bb85e.scn"]
+source_file="res://output_textured/_retired/missileboat.glb"
+dest_files=["res://.godot/imported/missileboat.glb-84fc15f3c4725d01033dde14a274dd09.scn"]
 
 [params]
 

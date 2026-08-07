@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cwh5d4f8qju68"
-path="res://.godot/imported/fighter_0.png-7dff05f4be1677793a53fbcd00ab9b16.ctex"
+path="res://.godot/imported/fighter_0.png-1799872882c6189206d63d571dba0dea.ctex"
 metadata={
 "vram_texture": false
 }
@@ -13,8 +13,8 @@ generator_parameters={
 
 [deps]
 
-source_file="res://assets/models/vehicles/fighter_0.png"
-dest_files=["res://.godot/imported/fighter_0.png-7dff05f4be1677793a53fbcd00ab9b16.ctex"]
+source_file="res://output_textured/_retired/fighter_0.png"
+dest_files=["res://.godot/imported/fighter_0.png-1799872882c6189206d63d571dba0dea.ctex"]
 
 [params]
 

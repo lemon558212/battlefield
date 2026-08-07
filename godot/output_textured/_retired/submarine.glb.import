@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://c4ydvvmaio5mc"
-path="res://.godot/imported/submarine.glb-a6c57203854e337e411acc531db1fb4e.scn"
+path="res://.godot/imported/submarine.glb-8395cf48447b5d0cf53685de0b3e49f4.scn"
 
 [deps]
 
-source_file="res://assets/models/vehicles/submarine.glb"
-dest_files=["res://.godot/imported/submarine.glb-a6c57203854e337e411acc531db1fb4e.scn"]
+source_file="res://output_textured/_retired/submarine.glb"
+dest_files=["res://.godot/imported/submarine.glb-8395cf48447b5d0cf53685de0b3e49f4.scn"]
 
 [params]
 

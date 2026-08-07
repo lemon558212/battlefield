@@ -2,19 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ccqriuukyjtqq"
-path="res://.godot/imported/attacker_1.png-74a50232c8eb18008e37c4ae25509143.ctex"
+uid="uid://djb5jbts2dsf4"
+path="res://.godot/imported/_t_look_friend0.png-1b6a7b3a563a41cc78478945a3e5e128.ctex"
 metadata={
 "vram_texture": false
-}
-generator_parameters={
-"md5": "406dd0596a3c46c0907ce22f9a071559"
 }
 
 [deps]
 
-source_file="res://output_textured/_retired/attacker_1.png"
-dest_files=["res://.godot/imported/attacker_1.png-74a50232c8eb18008e37c4ae25509143.ctex"]
+source_file="res://qa/_t_look_friend0.png"
+dest_files=["res://.godot/imported/_t_look_friend0.png-1b6a7b3a563a41cc78478945a3e5e128.ctex"]
 
 [params]
 
@@ -26,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=true
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

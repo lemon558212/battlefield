@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="LocomotionProfile" load_steps=2 format=3 uid="uid://blocoprof001"]
+
+[ext_resource type="Script" path="res://scripts/LocomotionProfile.gd" id="1_loco"]
+
+[resource]
+script = ExtResource("1_loco")

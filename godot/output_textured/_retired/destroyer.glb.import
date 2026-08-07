@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://cspy57oc5albj"
-path="res://.godot/imported/destroyer.glb-73d449682b8453bc2fae51e34f5b4cfd.scn"
+path="res://.godot/imported/destroyer.glb-c4abc69f44a6f0fb5375429a5faedbc6.scn"
 
 [deps]
 
-source_file="res://assets/models/vehicles/destroyer.glb"
-dest_files=["res://.godot/imported/destroyer.glb-73d449682b8453bc2fae51e34f5b4cfd.scn"]
+source_file="res://output_textured/_retired/destroyer.glb"
+dest_files=["res://.godot/imported/destroyer.glb-c4abc69f44a6f0fb5375429a5faedbc6.scn"]
 
 [params]
 

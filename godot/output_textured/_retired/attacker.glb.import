@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://cydjjgtgyxskn"
-path="res://.godot/imported/attacker.glb-5c709e77680aa82f607cd7a9c8026a67.scn"
+path="res://.godot/imported/attacker.glb-c41b957a6345d2a711c32b57006667b7.scn"
 
 [deps]
 
-source_file="res://assets/models/vehicles/attacker.glb"
-dest_files=["res://.godot/imported/attacker.glb-5c709e77680aa82f607cd7a9c8026a67.scn"]
+source_file="res://output_textured/_retired/attacker.glb"
+dest_files=["res://.godot/imported/attacker.glb-c41b957a6345d2a711c32b57006667b7.scn"]
 
 [params]
 

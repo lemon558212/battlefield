@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://bv044h67wei8n"
-path="res://.godot/imported/gunship.glb-99d24cf4e431c65ac8397c6da87914e8.scn"
+path="res://.godot/imported/gunship.glb-b6798d143005b9f385b9daa054701fc6.scn"
 
 [deps]
 
-source_file="res://assets/models/vehicles/gunship.glb"
-dest_files=["res://.godot/imported/gunship.glb-99d24cf4e431c65ac8397c6da87914e8.scn"]
+source_file="res://output_textured/_retired/gunship.glb"
+dest_files=["res://.godot/imported/gunship.glb-b6798d143005b9f385b9daa054701fc6.scn"]
 
 [params]
 

@@ -715,6 +715,92 @@ func leg_end(lower: String, foot: String) -> Vector3:
 	var shin_local: Vector3 = _dst.get_bone_global_rest(li).affine_inverse() * _dst.get_bone_global_rest(fi).origin
 	return _dst.global_transform * (_dst.get_bone_global_pose(li) * shin_local)
 
+# 腿部雙骨 IK（2026-08-07，foot IK 用）。
+# 與 ik_two_bone 的唯一差別，也是為什麼非得另寫一支：**末端不可以讀 Foot 骨的位置**。
+# 此類 Quaternius 骨架的 Foot 掛在 Root，`get_bone_global_pose(foot).origin` 完全不跟著
+# 腿動（見上面 leg_end 的註解）。拿它當 IK 末端，餘弦定理的 l2 會是一個固定的垃圾值，
+# 解出來的膝角每一幀都一樣——看起來就是「IK 沒作用」。這裡一律用 leg_end() 當末端。
+#
+# target_world＝腳踝該去的世界座標；pole_world＝膝蓋該朝的世界方向（一般是角色正面）。
+# weight＜1 時把目標往「目前腳踝位置」拉回，用來做 IK 淡入淡出（跳躍/趴姿要關掉）。
+# 回傳 false＝這副骨架沒有這些骨頭或姿勢退化，呼叫端要能安靜略過。
+func ik_leg(upper: String, lower: String, foot: String, target_world: Vector3,
+		pole_world: Vector3, weight: float = 1.0) -> bool:
+	var ui := _bone(upper)
+	var li := _bone(lower)
+	var fi := _bone(foot)
+	if ui < 0 or li < 0 or fi < 0 or weight <= 0.001:
+		return false
+	var to_skel: Transform3D = _dst.global_transform.affine_inverse()
+	var a: Vector3 = _dst.get_bone_global_pose(ui).origin
+	var b: Vector3 = _dst.get_bone_global_pose(li).origin
+	var c: Vector3 = to_skel * leg_end(lower, foot)
+	var l1: float = a.distance_to(b)
+	var l2: float = b.distance_to(c)
+	var reach: float = l1 + l2
+	if reach < 0.000001:
+		return false
+	# 容差一律用相對骨長（與 ik_two_bone 同一條教訓：hr_ 骨架的骨長只有 0.001 量級，
+	# 寫死的公尺級常數會把整條腿判成退化）
+	var eps: float = reach * 0.002
+	var target: Vector3 = to_skel * target_world
+	if weight < 0.999:
+		target = c.lerp(target, clampf(weight, 0.0, 1.0))
+	var to_t: Vector3 = target - a
+	if to_t.length() < eps:
+		return false
+	# 夾在「可及範圍」內：超伸會把腿拉成一直線再繼續拉，蒙皮會塌
+	var d: float = clampf(to_t.length(), absf(l1 - l2) + reach * 0.02, reach * 0.985)
+	var dir: Vector3 = to_t.normalized()
+	var want: float = acos(clampf((l1 * l1 + d * d - l2 * l2) / (2.0 * l1 * d), -1.0, 1.0))
+	var pole: Vector3 = (to_skel.basis * pole_world).normalized()
+	var p_perp: Vector3 = pole - dir * pole.dot(dir)
+	if p_perp.length() < 0.0001:
+		p_perp = dir.cross(Vector3.UP)
+		if p_perp.length() < 0.0001:
+			p_perp = dir.cross(Vector3.RIGHT)
+	p_perp = p_perp.normalized()
+	var knee: Vector3 = a + dir * (l1 * cos(want)) + p_perp * (l1 * sin(want))
+	# ① 大腿：擺到「髖→膝」該有的方向
+	var up_cur: Vector3 = b - a
+	if up_cur.length() < eps * 0.01:
+		return false
+	_rotate_bone(ui, Quaternion(up_cur.normalized(), (knee - a).normalized()))
+	# ② 小腿：重新量一次末端（大腿轉過之後腳踝也跟著動了），再擺到目標
+	b = _dst.get_bone_global_pose(li).origin
+	c = to_skel * leg_end(lower, foot)
+	var lo_cur: Vector3 = c - b
+	var lo_want: Vector3 = target - b
+	if lo_cur.length() > eps * 0.01 and lo_want.length() > eps * 0.01:
+		_rotate_bone(li, Quaternion(lo_cur.normalized(), lo_want.normalized()))
+	return true
+
+# 這根骨頭是不是「掛在骨架根部」（Quaternius hr_ 骨架的大腿就是這樣）。
+# foot IK 的骨盆升降必須看這個：
+#   掛在 Root  → 髖部移動帶不動它，要另外補一份位移
+#   正常父階   → 髖部一移動它就跟著走，**再補一次就是移動兩倍**
+# 2026-08-07 的「人物不見了」就是漏判這一條：tripo 骨架的 L_Thigh 父階是 Pelvis，
+# 卻被當成 detached 又補了一次位移，每幀疊加，幾秒內骨架被推到 -15m。
+func is_detached(bone: String) -> bool:
+	var bi := _bone(bone)
+	if bi < 0 or _dst == null:
+		return false
+	var pi := _dst.get_bone_parent(bi)
+	if pi < 0:
+		return true
+	return _dst.get_bone_name(pi) == "Root"
+
+# 骨盆升降（foot IK 的必要配套）：兩腳落差大到腿伸不直時，整個骨盆要沉下來。
+# 沒有這一步，站在台階邊緣的人會被 IK 硬把後腳拉長＝腿部過度伸展（3A 也是這樣做的）。
+# dy 為負＝往下沉。回傳實際套用量（可能被骨骼缺失擋掉）。
+func shift_pelvis(bone: String, dy: float, weight: float = 1.0) -> float:
+	var bi := _bone(bone)
+	if bi < 0 or absf(dy) < 0.0005 or weight <= 0.001:
+		return 0.0
+	var cur_w: Vector3 = _dst.global_transform * _dst.get_bone_global_pose(bi).origin
+	place_bone(bone, cur_w + Vector3(0.0, dy * clampf(weight, 0.0, 1.0), 0.0), 1.0)
+	return dy * clampf(weight, 0.0, 1.0)
+
 # 父子關係健檢：找出「目標骨掛在骨架根部、但來源骨其實在肢體鏈中間」的骨頭。
 # hr_ 骨架的 UpperLeg.L/R 就掛在 Root——旋轉照轉沒問題（父骨 Root 不動，反而穩），
 # 但位置不會跟著髖部走，所以這種骨頭要另外補位置（見 _detached）。

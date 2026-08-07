@@ -194,7 +194,7 @@ func _ready() -> void:
 	# 測試模式一律靜音（2026-07-30 使用者：「測試階段不要播背景音樂」）——
 	# 跑批一跑七小時，BGM 跟著響七小時。靜音掛在 Master bus，不動遊戲本身的音量設定。
 	for targ in ["e2e", "selftest", "shotseq", "mapshots", "play", "scene",
-			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift"]:
+			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift", "locochk"]:
 		if targ in OS.get_cmdline_user_args():
 			AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
 			# ★★測試模式固定亂數種子（2026-08-04）。
@@ -228,6 +228,8 @@ func _ready() -> void:
 		_walk_all()
 	elif "stress" in OS.get_cmdline_user_args():
 		_stress()
+	elif "locochk" in OS.get_cmdline_user_args():
+		_locochk()
 	elif "idledrift" in OS.get_cmdline_user_args():
 		_idledrift()
 	elif "trainshot" in OS.get_cmdline_user_args():
@@ -602,6 +604,211 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 			break                                  # 兩秒沒動：交給呼叫端決定要不要繞路
 	_press_key(KEY_W, false)
 	return _live_px(pu).distance_to(goal) * WORLD_SCALE < 1.2
+
+# ---------- 動作流暢度量測（-- locochk chNN）2026-08-07 ----------
+# 為什麼要有這一支：「滑步修好了」「轉向變平順了」全是主觀說法，而本專案已經被
+# 「看起來對、其實沒修好」坑過三次。這支把每一項都變成可以印出來的數字。
+#
+# 核心量法——**站立中的腳，在世界座標上不應該移動**。
+#   每幀取兩隻腳踝的世界座標；離地 < 6cm 視為「踩在地上」。
+#   踩著的那隻腳如果還在水平位移，位移量就是實打實的滑步，無從狡辯。
+#   評分用比值：planted_slide / body_move。腳完全不滑＝0，腳跟著身體一起滑＝1。
+const LOCO_PLANT_H := 0.06        # 腳踝離地多少以內算「踩在地上」
+const LOCO_SLIDE_FAIL := 0.45     # 滑步比值超過這個就算不及格
+const LOCO_SNAP_FAIL := 22.0      # 單幀轉向超過幾度算「瞬間轉向」
+
+var _lc_fail := 0
+var _lc_lines: Array = []
+
+func _lc_say(ok: bool, msg: String) -> void:
+	if not ok:
+		_lc_fail += 1
+	_lc_lines.append(("     " if ok else " FAIL") + " " + msg)
+	print("[locochk]%s %s" % ["  OK" if ok else " FAIL", msg])
+
+
+# 量一段時間內的滑步／轉向／步態切換。回傳統計字典。
+# hold_keys：這段期間按住哪些鍵（空陣列＝不按，量停步）。
+func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
+	for k in hold_keys:
+		_press_key(k, true)
+	var body_move := 0.0
+	var slide := 0.0
+	var planted_frames := 0
+	var max_snap := 0.0            # 單幀最大轉向（度）
+	var max_pen := 0.0             # 腳最深陷進地面幾公尺
+	var min_h := 1e9               # 這段期間腳踝離地的最低值（＝踩地時的高度）
+	var rec: Array = []            # [離地高, 該幀水平位移]
+	var gait_switch := 0
+	var speeds: Array = []
+	var prev_pos: Vector3 = u.global_position
+	var prev_yaw: float = u.rotation.y
+	var prev_ank: Array = u.ankle_points()
+	var prev_gait: String = u.loco_gait()
+	var t := 0.0
+	while t < secs:
+		await get_tree().process_frame
+		var dt: float = get_process_delta_time()
+		t += dt
+		var pos: Vector3 = u.global_position
+		body_move += Vector2(pos.x - prev_pos.x, pos.z - prev_pos.z).length()
+		prev_pos = pos
+		var dyaw: float = absf(rad_to_deg(wrapf(u.rotation.y - prev_yaw, -PI, PI)))
+		max_snap = maxf(max_snap, dyaw)
+		prev_yaw = u.rotation.y
+		speeds.append(u.loco_speed())
+		var g: String = u.loco_gait()
+		if g != prev_gait:
+			gait_switch += 1
+			prev_gait = g
+		var ank: Array = u.ankle_points()
+		if ank.size() == 2 and prev_ank.size() == 2:
+			for i in 2:
+				var a: Vector3 = ank[i]
+				var gy: float = float(Unit.ground_sampler.call(a))
+				var h: float = a.y - gy
+				max_pen = maxf(max_pen, -h)
+				min_h = minf(min_h, h)
+				var pa: Vector3 = prev_ank[i]
+				# ⚠ 不可以在這裡就用固定門檻判「有沒有踩地」——每一系骨架的腳踝骨
+				#   離地高度不同（Quaternius 約 2cm、tripo 約 15cm）。第一版寫死 0.06m，
+				#   結果 tripo 骨架**一幀都沒被判成踩地**，滑步斷言整段被跳過，
+				#   日誌卻印出「滑動 0.00m 比值 0.000」＝漂亮的假通過。
+				#   改成先全部記下來，量完再用「這隻腳自己的最低點 + 5cm」當門檻。
+				rec.append([h, Vector2(a.x - pa.x, a.z - pa.z).length()])
+		prev_ank = ank
+	for k in hold_keys:
+		_press_key(k, false)
+	var avg := 0.0
+	for s in speeds:
+		avg += float(s)
+	avg = avg / maxf(float(speeds.size()), 1.0)
+	# 踩地門檻＝這段期間量到的最低踝高 + 5cm（自適應，不吃骨架尺度差異）
+	var plant_th: float = (min_h + 0.05) if min_h < 1e8 else 0.06
+	for r in rec:
+		if float(r[0]) <= plant_th:
+			planted_frames += 1
+			slide += float(r[1])
+	return {
+		"plant_th": plant_th, "min_h": min_h,
+		"body": body_move, "slide": slide, "planted": planted_frames,
+		"snap": max_snap, "pen": max_pen, "switch": gait_switch,
+		"avg_speed": avg, "secs": t,
+		"ratio": slide / maxf(body_move, 0.0001),
+	}
+
+
+func _locochk() -> void:
+	_lc_fail = 0
+	_lc_lines.clear()
+	if not await _boot_to_battle("locochk", 3): _quit_test(1); return
+	var pu = _deployed[0]
+	pu["ap"] = 999999.0
+	pu["ap_max"] = 999999.0
+	pu["node"].auto_stance = false
+	pu["node"].stance_cmd = "stand"
+	_begin_action(pu)
+	# 進第三人稱（使用者實際操控的狀態；不進去就只是在測 AI 路徑）
+	_send_click(cam.unproject_position(pu["node"].global_position + Vector3(0, 1.0, 0)))
+	await get_tree().create_timer(0.6).timeout
+	var u = pu["node"]
+	if u.ankle_points().is_empty():
+		print("[locochk] 這個兵種沒有可量測的腿骨（非 Quaternius 骨架），改測其他項目")
+	print("[locochk] 第三人稱=%s 兵種=%s" % ["是" if cam.is_tps() else "否", String(pu["cls"])])
+
+	# ---------- ① 起步：不可以一幀就到全速 ----------
+	var t0 := Time.get_ticks_msec()
+	_press_key(KEY_W, true)
+	var to_full := 0.0
+	var first_frame_speed := -1.0
+	while to_full < 2.0:
+		await get_tree().process_frame
+		to_full += get_process_delta_time()
+		if first_frame_speed < 0.0:
+			first_frame_speed = u.loco_speed()
+		if u.loco_speed() > 2.7:
+			break
+	_lc_say(first_frame_speed < 1.0,
+			"起步第一幀速度 %.2f m/s（應遠小於全速 3.0＝有加速度）" % first_frame_speed)
+	_lc_say(to_full > 0.15 and to_full < 1.2,
+			"加速到 2.7 m/s 花了 %.2fs（合理區間 0.15~1.2s）" % to_full)
+
+	# ---------- ② 等速跑：量滑步 ----------
+	var run_s: Dictionary = await _lc_sample(u, 2.5, [KEY_W])
+	print("[locochk] 跑步 位移%.2fm 站立腳滑動%.2fm 比值%.3f 平均速%.2f 步態切換%d 最大單幀轉向%.1f° 踩地幀%d(門檻%.3fm 最低踝高%.3fm)"
+			% [run_s["body"], run_s["slide"], run_s["ratio"], run_s["avg_speed"],
+			run_s["switch"], run_s["snap"], int(run_s["planted"]),
+			float(run_s["plant_th"]), float(run_s["min_h"])])
+	# ★斷言不可以「量不到就跳過」——那正是上一版印出漂亮 0.000 卻什麼都沒測的原因。
+	#   量不到踩地幀本身就是 FAIL：代表這支量測對這個兵種是壞的。
+	_lc_say(int(run_s["planted"]) > 0,
+			"跑步期間量到 %d 幀踩地（=0 代表量測對這副骨架失效，不是「沒有滑步」）"
+			% int(run_s["planted"]))
+	if int(run_s["planted"]) > 0:
+		_lc_say(float(run_s["ratio"]) < LOCO_SLIDE_FAIL,
+				"跑步滑步比值 %.3f（<%.2f 才算腳有踩住地面）" % [run_s["ratio"], LOCO_SLIDE_FAIL])
+		_lc_say(float(run_s["pen"]) < 0.08,
+				"跑步時腳最深陷地 %.3fm（<0.08m）" % run_s["pen"])
+	_lc_say(int(run_s["switch"]) <= 2,
+			"等速跑 2.5s 內步態只切換 %d 次（≤2＝沒有動畫抽搐）" % int(run_s["switch"]))
+
+	# ---------- ③ 停步：不可以瞬停 ----------
+	var stop_from: Vector3 = u.global_position
+	var v0: float = u.loco_speed()
+	var stop_t := 0.0
+	while stop_t < 2.5 and u.loco_speed() > 0.05:
+		await get_tree().process_frame
+		stop_t += get_process_delta_time()
+	var stop_d: float = Vector2(u.global_position.x - stop_from.x,
+			u.global_position.z - stop_from.z).length()
+	_lc_say(stop_t > 0.12 and stop_d > 0.10,
+			"從 %.2f m/s 停下來花 %.2fs、滑行 %.2fm（不是一幀關電源）" % [v0, stop_t, stop_d])
+	_lc_say(stop_d < 2.0, "停步滑行 %.2fm（<2m，不是溜冰）" % stop_d)
+
+	# ---------- ④ 原地大角度轉向：不可以瞬間甩頭 ----------
+	await get_tree().create_timer(0.4).timeout
+	var yaw_before: float = u.rotation.y
+	var turn_s: Dictionary = await _lc_sample(u, 1.6, [KEY_S])   # 往後＝180° 反向
+	var turned: float = absf(rad_to_deg(wrapf(u.rotation.y - yaw_before, -PI, PI)))
+	print("[locochk] 反向 轉了%.0f° 最大單幀%.1f° 位移%.2fm" % [turned, turn_s["snap"], turn_s["body"]])
+	_lc_say(float(turn_s["snap"]) < LOCO_SNAP_FAIL,
+			"180° 反向時單幀最大轉 %.1f°（<%.0f°＝沒有瞬間轉向）" % [turn_s["snap"], LOCO_SNAP_FAIL])
+
+	# ---------- ⑤ 蹲行：舊碼滑最兇的情況（速度只剩 45%、動畫照原速播）----------
+	await get_tree().create_timer(0.3).timeout
+	u.stance_cmd = "crouch"
+	await get_tree().create_timer(0.8).timeout
+	var cr_s: Dictionary = await _lc_sample(u, 2.2, [KEY_W])
+	print("[locochk] 蹲行 位移%.2fm 滑動%.2fm 比值%.3f 平均速%.2f"
+			% [cr_s["body"], cr_s["slide"], cr_s["ratio"], cr_s["avg_speed"]])
+	_lc_say(int(cr_s["planted"]) > 0, "蹲行期間量到 %d 幀踩地" % int(cr_s["planted"]))
+	if int(cr_s["planted"]) > 0:
+		_lc_say(float(cr_s["ratio"]) < LOCO_SLIDE_FAIL,
+				"蹲行滑步比值 %.3f（<%.2f）" % [cr_s["ratio"], LOCO_SLIDE_FAIL])
+	_lc_say(float(cr_s["avg_speed"]) < 2.0 and float(cr_s["avg_speed"]) > 0.4,
+			"蹲行平均速度 %.2f m/s（應明顯慢於站姿 3.0）" % cr_s["avg_speed"])
+	u.stance_cmd = "stand"
+	await get_tree().create_timer(0.6).timeout
+
+	# ---------- ⑥ 腳步 IK：站在斜坡上兩腳都要踩到地面 ----------
+	var ik_line: String = u.loco_debug()
+	print("[locochk] 狀態列：", ik_line)
+	var ank: Array = u.ankle_points()
+	if ank.size() == 2:
+		var worst := 0.0
+		for a in ank:
+			var gy: float = float(Unit.ground_sampler.call(a))
+			worst = maxf(worst, absf((a.y - gy) - 0.085))
+		_lc_say(worst < 0.12, "靜止時兩腳踝離地誤差最大 %.3fm（<0.12m＝有踩到地）" % worst)
+
+	await _snap("res://locochk_end.png")
+	print("[locochk] ---- 總結 ----")
+	for l in _lc_lines:
+		print("[locochk]", l)
+	print("[locochk] FAILS=%d  耗時=%.1fs" % [_lc_fail, (Time.get_ticks_msec() - t0) / 1000.0])
+	print("[locochk] DONE")
+	_quit_test(0)
+
 
 # ---------- 原地飄移量測（-- idledrift chNN）----------
 # 使用者 2026-08-02：「人物停在原地會小飄移」。
