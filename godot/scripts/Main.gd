@@ -189,6 +189,18 @@ func _ready() -> void:
 	ui.training_back.connect(_open_story)
 	_load_growth()
 	ui.end_action.connect(_end_action)
+	# 動作系統 Debug overlay（F3）：顯示目前操控單位的運動狀態。
+	# 資料來源用 Callable 注入，UI 不必知道 Unit 的內部結構。
+	ui.set_debug_source(func() -> String:
+		var t = acting if acting != null else (_deployed[0] if not _deployed.is_empty() else null)
+		if t == null or not is_instance_valid(t["node"]):
+			return "（沒有可顯示的單位）"
+		var n = t["node"]
+		return "[F3] %s  %s
+地面=%s  相機距離=%.0fm  FPS=%.0f" % [
+				String(t["cls"]), n.loco_debug(),
+				"貼地" if absf(n.get("_fall_v")) < 0.2 else "離地",
+				n.get("_cam_dist"), Engine.get_frames_per_second()])
 	ui.back_menu.connect(_open_menu)
 	_open_menu()
 	# 測試模式一律靜音（2026-07-30 使用者：「測試階段不要播背景音樂」）——
@@ -5300,6 +5312,13 @@ func _refresh_visibility() -> void:
 
 # ---------- 輸入 ----------
 func _unhandled_input(event: InputEvent) -> void:
+	# F3：動作系統 Debug overlay（步態/速度/踏頻倍率/IK 權重/坡度）。
+	# 正式版預設隱藏，開發時一邊玩一邊對照——運動狀態是每幀在變的量，
+	# 事後看日誌永遠對不上「當下畫面為什麼長這樣」。
+	if event is InputEventKey and event.pressed and not event.echo 			and (event as InputEventKey).keycode == KEY_F3:
+		print("[debug] 動作 overlay ", "開" if ui.toggle_debug() else "關")
+		get_viewport().set_input_as_handled()
+		return
 	# 第三人稱：Esc 結束行動（同時放開滑鼠），左鍵對準心開火
 	if cam != null and cam.is_tps():
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:

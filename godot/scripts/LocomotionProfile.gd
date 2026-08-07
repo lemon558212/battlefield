@@ -60,8 +60,10 @@ extends Resource
 @export var run_to_sprint: float = 4.10
 ## 步態切換遲滯（m/s）：往回切要比往上切低這麼多，避免臨界來回跳
 @export var gait_hysteresis: float = 0.45
-## 步態最短停留時間（秒）：擋住 1 幀內來回切造成的動畫抽搐
-@export var gait_min_hold: float = 0.18
+## 步態最短停留時間（秒）：擋住短暫的速度波動造成的動畫抽搐。
+## 0.18 太短——地形起伏、擦到雜物都會讓速度掉一下，實測等速跑 2.5s 內
+## 仍會切換 4 次。人不會在半秒內把步態改三次，0.35 是符合現實的下限。
+@export var gait_min_hold: float = 0.35
 ## 各步態的**單步步幅**（公尺）。踏頻同步靠它把「動畫週期」換算成「該有的速度」：
 ##     native = (2 步 / 週期秒) × 步幅，  speed_scale = 實際速度 / native
 ## stride_run 取 1.13 是推導值不是調出來的：Jog_Fwd 週期 0.93s，要讓它的原生速度

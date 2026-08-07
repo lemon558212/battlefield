@@ -38,6 +38,46 @@ func _ready() -> void:
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
+	_make_debug_overlay()
+
+# ---------- 動作系統 Debug Overlay（F3 開關，2026-08-07）----------
+# 為什麼要有：運動狀態（步態、速度、踏頻倍率、IK 權重、坡度）全都是**每幀在變**的量，
+# 靠日誌事後看永遠對不上「當下畫面為什麼是這樣」。做成疊加層才能一邊玩一邊對照。
+# ⚠ 不掛在 root 底下：root 會被 _clear() 整個清掉（換畫面時），overlay 要活過那個。
+# 正式版預設隱藏，不影響效能（隱藏時 _process 直接 return）。
+var _dbg: Label = null
+var _dbg_src: Callable = Callable()
+
+func _make_debug_overlay() -> void:
+	_dbg = Label.new()
+	_dbg.name = "LocoDebug"
+	_dbg.position = Vector2(12, 96)
+	_dbg.add_theme_font_size_override("font_size", 15)
+	_dbg.add_theme_color_override("font_color", Color(0.6, 1.0, 0.7))
+	_dbg.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_dbg.add_theme_constant_override("outline_size", 4)
+	_dbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dbg.visible = false
+	add_child(_dbg)
+
+# Main 注入一個「回傳目前該顯示什麼」的 Callable（UI 不該知道 Unit 的內部結構）
+func set_debug_source(src: Callable) -> void:
+	_dbg_src = src
+
+func toggle_debug() -> bool:
+	if _dbg == null:
+		return false
+	_dbg.visible = not _dbg.visible
+	return _dbg.visible
+
+# ⚠ UI.gd 已經有一支 _process（第 576 行，跑閃字與小地圖）。
+#   GDScript 不會警告重複定義，直接變成 Parse Error 而且訊息只說
+#   「Could not parse global class GameUI」——看不出是我加了第二支。
+#   所以這裡不另開 _process，改由既有那支呼叫。
+func _tick_debug() -> void:
+	if _dbg == null or not _dbg.visible or not _dbg_src.is_valid():
+		return
+	_dbg.text = String(_dbg_src.call())
 
 # 立即從樹上移除再釋放：queue_free 是「延遲」刪除，舊節點會殘留一段時間，
 # 導致 find_child("DlgText"/"BudgetLbl"/...) 搜到正要被刪的舊節點 → 字寫進垃圾節點、新節點永遠空白。
@@ -538,6 +578,7 @@ func _render_dlg(d: Dictionary, active_side: String) -> void:
 	_typing = true
 
 func _process(delta: float) -> void:
+	_tick_debug()
 	if _flash_t > 0.0 and is_instance_valid(_flash):
 		_flash_t -= delta
 		if _flash_t < 0.5:
