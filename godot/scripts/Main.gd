@@ -206,7 +206,8 @@ func _ready() -> void:
 	# 測試模式一律靜音（2026-07-30 使用者：「測試階段不要播背景音樂」）——
 	# 跑批一跑七小時，BGM 跟著響七小時。靜音掛在 Master bus，不動遊戲本身的音量設定。
 	for targ in ["e2e", "selftest", "shotseq", "mapshots", "play", "scene",
-			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift", "locochk"]:
+			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift", "locochk",
+			"aichk"]:
 		if targ in OS.get_cmdline_user_args():
 			AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
 			# ★★測試模式固定亂數種子（2026-08-04）。
@@ -242,6 +243,8 @@ func _ready() -> void:
 		_stress()
 	elif "locochk" in OS.get_cmdline_user_args():
 		_locochk()
+	elif "aichk" in OS.get_cmdline_user_args():
+		_aichk()
 	elif "idledrift" in OS.get_cmdline_user_args():
 		_idledrift()
 	elif "trainshot" in OS.get_cmdline_user_args():
@@ -763,6 +766,153 @@ func _lc_look_pt(u, deg: float, dy: float) -> Vector3:
 	var a: float = deg_to_rad(deg)
 	var dir: Vector3 = u.facing_dir() * cos(a) + u.right_dir() * sin(a)
 	return u.global_position + Vector3(0, 1.55, 0) + dir * 8.0 + Vector3(0, dy, 0)
+
+
+# ================= AI 情報驗收台（`-- aichk`）=================
+# 驗的是 GDD/05 §5「AI 只用敵方視角視野決策」與 GDD/15 F6「聲音作為情報」。
+# ⚠ 這一台**放置**單位再量，不是用走的——因為要驗的是「知不知道」這件事本身，
+#   它是位置與視線的函式，走過去只是換一種方式擺位置。行為面的驗收在 play/stress：
+#   那裡看的是 AI 實際的決策理由（_ai_why）有沒有出現「循槍聲查看」。
+var _ai_fail := 0
+func _ai_say(ok: bool, msg: String) -> void:
+	if not ok:
+		_ai_fail += 1
+	print("[aichk]%s %s" % ["  OK" if ok else " FAIL", msg])
+
+# 把單位擺到指定 px 並讓 wx/wy 同步（不同步的話所有距離計算都在用舊座標）
+func _ai_place(u, px: float, py: float, face_to = null) -> void:
+	u["node"].stop()
+	u["node"].global_position = _to3d(px, py) + Vector3(0, 0.02, 0)
+	var q := _live_px(u)
+	u["wx"] = q.x
+	u["wy"] = q.y
+	if face_to != null:
+		var d: Vector2 = (face_to as Vector2) - Vector2(u["wx"], u["wy"])
+		if d.length() > 0.01:
+			# 本專案角色正面是 +Z：yaw = atan2(x, z)（見 Unit.facing_dir）
+			u["node"].rotation.y = atan2(d.x, d.y)
+
+func _aichk() -> void:
+	_ai_fail = 0
+	if not await _boot_to_battle("aichk", 1): _quit_test(1); return
+	var me = _deployed[0]
+	var foe = null
+	for u in units:
+		if u["alive"] and u["side"] != player_side and not Unit.is_vehicle_cls(u["cls"]):
+			foe = u
+			break
+	if foe == null:
+		print("[aichk] FAIL 這一章沒有敵方步兵可測")
+		_quit_test(1); return
+	var msave := _shield(me)          # 測知覺，不要中途被打死
+	var fsave := _shield(foe)
+	me["node"].auto_stance = false
+	me["node"].stance_cmd = "stand"
+	# 找一塊空地，兩邊都擺在上面：有牆的地方會混進「視線被擋」這個變因
+	var spot: Vector2 = _open_spot([14.0, 10.0, 7.0])
+	# ★ 其餘所有人先趕到最遠的角落。理由：`_side_sees` 是**整個陣營的聯集**
+	#   （一人看見全隊知道，這是對的），所以只要場上還有第三個人，
+	#   量到的就不是「這兩個人之間看不看得到」。這一台要驗的是那把尺本身。
+	var mw: float = float(map_data.get("w", 960))
+	var mh: float = float(map_data.get("h", 600))
+	var park := Vector2(20.0 if spot.x > mw * 0.5 else mw - 20.0,
+			20.0 if spot.y > mh * 0.5 else mh - 20.0)
+	var parked := 0
+	for u in units:
+		if u == me or u == foe or not u["alive"] or not is_instance_valid(u["node"]):
+			continue
+		_ai_place(u, park.x + float(parked % 5) * 6.0, park.y + float(parked / 5) * 6.0)
+		parked += 1
+	print("[aichk] 其餘 %d 人已移到角落 px(%.0f,%.0f)，避免第三者的視野混進來"
+			% [parked, park.x, park.y])
+	# 測試用的位移方向：往地圖裡面推，不要把人擺到圖外
+	var sx: float = 1.0 if spot.x < mw * 0.5 else -1.0
+	var sight_me: float = float(GameData.class_base.get(me["cls"], {}).get("sight", SIGHT))
+	var sight_fo: float = float(GameData.class_base.get(foe["cls"], {}).get("sight", SIGHT))
+	print("[aichk] 測試對象：我方 %s（視距 %.0f px）／敵方 %s（視距 %.0f px）"
+			% [String(me["cls"]), sight_me, String(foe["cls"]), sight_fo])
+
+	# ---------- ① 面對面近距離：雙方都看得到 ----------
+	var near_d: float = minf(sight_me, sight_fo) * 0.35
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * near_d, 0))
+	_ai_place(foe, spot.x + sx * near_d, spot.y, spot)
+	await get_tree().create_timer(0.4).timeout
+	_ai_say(_side_sees(player_side, foe), "面對面 %.0f px：我方看得到敵人" % near_d)
+	_ai_say(_side_sees(foe["side"], me), "面對面 %.0f px：敵方看得到我方（同一把尺）" % near_d)
+	_ai_say(_known_foes(foe).size() > 0, "敵方 AI 的已知目標數 %d（>0）" % _known_foes(foe).size())
+
+	# ---------- ② 超出視距：雙方都看不到 ----------
+	var far_d: float = maxf(sight_me, sight_fo) * 1.6
+	_ai_place(foe, spot.x + sx * far_d, spot.y, spot)
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * far_d, 0))
+	await get_tree().create_timer(0.4).timeout
+	_ai_say(not _side_sees(player_side, foe), "拉開到 %.0f px：我方看不到敵人" % far_d)
+	_ai_say(not _side_sees(foe["side"], me), "拉開到 %.0f px：敵方也看不到我方" % far_d)
+	_ai_say(_known_foes(foe).is_empty(),
+			"★ 敵方 AI 的已知目標數 %d（=0 才代表全知已經關掉）" % _known_foes(foe).size())
+
+	# ---------- ③ 視野扇形：擺在背後就看不到 ----------
+	# 距離取「正面看得到、背後看不到」的區間：背後視距只有 0.3 倍
+	var mid_d: float = sight_fo * 0.55
+	_ai_place(me, spot.x, spot.y, spot)
+	_ai_place(foe, spot.x + sx * mid_d, spot.y, spot)          # 敵人面朝我方＝看得到
+	await get_tree().create_timer(0.4).timeout
+	var see_front: bool = _side_sees(foe["side"], me)
+	_ai_place(foe, spot.x + sx * mid_d, spot.y, spot + Vector2(sx * mid_d * 2.0, 0))   # 轉身背對
+	await get_tree().create_timer(0.4).timeout
+	var see_back: bool = _side_sees(foe["side"], me)
+	_ai_say(see_front and not see_back,
+			"視野扇形：同樣 %.0f px，敵人面朝我＝%s、背對我＝%s（鐵律 0：人看不到背後）"
+			% [mid_d, "看得到" if see_front else "看不到", "看得到" if see_back else "看不到"])
+
+	# ---------- ④ 聽覺：開槍會被記住（GDD/15 F6）----------
+	# 擺在「聽得到但看不到」的位置：超出視距、在 HEAR_PX 之內
+	var hear_d: float = clampf(maxf(sight_me, sight_fo) * 1.3, 0.0, HEAR_PX * 0.8)
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * hear_d, 0))
+	_ai_place(foe, spot.x + sx * hear_d, spot.y, spot)
+	await get_tree().create_timer(0.4).timeout
+	foe.erase("noise_t")
+	_ai_say(_noise_memory(foe) == null, "開槍前：敵人沒有任何槍聲記憶")
+	var shot_px := Vector2(float(me["wx"]), float(me["wy"]))
+	_hear_shot(me)
+	var mem = _noise_memory(foe)
+	_ai_say(mem != null and (mem as Vector2).distance_to(shot_px) < 2.0,
+			"開槍後 %.0f px 外的敵人記住了聲音來源，誤差 %.2f px（記的是開槍當下的位置）"
+			% [hear_d, (mem as Vector2).distance_to(shot_px) if mem != null else -1.0])
+	var plan1: Dictionary = _ai_plan(foe)
+	_ai_say(String(plan1["why"]) == "循槍聲查看",
+			"聽到槍聲但看不到人時的決策＝「%s」（應為「循槍聲查看」）" % String(plan1["why"]))
+	_ai_say(plan1["target"] == null,
+			"★ 循聲查看時沒有鎖定目標（看不到的人不可以被鎖定）")
+
+	# ---------- ⑤ 記憶會過期：不可以永遠往同一個點走 ----------
+	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0 - HEAR_MEMORY_SEC - 1.0
+	_ai_say(_noise_memory(foe) == null, "槍聲記憶超過 %.0fs 後失效" % HEAR_MEMORY_SEC)
+	var plan2: Dictionary = _ai_plan(foe)
+	_ai_say(String(plan2["why"]) == "無目標→推進主堡",
+			"記憶過期後回到「%s」（應為「無目標→推進主堡」）" % String(plan2["why"]))
+
+	# ---------- ⑥ 聲音遮蔽（GDD/15 F3）：牆後的槍聲要變悶 ----------
+	_ai_say(Audio.los_check.is_valid(), "遮蔽悶音的接線存在（Main 有把視線查詢注入 Audio）")
+	var keep: Callable = Audio.los_check
+	Audio.los_check = func(_p: Vector3) -> bool: return true
+	var clear_pl = Audio.sfx3d("shot_rifle", me["node"].global_position)
+	var clear_cut: float = clear_pl.attenuation_filter_cutoff_hz if clear_pl != null else -1.0
+	var clear_db: float = clear_pl.volume_db if clear_pl != null else 0.0
+	Audio.los_check = func(_p: Vector3) -> bool: return false
+	var muf_pl = Audio.sfx3d("shot_rifle", me["node"].global_position)
+	var muf_cut: float = muf_pl.attenuation_filter_cutoff_hz if muf_pl != null else -1.0
+	var muf_db: float = muf_pl.volume_db if muf_pl != null else 0.0
+	Audio.los_check = keep
+	_ai_say(clear_pl != null and muf_pl != null and muf_cut < clear_cut * 0.5 and muf_db < clear_db,
+			"牆後的槍聲：低通 %.0fHz→%.0fHz、音量 %.1f→%.1f dB（都要往下）"
+			% [clear_cut, muf_cut, clear_db, muf_db])
+
+	_unshield(me, msave)
+	_unshield(foe, fsave)
+	print("[aichk] FAILS=%d" % _ai_fail)
+	print("[aichk] DONE")
+	_quit_test(1 if _ai_fail > 0 else 0)
 
 
 func _locochk() -> void:
@@ -5431,45 +5581,58 @@ func _count_side(s: int) -> int:
 			n += 1
 	return n
 
+# ---------- 誰看得到誰（迷霧的唯一真相）----------
+# ★ 2026-08-22：這段本來寫死在 _refresh_visibility 裡、而且**只算玩家看敵人**這一個方向，
+#   於是 GDD/05 §5「AI 也只用敵方視角視野決策」在 Godot 版根本不存在：
+#   _ai_plan 直接把所有活著的我方單位當 foes，敵人隔著整張圖、隔著牆、在背後都知道你在哪。
+#   抽成一個對稱的函式之後，玩家與 AI 用的是**同一把尺**（鐵律 0：物理對雙方一視同仁）。
+func _spots(p, u) -> bool:
+	if not p["alive"] or not u["alive"]:
+		return false
+	# 視野半徑改讀資料（鐵律 3）：class_base.json 每個兵種都寫了 sight
+	# （偵察兵 170、機槍兵 120…），先前全專案寫死 200，兵種差異等於不存在。
+	var sight: float = float(GameData.class_base.get(p["cls"], {}).get("sight", SIGHT))
+	# 視野扇形（鐵律 0：人看不到背後）。正前 ±60 度全視距，
+	# 側面砍到 0.55、背後只剩 0.3 的近距離察覺（餘光與聽覺）。
+	if is_instance_valid(p["node"]):
+		var pf: Vector3 = p["node"].facing_dir()
+		var pv := Vector3(float(u["wx"]) - float(p["wx"]), 0.0,
+				float(u["wy"]) - float(p["wy"]))
+		if pv.length() > 0.01:
+			var adeg: float = rad_to_deg(acos(clampf(pf.dot(pv.normalized()), -1.0, 1.0)))
+			sight *= (1.0 if adeg <= 60.0 else (0.55 if adeg <= 110.0 else 0.3))
+	sight *= weather_sight_mul() * _light_sight_mul()   # 雨雪與光線都壓低能見度
+	for c in _covers:
+		if c["type"] == "bush" and Vector2(c["wx"] - u["wx"], c["wy"] - u["wy"]).length() <= c["r"]:
+			# 草叢隱蔽（GDD/01 §5a）：蹲伏且尚未開火才真的藏得住（發現距離砍到 0.3）；
+			# 站著或開過火只砍一半——草叢不是隱形斗篷。
+			var hiding: bool = is_instance_valid(u["node"]) and u["node"]._crouch > 0.5 \
+					and not bool(u.get("fired", false))
+			sight = SIGHT * (0.3 if hiding else 0.5)
+			break
+	if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() > sight:
+		return false
+	# 視線被牆擋住就看不到（GDD/14 §3-3）：躲在屋裡的人只有從門窗的角度才會被發現——
+	# 這是「進建築」在戰術上真正的價值，不然屋子只是一塊會擋子彈的裝飾。
+	# ⚠ 這裡本來只吃 _los_clear（只有建築牆），所以躲在沙包、樹幹、殘骸後面
+	#   等於站在空地上被看光。視線跟彈道吃同一份障礙，只是高度改用眼高。
+	return _sight_clear(p, u)
+
+# 某一方有沒有任何人看得見這個單位（GDD/05 §5 的 Fog.sideCanSee）
+func _side_sees(side: int, u) -> bool:
+	for p in units:
+		if p["side"] != side or not p["alive"]:
+			continue
+		if _spots(p, u):
+			return true
+	return false
+
 # ---------- 迷霧（簡易：敵兵在我方視野內才顯示）----------
 func _refresh_visibility() -> void:
 	for u in units:
 		if u["side"] == player_side:
 			continue
-		var vis := false
-		for p in units:
-			if p["side"] != player_side or not p["alive"]:
-				continue
-			# 視野半徑改讀資料（鐵律 3）：class_base.json 每個兵種都寫了 sight
-			# （偵察兵 170、機槍兵 120…），先前全專案寫死 200，兵種差異等於不存在。
-			var sight: float = float(GameData.class_base.get(p["cls"], {}).get("sight", SIGHT))
-			# 視野扇形（鐵律 0：人看不到背後）。正前 ±60 度全視距，
-			# 側面砍到 0.55、背後只剩 0.3 的近距離察覺（餘光與聽覺）。
-			if is_instance_valid(p["node"]):
-				var pf: Vector3 = p["node"].facing_dir()
-				var pv := Vector3(float(u["wx"]) - float(p["wx"]), 0.0,
-						float(u["wy"]) - float(p["wy"]))
-				if pv.length() > 0.01:
-					var adeg: float = rad_to_deg(acos(clampf(pf.dot(pv.normalized()), -1.0, 1.0)))
-					sight *= (1.0 if adeg <= 60.0 else (0.55 if adeg <= 110.0 else 0.3))
-			sight *= weather_sight_mul() * _light_sight_mul()   # 雨雪與光線都壓低能見度
-			for c in _covers:
-				if c["type"] == "bush" and Vector2(c["wx"] - u["wx"], c["wy"] - u["wy"]).length() <= c["r"]:
-					# 草叢隱蔽（GDD/01 §5a）：蹲伏且尚未開火才真的藏得住（發現距離砍到 0.3）；
-					# 站著或開過火只砍一半——草叢不是隱形斗篷。
-					var hiding: bool = is_instance_valid(u["node"]) and u["node"]._crouch > 0.5 							and not bool(u.get("fired", false))
-					sight = SIGHT * (0.3 if hiding else 0.5)
-					break
-			if Vector2(u["wx"] - p["wx"], u["wy"] - p["wy"]).length() > sight:
-				continue
-			# 視線被牆擋住就看不到（GDD/14 §3-3）：躲在屋裡的人只有從門窗的角度才會被發現——
-			# 這是「進建築」在戰術上真正的價值，不然屋子只是一塊會擋子彈的裝飾。
-			# ⚠ 這裡本來只吃 _los_clear（只有建築牆），所以躲在沙包、樹幹、殘骸後面
-			#   等於站在空地上被看光。視線跟彈道吃同一份障礙，只是高度改用眼高。
-			if not _sight_clear(p, u):
-				continue
-			vis = true
-			break
+		var vis: bool = _side_sees(player_side, u)
 		if u["alive"]:                    # 陣亡者交給 die() 淡出，別強制隱藏
 			u["node"].visible = vis
 
@@ -6096,19 +6259,31 @@ func _flicker_fire(delta: float) -> void:
 # ⚠ 這條要在「視野扇形」之後做才有意義——先前 360 度全視野，轉不轉頭都一樣。
 #   現在背後只有 0.3 倍視距，所以「被聲音吸引轉身」真的會改變偵察結果。
 const HEAR_PX := 460.0        # 聽得到槍聲的距離（比視野遠得多，這是聲音的價值）
+# 聽到的槍聲要記多久（秒）。真人不會聽過就忘，但也不會記一整場：
+# 記憶過期後那個位置就不再值得去看——不然 AI 會一直往一個早就沒人的地方走。
+const HEAR_MEMORY_SEC := 20.0
 func _hear_shot(shooter) -> void:
 	if not is_instance_valid(shooter["node"]):
 		return
 	var sp: Vector2 = _live_px(shooter)
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
 	for u in units:
 		if u == shooter or not u["alive"] or not is_instance_valid(u["node"]):
 			continue
+		var up: Vector2 = _live_px(u)
+		if up.distance_to(sp) > HEAR_PX:
+			continue
+		# ★ 聽覺是情報（GDD/15 F6）：記在**聽的人**身上，而且記的是
+		#   「開槍當下那個位置」，不是對方現在在哪——聲音給的就是舊消息。
+		#   記在聽的人身上（而不是全域事件表）才對得起「當時誰在聽得到的範圍內」：
+		#   聽到之後對方跑遠了也不會讓記憶消失，沒聽到的人事後走過來也不會憑空知道。
+		if u["side"] != shooter["side"]:
+			u["noise_px"] = sp.x
+			u["noise_py"] = sp.y
+			u["noise_t"] = now
 		if u == acting:
 			continue                     # 玩家正在操控的人不要被系統搶走視角
 		if Unit.is_vehicle_cls(u["cls"]):
-			continue
-		var up: Vector2 = _live_px(u)
-		if up.distance_to(sp) > HEAR_PX:
 			continue
 		if u["node"].is_moving():
 			continue                     # 正在移動的人不打斷他
@@ -6116,6 +6291,37 @@ func _hear_shot(shooter) -> void:
 		to.y = 0.0
 		if to.length() > 0.05:
 			u["node"].face_towards_sound(to.normalized())
+
+# 這個單位還記得的槍聲位置（px）；沒有或已過期回 null
+func _noise_memory(u):
+	if not u.has("noise_t"):
+		return null
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	if now - float(u["noise_t"]) > HEAR_MEMORY_SEC:
+		return null
+	return Vector2(float(u["noise_px"]), float(u["noise_py"]))
+
+# 這個單位「知道」的敵人＝我方陣營現在看得見的（GDD/05 §5）。
+# ⚠ 不是「他自己看得見的」：同一陣營會互相通報，一個人看到全隊都知道，
+#   這也是原本 JS 版 Fog.sideCanSee 的語意。
+func _known_foes(e) -> Array:
+	var out: Array = []
+	for x in units:
+		if x["alive"] and x["side"] != e["side"] and _side_sees(e["side"], x):
+			out.append(x)
+	return out
+
+# 看得見的最近敵人（沒有就 null）。舊的 _nearest_foe 是全知的，只准用在
+# 「已經確定看得到」之後的場合。
+func _nearest_known(e):
+	var best = null
+	var bd := 1e9
+	for x in _known_foes(e):
+		var d: float = Vector2(x["wx"] - e["wx"], x["wy"] - e["wy"]).length()
+		if d < bd:
+			bd = d
+			best = x
+	return best
 
 # 兩人之間的中點（打在掩體上的音源大致位置）
 func _mid3(a, b) -> Vector3:
@@ -6790,7 +6996,9 @@ func _enemy_step() -> void:
 		if not acting["alive"]:
 			_finish_enemy_action()
 			return
-		var tgt = _ai_target if (_ai_target != null and _ai_target["alive"]) else _nearest_foe(acting)
+		# ⚠ 後備目標也必須是「看得見的」——否則 AI 會朝著迷霧裡的人開火
+		#   （_shot_clear_units 只管彈道通不通，不管有沒有發現對方）
+		var tgt = _ai_target if (_ai_target != null and _ai_target["alive"]) else _nearest_known(acting)
 		var moving: bool = acting["node"].is_moving()
 		if _ai_state == "move":
 			# 真停滯偵測：單位以為自己在走（is_moving 仍為 true），但每幀被實體推回原地。
@@ -6894,32 +7102,39 @@ func _ai_pick_focus(e, foes: Array):
 func _ai_plan(e) -> Dictionary:
 	var hp_ratio: float = float(e["hp"]) / maxf(float(e["maxhp"]), 1.0)
 	var dif: Dictionary = _diff()
-	var foes: Array = []
-	for x in units:
-		if x["alive"] and x["side"] != e["side"]:
-			foes.append(x)
+	# ★ 情報只有兩個來源：看得見的（GDD/05 §5）與聽得到的（GDD/15 F6）。
+	#   先前這裡是 `for x in units: if x.alive and 敵方 → foes.append`＝**全知**：
+	#   玩家躲在牆後、趴在草叢裡、繞到背後，AI 照樣直線走過來，
+	#   於是迷霧、掩體、草叢、視野扇形這一整套對 AI 全部不算數。
+	var foes: Array = _known_foes(e)
 	# 1) 殘血撤退：往自家主堡方向退，並優先躲進掩體
 	#    撤退門檻隨章節提高——會撤退療傷的軍隊比死戰到底的難打得多
 	if hp_ratio < float(dif.get("retreatHp", 0.3)):
-		return {"target": _nearest_foe(e), "range_k": 1.0, "dest": _retreat_dest(e), "why": "殘血撤退"}
+		return {"target": _nearest_known(e), "range_k": 1.0, "dest": _retreat_dest(e), "why": "殘血撤退"}
 	if foes.is_empty():
+		# 1b) 看不到人，但剛剛聽到槍聲 → 去看一眼（聲音是舊消息，走到的是「開槍的位置」）
+		var np = _noise_memory(e)
+		if np != null and Vector2(float(e["wx"]), float(e["wy"])).distance_to(np) > 40.0:
+			return {"target": null, "range_k": 0.6,
+					"dest": _avoid_goal(e["node"].global_position, _to3d(np.x, np.y), BODY_R),
+					"why": "循槍聲查看"}
 		return {"target": null, "range_k": 0.6, "dest": _base_dest(1 - e["side"]), "why": "無目標→推進主堡"}
 	# 2) 職責行為
 	match e["cls"]:
 		"at":
 			var tank = _pick_foe(foes, "tank", Vector2(float(e["wx"]), float(e["wy"])))
-			return {"target": tank if tank != null else _nearest_foe(e), "range_k": 0.6, "dest": null,
+			return {"target": tank if tank != null else _nearest_known(e), "range_k": 0.6, "dest": null,
 					"why": "火箭兵找坦克" if tank != null else "火箭兵無坦克可打"}
 		"sniper":
 			return {"target": _pick_weakest(foes), "range_k": 0.9, "dest": null, "why": "狙擊手找血最少的"}
 		"mg":
 			# 機槍兵佔掩體警戒：不推進，就近找掩體站定，靠警戒射擊吃人
-			return {"target": _nearest_foe(e), "range_k": 1.0, "dest": _cover_dest(e), "why": "機槍兵佔掩體警戒"}
+			return {"target": _nearest_known(e), "range_k": 1.0, "dest": _cover_dest(e), "why": "機槍兵佔掩體警戒"}
 		"tank":
 			return {"target": _pick_valuable(foes), "range_k": 0.6, "dest": null, "why": "坦克轟最高價值目標"}
 	# 3) 章節難度行為（data/difficulty.json）。這三件用的都是**專案裡早就有、
 	#    但只有機槍兵或根本沒人用**的機制：_cover_dest / 集火 / _avoid_goal 側翼。
-	var tgt = _nearest_foe(e)
+	var tgt = _nearest_known(e)
 	var why := "推進到射程 0.6 倍"
 	var dest = null
 	var rk := 0.6
@@ -6995,7 +7210,22 @@ func _retreat_dest(e):
 
 # 就近掩體：站在掩體「背對敵人」那一側，才擋得住（掩體是方向性的）
 func _cover_dest(e):
-	var foe = _nearest_foe(e)
+	# 掩體要背對「威脅來的方向」。而 AI 對威脅方向的認知只能來自情報：
+	# 看得見的敵人 → 聽到的槍聲 → 都沒有就朝敵方主堡的方向防（那是唯一合理的預設）。
+	# ⚠ 這裡本來用全知的 _nearest_foe：連迷霧裡的人都能精準背對，等於偷看。
+	var foe = _nearest_known(e)
+	var threat = null
+	if foe != null:
+		threat = Vector2(float(foe["wx"]), float(foe["wy"]))
+	else:
+		var np = _noise_memory(e)
+		if np != null:
+			threat = np
+		else:
+			var hb: Vector3 = _base_dest(1 - e["side"])
+			var mw: float = map_data.get("w", 960)
+			var mh: float = map_data.get("h", 600)
+			threat = Vector2(hb.x / WORLD_SCALE + mw * 0.5, hb.z / WORLD_SCALE + mh * 0.5)
 	var here := Vector2(float(e["wx"]), float(e["wy"]))
 	var best = null
 	var bd := 1e9
@@ -7007,22 +7237,15 @@ func _cover_dest(e):
 		if d < bd and d < 600.0:
 			bd = d
 			var away := Vector2(1, 0)
-			if foe != null:
-				away = (cp - Vector2(float(foe["wx"]), float(foe["wy"]))).normalized()
+			if threat != null and cp.distance_to(threat) > 0.01:
+				away = (cp - threat).normalized()
 			var stand: Vector2 = cp + away * (float(c["r"]) * 0.75)
 			best = _to3d(stand.x, stand.y)
 	return best
 
-func _nearest_foe(u):
-	var tgt = null
-	var td := 1e9
-	for x in units:
-		if x["side"] != u["side"] and x["alive"]:
-			var d := Vector2(x["wx"] - u["wx"], x["wy"] - u["wy"]).length()
-			if d < td:
-				td = d
-				tgt = x
-	return tgt
+# ⚠ 這裡本來有一支全知的 _nearest_foe（不看迷霧、不看視線，直接掃 units 找最近的敵人）。
+#   2026-08-22 全部改用 _nearest_known 之後它沒有呼叫者了，直接刪掉——
+#   留著遲早會有人（我）順手用回去，那等於把剛修好的公平性又打開一個後門。
 
 func _finish_enemy_action() -> void:
 	if acting != null and is_instance_valid(acting["node"]):
