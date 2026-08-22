@@ -634,7 +634,10 @@ func _walk_leg(pu, goal: Vector2) -> bool:
 #   完美步行→0（總有一隻腳釘著），整個人平移滑行→1（兩隻腳都跟著身體走）。
 #   不需要任何門檻，也不吃骨架尺度。
 const LOCO_SLIDE_FAIL := 0.35     # 滑步比值超過這個就算不及格
-const LOCO_SNAP_FAIL := 22.0      # 單幀轉向超過幾度算「瞬間轉向」
+# 轉向上限＝角速度，不是「單幀幾度」（2026-08-22）。
+# turn_rate_fast 是 Locomotion 對 rad/s 的硬上限，量到的值不該超過它太多；
+# 1.25 倍容差留給「取樣點落在幀邊界」與 ease 收尾造成的抖動。
+const LOCO_TURN_TOL := 1.25
 
 var _lc_fail := 0
 var _lc_unit = null            # 量測對象（_lc_sample 要補 AP 用）
@@ -658,7 +661,8 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 	var body_move := 0.0
 	var slide := 0.0
 	var planted_frames := 0
-	var max_snap := 0.0            # 單幀最大轉向（度）
+	var max_snap := 0.0            # 單幀最大轉向（度）——只當診斷用，見 snap_rate
+	var max_rate := 0.0            # 最大角速度（度/秒）——這才是幀率無關的量
 	var max_pen := 0.0             # 腳最深陷進地面幾公尺
 	var min_h := 1e9               # 這段期間腳踝離地的最低值（診斷用）
 	var step_mv := [0.0, 0.0]      # 這一幀左右腳各自的水平位移
@@ -679,6 +683,13 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 		prev_pos = pos
 		var dyaw: float = absf(rad_to_deg(wrapf(u.rotation.y - prev_yaw, -PI, PI)))
 		max_snap = maxf(max_snap, dyaw)
+		# ★「單幀轉幾度」是**幀率的函數**，不是角色的物理量：
+		#   同一份程式碼在 60fps 量到 6°/幀，在 7fps 就量到 33°/幀，
+		#   於是慢的機器一定 FAIL、快的機器一定 OK——那是在測顯示卡不是測轉向。
+		#   角色真正的物理量是角速度（Locomotion.step_yaw 限制的就是 rad/s），
+		#   所以改量 度/秒，門檻直接對照 LocomotionProfile.turn_rate_fast。
+		if dt > 0.0005:
+			max_rate = maxf(max_rate, dyaw / dt)
 		prev_yaw = u.rotation.y
 		speeds.append(u.loco_speed())
 		var g: String = u.loco_gait()
@@ -729,7 +740,7 @@ func _lc_sample(u, secs: float, hold_keys: Array) -> Dictionary:
 	return {
 		"contact_v": contact_v, "body_v": body_v, "min_h": min_h, "plant_th": 0.0,
 		"body": body_move, "slide": slide, "planted": planted_frames,
-		"snap": max_snap, "pen": max_pen, "switch": gait_switch,
+		"snap": max_snap, "snap_rate": max_rate, "pen": max_pen, "switch": gait_switch,
 		"avg_speed": avg, "secs": t,
 		"ratio": (contact_v / maxf(body_v, 0.05)) if contact_v >= 0.0 else -1.0,
 	}
@@ -910,11 +921,15 @@ func _locochk() -> void:
 	u.move_to(u.global_position - u.facing_dir() * 6.0)     # 正後方 6m＝必須轉 180°
 	var turn_s: Dictionary = await _lc_sample(u, 2.6, [])
 	var turned: float = absf(rad_to_deg(wrapf(u.rotation.y - yaw_before, -PI, PI)))
-	print("[locochk] 反向 轉了%.0f° 最大單幀%.1f° 位移%.2fm" % [turned, turn_s["snap"], turn_s["body"]])
+	print("[locochk] 反向 轉了%.0f° 最大角速度%.0f°/s（單幀%.1f°／%.1f fps 相依，僅診斷）位移%.2fm"
+			% [turned, turn_s["snap_rate"], turn_s["snap"],
+			Engine.get_frames_per_second(), turn_s["body"]])
 	_lc_say(turned > 120.0,
 			"下令走向正後方後實際轉了 %.0f°（>120° 才代表這一項真的測到東西）" % turned)
-	_lc_say(float(turn_s["snap"]) < LOCO_SNAP_FAIL,
-			"180° 反向時單幀最大轉 %.1f°（<%.0f°＝沒有瞬間轉向）" % [turn_s["snap"], LOCO_SNAP_FAIL])
+	var turn_cap: float = rad_to_deg(Unit.loco_profile().turn_rate_fast) * LOCO_TURN_TOL
+	_lc_say(float(turn_s["snap_rate"]) < turn_cap,
+			"180° 反向時最大角速度 %.0f°/s（<%.0f°/s＝沒有瞬間轉向；上限來自 turn_rate_fast）"
+			% [turn_s["snap_rate"], turn_cap])
 
 	# ---------- ⑤ 蹲行：舊碼滑最兇的情況（速度只剩 45%、動畫照原速播）----------
 	await get_tree().create_timer(0.3).timeout
