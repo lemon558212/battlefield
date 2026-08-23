@@ -207,7 +207,7 @@ func _ready() -> void:
 	# 跑批一跑七小時，BGM 跟著響七小時。靜音掛在 Master bus，不動遊戲本身的音量設定。
 	for targ in ["e2e", "selftest", "shotseq", "mapshots", "play", "scene",
 			"walk", "stress", "trainshot", "blkdump", "artshots", "idledrift", "locochk",
-			"aichk"]:
+			"aichk", "misschk"]:
 		if targ in OS.get_cmdline_user_args():
 			AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
 			# ★★測試模式固定亂數種子（2026-08-04）。
@@ -245,6 +245,8 @@ func _ready() -> void:
 		_locochk()
 	elif "aichk" in OS.get_cmdline_user_args():
 		_aichk()
+	elif "misschk" in OS.get_cmdline_user_args():
+		_misschk()
 	elif "idledrift" in OS.get_cmdline_user_args():
 		_idledrift()
 	elif "trainshot" in OS.get_cmdline_user_args():
@@ -1254,6 +1256,188 @@ func _aichk() -> void:
 	print("[aichk] FAILS=%d" % _ai_fail)
 	print("[aichk] DONE")
 	_quit_test(1 if _ai_fail > 0 else 0)
+
+
+# ================= 任務型態與章節特殊規則驗收台（`-- misschk`）=================
+# 驗兩件事：① GDD/01 §7 的任務型態真的會判勝負 ② story.json 的 special 真的被讀到
+# （後者先前是**零**——五章的特殊規則寫在資料裡、印在簡報上，程式從來沒讀過）。
+var _ms_fail := 0
+func _ms_say(ok: bool, msg: String) -> void:
+	if not ok:
+		_ms_fail += 1
+	print("[misschk]%s %s" % ["  OK" if ok else " FAIL", msg])
+
+# 每個案例跑完要把狀態收乾淨，否則第一個 _win 之後全部都是 END
+func _ms_reset() -> void:
+	st = St.CMD
+	_last_win = {}
+	_cap_hold = 0
+	_cap_hold_foe = 0
+	_mission_reached = 0
+
+func _ms_set_mission(m) -> void:
+	if m == null:
+		(GameData.story[chapter - 1] as Dictionary).erase("mission")
+	else:
+		(GameData.story[chapter - 1] as Dictionary)["mission"] = m
+
+# 把某一方全部搬到某個 px（測全滅／抵達用）
+func _ms_move(u, px: float, py: float) -> void:
+	_ai_place(u, px, py)
+
+func _misschk() -> void:
+	_ms_fail = 0
+	if not await _boot_to_battle("misschk", 3): _quit_test(1); return
+	var me = _deployed[0]
+	var mates: Array = _deployed.duplicate()
+	for u in units:
+		_shield(u)                      # 測勝負判定，不要有人中途被打死
+	print("[misschk] 我方 %d 人、敵方 %d 人" % [_count_side(player_side),
+			_count_side(1 - player_side)])
+
+	# ---------- ① 預設是殲滅，且行為與加入任務系統前相同 ----------
+	_ms_reset()
+	_ms_set_mission(null)
+	_ms_say(String(_mission_cfg()["type"]) == "annihilate",
+			"沒掛 mission 的章節＝殲滅（型態＝%s）" % String(_mission_cfg()["type"]))
+
+	# ---------- ② 占領：站上敵主堡並守住 ----------
+	_ms_reset()
+	_ms_set_mission({"type": "capture", "hold": 2})
+	var z: Dictionary = _mission_zone()
+	_ms_say(not z.is_empty(), "占領任務的目標區＝敵方主堡 px(%.0f,%.0f) r=%.0f"
+			% [z.get("x", -1), z.get("y", -1), z.get("r", 0)])
+	_ms_move(me, float(z["x"]), float(z["y"]))
+	await get_tree().create_timer(0.3).timeout
+	_mission_turn_tick()
+	var mid_state: bool = (st != St.END)
+	_mission_turn_tick()
+	_ms_say(mid_state and st == St.END and int(_last_win.get("winner", -1)) == player_side,
+			"站上敵主堡：守 1 回合還沒贏（%s）、守滿 2 回合判勝（%s）"
+			% [mid_state, String(_last_win.get("why", "（沒判定）"))])
+
+	# ---------- ③ 防守：撐過指定回合 ----------
+	_ms_reset()
+	_ms_set_mission({"type": "defend", "turns": 8})
+	var keep_turn: int = turn
+	turn = 5
+	_mission_turn_tick()
+	var not_yet: bool = (st != St.END)
+	turn = 9
+	_mission_turn_tick()
+	_ms_say(not_yet and st == St.END and int(_last_win.get("winner", -1)) == player_side,
+			"防守 8 回合：第 5 回合還沒贏（%s）、第 9 回合判勝（%s）"
+			% [not_yet, String(_last_win.get("why", "（沒判定）"))])
+	turn = keep_turn
+
+	# ---------- ④ 突破：帶指定人數抵達目標區 ----------
+	_ms_reset()
+	_ms_set_mission({"type": "breakthrough", "count": 2})
+	var z2: Dictionary = _mission_zone()
+	_ms_move(me, float(z2["x"]), float(z2["y"]))
+	await get_tree().create_timer(0.3).timeout
+	_check_end()
+	var one_not_enough: bool = (st != St.END)
+	if mates.size() > 1:
+		_ms_move(mates[1], float(z2["x"]) + 20.0, float(z2["y"]))
+		await get_tree().create_timer(0.3).timeout
+		_check_end()
+	_ms_say(one_not_enough and st == St.END,
+			"突破 2 人：1 人抵達不算（%s）、2 人抵達判勝（%s）"
+			% [one_not_enough, String(_last_win.get("why", "（沒判定）"))])
+
+	# ---------- ⑤ 護送：目標抵達撤離區＝勝；目標陣亡＝敗 ----------
+	_ms_reset()
+	# ⚠ 用具名角色而不是兵種：同一個兵種場上可能有兩個人，殺掉一個還找得到另一個，
+	#   那樣就算程式壞了測試也會通過（假通過）。
+	var vip_key: String = String(me.get("char_name", ""))
+	if vip_key == "":
+		vip_key = String(me["cls"])
+	_ms_set_mission({"type": "escort", "who": vip_key})
+	var z3: Dictionary = _mission_zone()
+	_ms_move(me, float(z3["x"]) + 400.0, float(z3["y"]))
+	await get_tree().create_timer(0.3).timeout
+	_check_end()
+	var esc_not_yet: bool = (st != St.END)
+	_ms_move(me, float(z3["x"]), float(z3["y"]))
+	await get_tree().create_timer(0.3).timeout
+	_check_end()
+	var esc_win: bool = st == St.END and int(_last_win.get("winner", -1)) == player_side
+	_ms_reset()
+	var hp_keep = me["hp"]
+	me["alive"] = false
+	_check_end()
+	var esc_lose: bool = st == St.END and int(_last_win.get("winner", -1)) != player_side
+	me["alive"] = true
+	me["hp"] = hp_keep
+	_ms_say(esc_not_yet and esc_win and esc_lose,
+			"護送：沒到撤離區不算（%s）、到了判勝（%s）、目標陣亡判敗（%s）"
+			% [esc_not_yet, esc_win, esc_lose])
+	_ms_set_mission(null)
+
+	# ---------- ⑥ 戰場評價 S~C 不再寫死 A ----------
+	_ms_reset()
+	var keep_turn2: int = turn
+	turn = 3
+	var rank_fast: String = _battle_rank(true)
+	turn = 26
+	var rank_slow: String = _battle_rank(true)
+	turn = keep_turn2
+	_ms_say(rank_fast != rank_slow and rank_fast == "S",
+			"評價會動：3 回合結束＝%s、26 回合結束＝%s（先前不管怎麼打都是 A）"
+			% [rank_fast, rank_slow])
+
+	# ---------- ⑦ story.json 的 special 真的被讀到 ----------
+	var keep_ch: int = chapter
+	chapter = 7
+	_ms_say(_banned_cls() == "mg", "第 7 章禁用兵種＝「%s」（story.json 寫的是 mg）" % _banned_cls())
+	chapter = 5
+	_ms_reset()
+	var keep_turn3: int = turn
+	turn = 19
+	_special_turn_tick()
+	_ms_say(st == St.END and int(_last_win.get("winner", -1)) != player_side,
+			"第 5 章限時 18 回合：第 19 回合判敗（%s）" % String(_last_win.get("why", "（沒判定）")))
+	turn = keep_turn3
+	_ms_reset()
+	chapter = 12
+	turn = 8
+	_waves_done.clear()
+	var n_before: int = _count_side(1 - player_side)
+	_special_turn_tick()
+	await get_tree().create_timer(0.5).timeout
+	var n_after: int = _count_side(1 - player_side)
+	_ms_say(n_after > n_before, "第 12 章第 8 回合增援波次：敵軍 %d → %d 人" % [n_before, n_after])
+	turn = keep_turn3
+	chapter = 10
+	_silence_broken = false
+	turn = 2
+	var n_b2: int = _count_side(1 - player_side)
+	_special_on_fire(me)
+	await get_tree().create_timer(0.5).timeout
+	_ms_say(_count_side(1 - player_side) > n_b2 and _silence_broken,
+			"第 10 章靜默期內開火：敵軍 %d → %d 人（靜默已打破=%s）"
+			% [n_b2, _count_side(1 - player_side), _silence_broken])
+	chapter = 14
+	_stealth_kills = 0
+	var n_b3: int = _count_side(1 - player_side)
+	var victim = null
+	for u in units:
+		if u["side"] != player_side and u["alive"]:
+			victim = u
+			break
+	for i in 6:
+		_special_on_kill(victim)
+	await get_tree().create_timer(0.5).timeout
+	_ms_say(_count_side(1 - player_side) > n_b3,
+			"第 14 章擊殺超過 5 人：敵軍 %d → %d 人（擊殺計數 %d）"
+			% [n_b3, _count_side(1 - player_side), _stealth_kills])
+	chapter = keep_ch
+	turn = keep_turn3
+
+	print("[misschk] FAILS=%d" % _ms_fail)
+	print("[misschk] DONE")
+	_quit_test(1 if _ms_fail > 0 else 0)
 
 
 func _locochk() -> void:
@@ -5088,10 +5272,16 @@ func _open_deploy(ch: Dictionary) -> void:
 	_ai_deploy()
 	# 名冊：已解鎖具名
 	var roster := []
+	var banned: String = _banned_cls()     # 本章禁用兵種（story.json special.ban）
+	if banned != "":
+		ui.flash_msg("本章不可部署：%s" % String(GameData.class_base.get(banned, {})
+				.get("zh", banned)), Color(1.0, 0.8, 0.5))
 	for cls in GameData.characters.keys():
 		var chr: Dictionary = GameData.characters[cls]
 		if chr.get("unlockCh", 1) > chapter:
 			continue
+		if cls == banned:
+			continue                        # 禁用＝名冊上根本不出現這張卡
 		roster.append({"cls": cls, "name": chr.get("name", ""),
 				"zh": GameData.class_base.get(cls, {}).get("zh", cls),
 				"trait": chr.get("trait", {}).get("desc", ""), "named": true})
@@ -6253,11 +6443,13 @@ func _fire(shooter, target, part := "body") -> void:
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
 			_add_battle_mark(target)      # 這裡死過人（J5）
+			_special_on_kill(target)      # 隱密行動：擊殺計數（story.json special）
 			target["node"].die()          # 淡出傾倒後自我移除
 		elif target["alive"]:
 			target["node"].take_hit()     # 受擊：立繪換 hurt 表情＋紅閃
 	_splash(shooter, target)
 	_hear_shot(shooter)
+	_special_on_fire(shooter)      # 靜默滲透：期限內開火會招來增援（story.json special）
 	_refresh_visibility()
 	_check_end()
 
@@ -6866,6 +7058,7 @@ func _splash(shooter, center) -> void:
 		if u["hp"] <= 0 and u["alive"]:
 			u["alive"] = false
 			_add_battle_mark(u)           # 這裡死過人（J5）
+			_special_on_kill(u)           # 隱密行動：擊殺計數
 			u["node"].die()
 		else:
 			u["node"].take_hit()
@@ -7808,11 +8001,21 @@ func _finish_enemy_action() -> void:
 func _end_enemy_turn() -> void:
 	_end_action()
 	turn += 1
+	# 任務判定要在回合上限**之前**：防守任務撐到第 8 回合就該贏，
+	# 不該被「30 回合平手」蓋掉（兩條規則的優先序寫死在這裡，不要各自散落）
+	_special_turn_tick()         # 波次增援與限時（story.json 的 special）
+	if st == St.END:
+		return
+	_mission_turn_tick()
+	if st == St.END:
+		return
 	if turn > 30:
 		_win(1 - player_side, "防守方撐過 30 回合")
 		return
 	_advance_time_weather()      # 回合時鐘：推進時刻、擲天氣（GDD/04 天候節）
 	st = St.CMD
+	var _sp_txt: String = _special_text()
+	ui.show_objective(_mission_text() + ("" if _sp_txt == "" else "　｜　" + _sp_txt))
 	cp = _turn_cp()
 	for u in units:
 		u["acted"] = false
@@ -8870,6 +9073,7 @@ func _intercept_fire(shooter, target, dist_px: float) -> void:
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
 			_add_battle_mark(target)      # 這裡死過人（J5）
+			_special_on_kill(target)      # 隱密行動：擊殺計數（story.json special）
 			target["node"].die()
 		elif target["alive"]:
 			target["node"].take_hit()
@@ -8877,16 +9081,269 @@ func _intercept_fire(shooter, target, dist_px: float) -> void:
 	_check_end()
 
 # ---------- 勝敗 ----------
+# ================= 任務型態（GDD/01 §7；dept-03）=================
+# ⚠ 先前 _check_end 只有兩條：我方全滅＝敗、敵軍全滅＝勝。
+#   GDD §7 寫的「佔領敵主堡」從來沒實作過，`maps.json` 的 bases 只有 AI 拿來當
+#   推進方向用；部門文件列的八種任務型態一種都沒有，於是十五章的玩法完全一樣：
+#   走過去、把人殺光。戰役節奏單調的真因在這裡，不在關卡設計。
+# 章節在 story.json 掛 `mission`；**不掛就是 annihilate，行為與加入本系統前完全相同**。
+var _cap_hold := 0            # 我方站在敵主堡上連續幾回合
+var _cap_hold_foe := 0        # 敵方站在我主堡上連續幾回合
+var _mission_reached := 0     # 突破／撤離：已抵達目標區的我方人數（每回合重算）
+
+# ---------- 章節特殊規則（story.json 的 special）----------
+# ★★★ 這五種規則**早就寫在 data/story.json 裡**（ch05 限時、ch07 禁機槍兵、
+#   ch10 靜默滲透、ch12/15 增援波次、ch14 隱密行動），簡報畫面也印給玩家看了，
+#   但 `grep special scripts/` 的結果是**零**——程式從來沒有讀過這個欄位。
+#   玩家照著簡報打，規則卻不存在。這是本專案的老病（「設定看起來有、玩起來沒有」）
+#   最嚴重的一次：五個章節的玩法差異全部是假的。
+var _silence_broken := false      # 靜默任務是否已被自己開火打破
+var _stealth_kills := 0           # 隱密任務的擊殺計數
+var _waves_done: Array = []       # 已經來過的增援波次（回合數）
+
+func _special() -> Dictionary:
+	var ch: Dictionary = GameData.story[chapter - 1] if chapter > 0 else {}
+	var sp = ch.get("special", null)
+	return sp if sp is Dictionary else {}
+
+# 這一章禁用的兵種（ban）——部署清單要真的少一張卡
+func _banned_cls() -> String:
+	var sp: Dictionary = _special()
+	return String(sp.get("cls", "")) if String(sp.get("type", "")) == "ban" else ""
+
+# 敵方增援（silence／stealth／waves 三種特殊規則共用）
+func _reinforce(n: int, why: String) -> void:
+	var es: int = 1 - player_side
+	var zone: Dictionary = {}
+	var dz = map_data.get("deploy", [])
+	if dz is Array and dz.size() > es:
+		zone = dz[es]
+	else:
+		zone = {"x": 560, "y": 250, "w": 300, "h": 200}
+	var pool := ["rifleman", "assault", "mg", "sniper"]
+	var added := 0
+	for i in n:
+		var wx: float = float(zone.get("x", 560)) + 30.0 + float(i % 3) * 55.0
+		var wy: float = float(zone.get("y", 250)) + 30.0 + float(i / 3) * 55.0
+		var isp = _inf_spawn_spot(Vector2(wx, wy))
+		if isp == null:
+			continue
+		var ip: Vector2 = isp
+		if _spawn_unit(pool[i % pool.size()], es, ip.x, ip.y, false) != null:
+			added += 1
+	_refresh_visibility()
+	if added > 0:
+		ui.flash_msg("⚠ 敵軍增援 %d 人：%s" % [added, why], Color(1.0, 0.55, 0.45))
+	if _test_mode:
+		print("[special] 增援 %d 人（要求 %d）：%s" % [added, n, why])
+
+# 開火時呼叫：靜默任務在期限內開火＝暴露，招來增援（只招一次）
+func _special_on_fire(shooter) -> void:
+	if shooter["side"] != player_side:
+		return
+	var sp: Dictionary = _special()
+	if String(sp.get("type", "")) == "silence" and not _silence_broken 			and turn <= int(sp.get("turns", 5)):
+		_silence_broken = true
+		_reinforce(3, "靜默期內開火，位置暴露")
+
+# 擊殺時呼叫：隱密任務殺過頭＝驚動敵軍
+func _special_on_kill(victim) -> void:
+	if victim["side"] == player_side:
+		return
+	var sp: Dictionary = _special()
+	if String(sp.get("type", "")) != "stealth":
+		return
+	_stealth_kills += 1
+	var lim: int = int(sp.get("limit", 5))
+	if _stealth_kills == lim + 1:
+		_reinforce(4, "擊殺超過 %d 人，驚動敵軍" % lim)
+
+# 每回合開始時呼叫：波次增援與限時
+func _special_turn_tick() -> void:
+	var sp: Dictionary = _special()
+	var t: String = String(sp.get("type", ""))
+	if t == "waves":
+		for w in sp.get("turns", []):
+			if turn == int(w) and not _waves_done.has(int(w)):
+				_waves_done.append(int(w))
+				_reinforce(3, "第 %d 回合的預備隊投入" % int(w))
+	elif t == "timelimit":
+		if turn > int(sp.get("turns", 18)):
+			_win(1 - player_side, "超過 %d 回合，目標逃脫" % int(sp.get("turns", 18)))
+
+# 玩家看得到的特殊規則敘述（HUD 第二行）
+func _special_text() -> String:
+	var sp: Dictionary = _special()
+	match String(sp.get("type", "")):
+		"timelimit":
+			return "限時：第 %d／%d 回合" % [turn, int(sp.get("turns", 18))]
+		"ban":
+			return "本章不可部署：%s" % String(GameData.class_base.get(
+					String(sp.get("cls", "")), {}).get("zh", String(sp.get("cls", ""))))
+		"silence":
+			if _silence_broken:
+				return "靜默已被打破——敵軍已警覺"
+			return "靜默滲透：第 %d 回合前不可開火（還剩 %d 回合）" % [
+					int(sp.get("turns", 5)), maxi(int(sp.get("turns", 5)) - turn + 1, 0)]
+		"waves":
+			return "增援波次：第 %s 回合" % str(sp.get("turns", []))
+		"stealth":
+			return "隱密行動：擊殺 %d／%d（超過會引來增援）" % [_stealth_kills, int(sp.get("limit", 5))]
+	return ""
+
+func _mission() -> Dictionary:
+	var ch: Dictionary = GameData.story[chapter - 1] if chapter > 0 else {}
+	var m = ch.get("mission", {})
+	if not (m is Dictionary) or (m as Dictionary).is_empty():
+		return {"type": "annihilate"}
+	return m
+
+# 型態的預設參數（data/missions.json）＋章節覆寫。章節只寫想改的那幾個欄位。
+func _mission_cfg() -> Dictionary:
+	var m: Dictionary = _mission()
+	var t: String = String(m.get("type", "annihilate"))
+	var base: Dictionary = (GameData.missions.get("types", {}) as Dictionary).get(t, {})
+	var out: Dictionary = (base as Dictionary).duplicate(true)
+	for k in m.keys():
+		out[k] = m[k]
+	out["type"] = t
+	return out
+
+# 任務目標區（px 圓）。章節可寫 zone:{x,y,r}；沒寫的話各型態有合理預設：
+#   capture／breakthrough → 敵方主堡；extract／escort → 我方主堡（帶回自己的線後）
+func _mission_zone() -> Dictionary:
+	var cfg: Dictionary = _mission_cfg()
+	var z = cfg.get("zone", null)
+	if z is Dictionary:
+		return {"x": float(z.get("x", 0)), "y": float(z.get("y", 0)), "r": float(z.get("r", 90))}
+	var home_side: int = player_side
+	if String(cfg["type"]) in ["capture", "breakthrough"]:
+		home_side = 1 - player_side
+	for b in map_data.get("bases", []):
+		if int(b.get("side", 0)) == home_side:
+			return {"x": float(b.get("x", 0)), "y": float(b.get("y", 0)), "r": 90.0}
+	return {}
+
+# 站在目標區裡的某一方人數
+func _in_zone_count(side_i: int) -> int:
+	var z: Dictionary = _mission_zone()
+	if z.is_empty():
+		return 0
+	var c := 0
+	var zp := Vector2(float(z["x"]), float(z["y"]))
+	for u in units:
+		if u["alive"] and u["side"] == side_i and _live_px(u).distance_to(zp) <= float(z["r"]):
+			c += 1
+	return c
+
+# 護送／撤離的目標單位（story.json 的 mission.who＝角色名或兵種 key）
+func _mission_vip():
+	var cfg: Dictionary = _mission_cfg()
+	var who: String = String(cfg.get("who", ""))
+	if who == "":
+		return null
+	for u in units:
+		# ⚠ 一定要驗 alive：第一版沒驗，於是護送目標陣亡後 _mission_vip 照樣找得到他，
+		#   「目標陣亡＝失敗」永遠不會觸發（misschk 當場抓到）。
+		#   這正是護送任務唯一的失敗條件，漏了等於整個任務型態是假的。
+		if u["side"] != player_side or not u["alive"]:
+			continue
+		if String(u.get("char_name", "")) == who or String(u["cls"]) == who:
+			return u
+	return null
+
+# 玩家看得到的目標敘述（HUD 用）——任務不寫在畫面上等於沒有任務
+func _mission_text() -> String:
+	var cfg: Dictionary = _mission_cfg()
+	var t: String = String(cfg["type"])
+	var zh: String = String(cfg.get("zh", t))
+	match t:
+		"capture":
+			return "%s：占領敵主堡（已守 %d／%d 回合）" % [zh, _cap_hold, int(cfg.get("hold", 2))]
+		"defend":
+			return "%s：撐過第 %d 回合（現在第 %d）" % [zh, int(cfg.get("turns", 8)), turn]
+		"breakthrough":
+			return "%s：%d 人抵達目標區（現在 %d）" % [zh, int(cfg.get("count", 2)), _mission_reached]
+		"extract", "escort":
+			var vip = _mission_vip()
+			var nm: String = String(cfg.get("who", ""))
+			if t == "escort" and vip == null and nm != "":
+				return "%s：%s 已陣亡" % [zh, nm]
+			return "%s：把 %s 帶到撤離區" % [zh, nm if nm != "" else "隊員"]
+	return "%s：消滅所有敵軍" % zh
+
+# 每回合結束時的任務判定（占領要「守住」、防守與限時要數回合，都只能按回合算）
+func _mission_turn_tick() -> void:
+	if st == St.END:
+		return
+	var cfg: Dictionary = _mission_cfg()
+	var t: String = String(cfg["type"])
+	_mission_reached = _in_zone_count(player_side)
+	if t == "capture":
+		_cap_hold = (_cap_hold + 1) if _in_zone_count(player_side) > 0 else 0
+		_cap_hold_foe = (_cap_hold_foe + 1) if _foe_on_my_base() else 0
+		var need: int = int(cfg.get("hold", 2))
+		if _cap_hold >= need:
+			_win(player_side, "占領敵主堡並守住 %d 回合" % need)
+			return
+		if _cap_hold_foe >= need:
+			_win(1 - player_side, "我方主堡被占領")
+			return
+	elif t == "defend":
+		if turn > int(cfg.get("turns", 8)):
+			_win(player_side, "守住陣地，撐過 %d 回合" % int(cfg.get("turns", 8)))
+			return
+	# 限時（任何型態都可加 limit）：時間到還沒達成就是失敗
+	var lim: int = int(cfg.get("limit", 0))
+	if lim > 0 and turn > lim:
+		_win(1 - player_side, "超過 %d 回合的時限" % lim)
+		return
+	_check_end()
+
+# 敵方有人站在我方主堡上
+func _foe_on_my_base() -> bool:
+	for b in map_data.get("bases", []):
+		if int(b.get("side", 0)) != player_side:
+			continue
+		var bp := Vector2(float(b.get("x", 0)), float(b.get("y", 0)))
+		for u in units:
+			if u["alive"] and u["side"] != player_side and _live_px(u).distance_to(bp) <= 90.0:
+				return true
+	return false
+
 func _check_end() -> void:
+	if st == St.END:
+		return
 	if _count_side(player_side) == 0:
 		_win(1 - player_side, "我方全滅")
-	elif _count_side(1 - player_side) == 0:
+		return
+	var cfg: Dictionary = _mission_cfg()
+	var t: String = String(cfg["type"])
+	# 護送目標陣亡＝當場失敗（護送任務的重點就是「那個人不能死」）
+	if t == "escort" and String(cfg.get("who", "")) != "" and _mission_vip() == null:
+		_win(1 - player_side, "護送目標陣亡")
+		return
+	# 殲滅永遠是有效的勝利手段：把敵人全部打光，任何任務都算完成
+	if _count_side(1 - player_side) == 0:
 		_win(player_side, "敵軍殲滅")
+		return
+	match t:
+		"breakthrough":
+			_mission_reached = _in_zone_count(player_side)
+			if _mission_reached >= int(cfg.get("count", 2)):
+				_win(player_side, "%d 人突破敵線抵達目標區" % _mission_reached)
+		"extract", "escort":
+			var vip = _mission_vip()
+			var z: Dictionary = _mission_zone()
+			if vip != null and not z.is_empty() 					and _live_px(vip).distance_to(Vector2(float(z["x"]), float(z["y"]))) <= float(z["r"]):
+				_win(player_side, "%s 抵達撤離區" % String(cfg.get("who", "隊員")))
 
+var _last_win := {}       # QA 用：最近一次勝負判定（誰贏、理由）——驗收台要驗得到
 func _win(winner: int, why: String) -> void:
 	if st == St.END:
 		return
 	st = St.END
+	_last_win = {"winner": winner, "why": why}
 	var w := winner == player_side
 	var ch: Dictionary = GameData.story[chapter - 1] if chapter > 0 else {}
 	if w and chapter > 0 and not _test_mode:
@@ -8905,10 +9362,39 @@ func _win(winner: int, why: String) -> void:
 		_growth["pool"] = int(_growth["pool"]) + xp
 		_save_growth()
 		xp_note = "\n獲得經驗 +%d（經驗池 %d，到訓練場升級兵科）" % [xp, int(_growth["pool"])]
-	var rank := "A" if w else ""
+	var rank: String = _battle_rank(w) if w else ""
 	Audio.sting("victory" if w else "defeat")
 	ui.hide_charcard()
 	ui.show_end(w, why, rank, String(ch.get("debrief", "")) + xp_note, _open_menu)
+
+# 戰場評價 S~C（GDD/01 §7；dept-03 的「回合數／傷亡／達成度」）。
+# ⚠ 這裡本來寫死 `var rank := "A" if w else ""`——不管打幾回合、死幾個人都是 A，
+#   評價欄等於裝飾。公式與門檻放 data/missions.json（鐵律 3）。
+func _battle_rank(won: bool) -> String:
+	var r: Dictionary = GameData.missions.get("rating", {})
+	var score: float = float(r.get("base", 100))
+	var par: int = int(r.get("par_turns", 10))
+	var used: int = maxi(turn, 1)
+	if used > par:
+		score -= float(used - par) * float(r.get("per_turn_over", 4))
+	else:
+		score += float(par - used) * float(r.get("fast_bonus_per_turn", 3))
+	var lost := 0
+	for u in units:
+		if u["side"] == player_side and not u["alive"]:
+			lost += 1
+	score -= float(lost) * float(r.get("per_casualty", 12))
+	var th: Dictionary = r.get("thresholds", {"S": 100, "A": 85, "B": 70, "C": 0})
+	var best := "C"
+	var best_v := -1.0
+	for k in th.keys():
+		var v: float = float(th[k])
+		if score >= v and v > best_v:
+			best_v = v
+			best = String(k)
+	if _test_mode:
+		print("[rank] 回合=%d（標準 %d）陣亡=%d 分數=%.0f → %s" % [used, par, lost, score, best])
+	return best
 
 func _teardown_world() -> void:
 	for u in units:

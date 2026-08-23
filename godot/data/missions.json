@@ -1,0 +1,20 @@
+{
+ "_note": "任務型態與戰場評價（GDD/01 §7）。章節在 story.json 掛 mission 物件；不掛＝annihilate，行為與加入本檔之前完全相同。zone 省略時各型態有預設（見 GDD/01 §7 的表）。",
+ "types": {
+  "annihilate":  {"zh": "殲滅", "desc": "消滅所有敵軍"},
+  "capture":     {"zh": "占領", "desc": "占領敵方主堡並守住", "hold": 2},
+  "defend":      {"zh": "防守", "desc": "守住陣地直到援軍抵達", "turns": 8},
+  "breakthrough":{"zh": "突破", "desc": "帶指定人數穿過敵線抵達目標區", "count": 2},
+  "extract":     {"zh": "撤離", "desc": "把指定單位帶到撤離區", "count": 1},
+  "escort":      {"zh": "護送", "desc": "護送目標單位抵達撤離區，目標陣亡即失敗"}
+ },
+ "rating": {
+  "_note": "S~C 級（GDD/01 §7）。分數＝基礎 100 －超時扣分 －傷亡扣分 ＋速攻加分，落在門檻上取級。",
+  "base": 100,
+  "par_turns": 10,
+  "per_turn_over": 4,
+  "per_casualty": 12,
+  "fast_bonus_per_turn": 3,
+  "thresholds": {"S": 100, "A": 85, "B": 70, "C": 0}
+ }
+}

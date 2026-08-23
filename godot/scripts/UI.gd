@@ -797,6 +797,22 @@ func update_hud(turn: int, phase: String, cp: int, wx := "") -> void:
 			elif l.position.y > 30 and l.position.y < 60:
 				l.text = "第 %d 回合｜CP %d" % [turn, cp] + ("" if wx == "" else "｜" + wx)
 
+# 任務目標列（GDD/01 §7、GDD/13）：玩家隨時要知道「這一場要幹嘛、進度到哪」。
+# 先前十五章的目標一律是「把人殺光」，所以沒有這一列也不會有人發現——
+# 有了任務型態之後，沒有這一列玩家就只能猜。
+var _obj_label: Label = null
+func show_objective(txt: String) -> void:
+	if txt == "":
+		if is_instance_valid(_obj_label):
+			_obj_label.visible = false
+		return
+	if not is_instance_valid(_obj_label):
+		_obj_label = _label("", 15, Color(0.95, 0.86, 0.55))
+		_obj_label.position = Vector2(28, 92)
+		root.add_child(_obj_label)
+	_obj_label.visible = true
+	_obj_label.text = "◈ " + txt
+
 # 戰場角色卡（選中單位大立繪）
 func show_charcard(cls: String, disp_name: String, trait_desc: String, hp: int, maxhp: int) -> void:
 	var card := root.find_child("CharCard", false, false)

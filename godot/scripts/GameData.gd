@@ -18,6 +18,7 @@ var char_look: Dictionary = {}
 var enemy_look: Dictionary = {}       # 敵軍外觀（GDD/06 外觀 v2：敵我基底分池）
 var vehicle_look: Dictionary = {}     # 載具外觀：立繪生成的模型（modly）＋尺度／砲塔切面
 var materials: Dictionary = {}        # 材質的彈道屬性（GDD/15 D5：穿不穿得過、穿過之後偏多少）
+var missions: Dictionary = {}         # 任務型態與戰場評價（GDD/01 §7）
 
 func _ready() -> void:
 	nations = _load_json("res://data/nations.json")
@@ -35,6 +36,7 @@ func _ready() -> void:
 	enemy_look = _load_json("res://data/enemy_look.json")
 	vehicle_look = _load_json("res://data/vehicle_look.json")
 	materials = _load_json("res://data/materials.json")
+	missions = _load_json("res://data/missions.json")
 	var st = _load_json_any("res://data/story.json")
 	if st is Array:
 		story = st
