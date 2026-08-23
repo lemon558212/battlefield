@@ -235,7 +235,13 @@ func show_fire_panel(opts: Array, on_pick: Callable) -> void:
 	hide_fire_panel()
 	var box := Control.new()
 	box.name = "FireBox"
-	var h: int = 56 + opts.size() * 54 + 42   # 底部要留「取消」的位置，否則按鈕會凸出面板外（實拍發現）
+	# 修正明細（GDD/13 資訊揭露）：玩家要看得懂「為什麼只有 38%」。
+	# 明細取第一個部位的（掩體、穿透、姿勢、天候、光線對兩個部位都一樣），
+	# 部位之間唯一會不同的是「被遮蔽」，那個已經標在按鈕文字上了。
+	var why: Array = []
+	if opts.size() > 0 and opts[0].has("why"):
+		why = opts[0]["why"]
+	var h: int = 56 + opts.size() * 54 + 42 + (0 if why.is_empty() else why.size() * 19 + 8)
 	var bg := _panel(Color(0.04, 0.05, 0.07, 0.92))
 	bg.size = Vector2(330, h)
 	box.add_child(bg)
@@ -256,6 +262,13 @@ func show_fire_panel(opts: Array, on_pick: Callable) -> void:
 		b.pressed.connect(func(): on_pick.call(part))
 		box.add_child(b)
 		y += 54
+	if not why.is_empty():
+		for w in why:
+			var wl := _label("・" + String(w), 13, Color(0.72, 0.76, 0.80))
+			wl.position = Vector2(16, y + 2)
+			box.add_child(wl)
+			y += 19
+		y += 8
 	var c := _btn("取消", 14)
 	c.custom_minimum_size = Vector2(302, 30)
 	c.size = Vector2(302, 30)

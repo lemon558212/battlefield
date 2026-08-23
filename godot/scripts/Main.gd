@@ -1183,6 +1183,56 @@ func _aichk() -> void:
 		if is_instance_valid(tank["node"]):
 			tank["node"].queue_free()
 
+	# ---------- ⑤l 預測面板不可以說謊（GDD/13）----------
+	# _fire 與 _fire_preview 先前各算各的：這一輪加進 _fire 的高低差與材質穿透，
+	# 面板完全不知道。收斂成 _shot_forecast 之後，這裡驗「面板真的會跟著變」。
+	var keep_blk2: Array = _blockers
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * 90.0, 0))
+	_ai_place(foe, spot.x + sx * 90.0, spot.y, spot)
+	await get_tree().create_timer(0.4).timeout
+	_blockers = []
+	var f_open: Dictionary = _shot_forecast(me, foe, "body")
+	var mid2 := Vector2((float(me["wx"]) + float(foe["wx"])) * 0.5,
+			(float(me["wy"]) + float(foe["wy"])) * 0.5)
+	_blockers = [{"t": "cir", "c": mid2, "r": 1.2, "h": 1.6, "mat": "wood"}]
+	var f_wood: Dictionary = _shot_forecast(me, foe, "body")
+	_blockers = keep_blk2
+	var hit_k: float = float(f_wood["hit"]) / maxf(float(f_open["hit"]), 0.0001)
+	var dmg_k: float = float(f_wood["dmg"]) / maxf(float(f_open["dmg"]), 0.0001)
+	_ai_say(absf(hit_k - 0.72) < 0.03 and absf(dmg_k - 0.80) < 0.05,
+			"面板跟著材質走：中間插一塊木板後，預測命中 ×%.2f、預測傷害 ×%.2f（木板是 0.72／0.80）"
+			% [hit_k, dmg_k])
+	_ai_say((f_wood["why"] as Array).size() > (f_open["why"] as Array).size(),
+			"面板會說明理由：插木板後多了「%s」"
+			% ("／".join(PackedStringArray(f_wood["why"] as Array)) if not (f_wood["why"] as Array).is_empty() else "（無）"))
+
+	# ---------- ⑤m 爆裂彈直射打在工事上要把工事掀了（GDD/15 G1）----------
+	var dwall = null
+	for d in _destructibles:
+		dwall = d
+		break
+	if dwall == null:
+		print("[aichk] 這張圖沒有可摧毀工事，G1 這一項跳過")
+	else:
+		var wc: Vector2 = dwall["c"]
+		# 把兩個人擺到那道牆的兩側，彈道必定穿過它
+		_ai_place(me, wc.x - 90.0, wc.y, wc)
+		_ai_place(foe, wc.x + 90.0, wc.y, wc)
+		await get_tree().create_timer(0.4).timeout
+		var bp2 = _first_block_px(_live_px(me), _live_px(foe), 1.4, 1.2)
+		_ai_say(bp2 != null and (bp2 as Vector2).distance_to(wc) < float(dwall["r"]) + 40.0,
+				"爆點定位在真正擋路的那道工事上（離牆心 %.0f px，牆半徑 %.0f）"
+				% [(bp2 as Vector2).distance_to(wc) if bp2 != null else -1.0, float(dwall["r"])])
+		if bp2 != null:
+			var node_ok: bool = is_instance_valid(dwall["node"])
+			var blk_in: bool = _blockers.has(dwall["blk"])
+			_destroy_fortifications(bp2 as Vector2, 30.0 * 0.8)
+			await get_tree().create_timer(0.4).timeout
+			_ai_say(node_ok and blk_in and not is_instance_valid(dwall["node"])
+					and not _blockers.has(dwall["blk"]),
+					"★ 主砲級直射把工事打掉：網格與碰撞一起消失（炸前 網格=%s 碰撞=%s）"
+					% [node_ok, blk_in])
+
 	# ---------- ⑥ 聲音遮蔽（GDD/15 F3）：牆後的槍聲要變悶 ----------
 	_ai_say(Audio.los_check.is_valid(), "遮蔽悶音的接線存在（Main 有把視線查詢注入 Audio）")
 	var keep: Callable = Audio.los_check
@@ -6159,20 +6209,35 @@ func _fire(shooter, target, part := "body") -> void:
 	if not _shot_clear_units(shooter, target, part):
 		# 打在掩體上也要有聲音——玩家要聽得出「這一槍沒過去」
 		var imp: Vector3 = _mid3(shooter, target)
+		# ★ 爆裂武器打在工事上要**把工事打掉**（GDD/15 G1）：
+		#   先前只有「範圍傷害的爆炸」會摧毀沙包，直射命中障礙完全沒反應——
+		#   於是坦克主砲轟在沙包牆上只有一聲響和一個彈痕，牆好端端地站著。
+		#   現實裡 90mm 主砲打沙包牆就是把那一段掀掉。爆點取彈道上**真正擋下它的
+		#   那個障礙**，不是兩人的中點（中點可能還在空地上）。
+		var w_spl: float = float(shooter["weapon"].get("splash", 0))
+		if w_spl > 0.0:
+			var ya2: float = shooter["node"].muzzle_height() 					if not Unit.is_vehicle_cls(shooter["cls"]) else 1.9
+			var yb2: float = target["node"].torso_height() 					if not Unit.is_vehicle_cls(target["cls"]) else 1.4
+			var bp = _first_block_px(_live_px(shooter), _live_px(target), ya2, yb2)
+			if bp != null:
+				imp = _to3d((bp as Vector2).x, (bp as Vector2).y) + Vector3(0, 0.6, 0)
+				Audio.boom(imp)
+				_destroy_fortifications(bp as Vector2, w_spl * 0.8)
+				if shooter["side"] == player_side:
+					ui.flash_msg("爆裂彈把擋路的工事掀了", Color(1.0, 0.8, 0.45))
+				_refresh_visibility()
+				return
 		Audio.impact("dirt", imp)
 		_bullet_mark(imp)
 		if shooter["side"] == player_side:
 			ui.flash_msg("子彈打在掩體上", Color(0.9, 0.8, 0.6))
 		_refresh_visibility()
 		return
-	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
-	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"],
-			_unit_elev(shooter) - _unit_elev(target))
-	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, part) * (1.0 - cov * 0.6)
-	var pen: Dictionary = _pen_fx(_live_px(shooter), _live_px(target),
-			shooter["node"].muzzle_height() if not Unit.is_vehicle_cls(shooter["cls"]) else 1.9,
-			target["node"].torso_height() if not Unit.is_vehicle_cls(target["cls"]) else 1.4)
-	hc *= float(pen["hit"])
+	# 命中與傷害＝與預覽面板同一支公式（見 _shot_forecast 的註解：兩邊各算各的
+	# 會讓面板說謊，而玩家是照著面板做決策的）
+	var fc: Dictionary = _shot_forecast(shooter, target, part)
+	var hc: float = float(fc["hit"])
+	var pen: Dictionary = fc["pen"]
 	if int(pen["n"]) > 0 and shooter["side"] == player_side:
 		ui.flash_msg("穿過 %d 層遮蔽物（命中 ×%.2f、威力 ×%.2f）"
 				% [int(pen["n"]), float(pen["hit"]), float(pen["dmg"])],
@@ -6180,9 +6245,8 @@ func _fire(shooter, target, part := "body") -> void:
 	if hc > randf():
 		Audio.impact("metal" if Unit.is_vehicle_cls(target["cls"]) else "wood",
 				target["node"].global_position + Vector3(0, 1.0, 0))
-		# 穿透後的子彈威力會掉（D5）：打穿木箱再命中，傷害不該跟直射一樣
-		target["hp"] -= int(round(float(GameData.damage(_wrap(shooter), _wrap(target), part))
-				* float(pen["dmg"])))
+		# 傷害同樣來自 _shot_forecast（含穿透後的威力衰減）
+		target["hp"] -= int(fc["dmg"])
 		_sync_hp(target)
 		if part != "body":
 			ui.flash_msg("命中%s！" % ("頭部" if part == "head" else "散熱器"), Color(1.0, 0.9, 0.4))
@@ -6850,20 +6914,63 @@ func _aim_parts(shooter, target) -> Array:
 		out.append({"part": "head", "zh": "頭部"})
 	return out
 
+# ★ 一次射擊的完整結算（命中率、傷害、以及**為什麼是這個數字**）。
+# 2026-08-22：先前 _fire（真的開火）與 _fire_preview（給玩家看的預覽）
+# 各算各的，於是這一輪加進 _fire 的高低差遮蔽與材質穿透，預覽完全不知道——
+# 面板上寫 62%，實際結算是 45%。**會說謊的預測面板比沒有面板更糟**
+# （玩家是照著它做決策的）。所以收斂成同一支：兩邊都呼叫這裡。
+func _shot_forecast(shooter, target, part := "body") -> Dictionary:
+	var dist_px: float = Vector2(target["wx"] - shooter["wx"],
+			target["wy"] - shooter["wy"]).length()
+	var why: Array = []
+	var elev_d: float = _unit_elev(shooter) - _unit_elev(target)
+	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"], elev_d)
+	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, part)
+	hc *= (1.0 - cov * 0.6)
+	if cov > 0.01:
+		why.append("掩體 -%d%%%s" % [int(round(cov * 60.0)),
+				("（高低差已折算）" if elev_d > 0.5 else "")])
+	var ya: float = shooter["node"].muzzle_height() if not Unit.is_vehicle_cls(shooter["cls"]) else 1.9
+	var yb: float = target["node"].torso_height() if not Unit.is_vehicle_cls(target["cls"]) else 1.4
+	var pen: Dictionary = _pen_fx(_live_px(shooter), _live_px(target), ya, yb)
+	hc *= float(pen["hit"])
+	var dmg: float = float(GameData.damage(_wrap(shooter), _wrap(target), part)) * float(pen["dmg"])
+	if int(pen["n"]) > 0:
+		why.append("穿過 %d 層%s（命中 ×%.2f、威力 ×%.2f）" % [int(pen["n"]),
+				("／" + String(pen["worst"])) if String(pen["worst"]) != "" else "",
+				float(pen["hit"]), float(pen["dmg"])])
+	var blocked: bool = not _shot_clear_units(shooter, target, part)
+	if blocked:
+		hc = 0.0
+		why.append("彈道被實體擋住")
+	# 玩家看得到的其餘修正（都已經在 hit_chance 裡算過了，這裡只負責說明）
+	var n = shooter.get("node", null)
+	if n != null and is_instance_valid(n) and not Unit.is_vehicle_cls(shooter["cls"]):
+		if n.is_moving():
+			why.append("移動中射擊 ×0.55")
+		if n._prone > 0.5:
+			why.append("臥射 ×1.25")
+		elif n._crouch > 0.5:
+			why.append("蹲姿 ×1.12")
+		if float(n.stamina) < 0.75:
+			why.append("體力 %d%%" % int(round(float(n.stamina) * 100.0)))
+	if weather != "clear":
+		why.append("天候 %s" % String(GameData.weather_fx(weather).get("zh", weather)))
+	if _light_sight_mul() < 1.0:
+		why.append("光線 %02d:00" % int(fposmod(clock_hour, 24.0)))
+	return {"hit": clampf(hc, 0.0, 1.0), "dmg": int(round(maxf(dmg, 0.0))),
+			"blocked": blocked, "why": why, "pen": pen, "cover": cov}
+
 # 射擊預覽：把命中率與預期傷害算給玩家看（GDD/13：命中傷害預測介面）
 func _fire_preview(shooter, target) -> Array:
-	var dist_px := Vector2(target["wx"] - shooter["wx"], target["wy"] - shooter["wy"]).length()
-	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
 	var out := []
 	for p in _aim_parts(shooter, target):
-		var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, p["part"]) * (1.0 - cov * 0.6)
-		var dm: int = GameData.damage(_wrap(shooter), _wrap(target), p["part"])
-		# 彈道被實體擋住的部位直接標 0%：玩家要看得出「軀幹被沙包擋住、只能打頭」
+		var f: Dictionary = _shot_forecast(shooter, target, p["part"])
 		var zh: String = p["zh"]
-		if not _shot_clear_units(shooter, target, p["part"]):
-			hc = 0.0
+		if bool(f["blocked"]):
 			zh += "（被遮蔽）"
-		out.append({"part": p["part"], "zh": zh, "hit": hc, "dmg": dm})
+		out.append({"part": p["part"], "zh": zh, "hit": f["hit"], "dmg": f["dmg"],
+				"why": f["why"]})
 	return out
 
 # GameData 公式吃 .weapon/.cls，包一層
@@ -8109,6 +8216,21 @@ func _sight_clear(observer, target) -> bool:
 # 這正是掩體該有的樣子——不是無敵護盾，也不是裝飾。
 # 彈道上穿過幾層「可穿透」障礙（木柵欄、木電線桿）。
 # 穿得過去不代表沒有代價：子彈會偏、會減速，所以每穿一層命中率打七折。
+# 彈道上第一個「擋下這一槍」的障礙在哪（px）。沒有就回 null。
+# 用途：主砲直射打在沙包上，爆點應該在**那道沙包**，不是兩人的中點。
+func _first_block_px(a: Vector2, b: Vector2, ya: float, yb: float):
+	var best_t := 2.0
+	for bk in _blockers:
+		if bool(GameData.material(String(bk.get("mat", "")),
+				bool(bk.get("pen", false))).get("pen", false)):
+			continue
+		var t: float = _blk_ray_t(bk, a, b)
+		if t > 0.001 and t < 1.0 and lerpf(ya, yb, t) < float(bk.get("h", 1.2)) and t < best_t:
+			best_t = t
+	if best_t > 1.5:
+		return null
+	return a.lerp(b, best_t)
+
 # 彈道穿過幾層可穿透障礙、代價是多少（GDD/15 D5）。
 # ⚠ 舊版只回傳「層數」，命中率一律每層 ×0.7——於是一張帆布跟一面鐵皮一樣難打，
 #   而「材質」在戰術上完全不存在。現在每層各查自己的 hit／dmg 倍率相乘：
