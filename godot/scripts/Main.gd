@@ -993,6 +993,24 @@ func _aichk() -> void:
 			"★ 同一筆痕跡只驚動一次（已看過 %d 筆、清掉記憶後沒有被重新登記）" % seen_n)
 	_battle_marks.clear()
 
+	# ---------- ⑤d 警戒射擊要先「看得到」（鐵律 0②、GDD/15 I1）----------
+	# 迎擊本來只驗彈道，於是背後有人跑過去也會自動開火。這裡驗「同一個位置，
+	# 只改朝向」就足以決定開不開火——這是視野扇形在迎擊上生效的唯一證據。
+	var alert_d: float = float(foe["weapon"].get("range", 200)) * ALERT_RANGE_K * 0.5
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * alert_d, 0))
+	_ai_place(foe, spot.x + sx * alert_d, spot.y, spot)                 # 面朝我
+	await get_tree().create_timer(0.4).timeout
+	var eng_front: bool = _alert_can_engage(foe, me)
+	var ballistic: bool = _shot_clear_units(foe, me)
+	_ai_place(foe, spot.x + sx * alert_d, spot.y,
+			spot + Vector2(sx * alert_d * 3.0, 0))                      # 原地轉身背對
+	await get_tree().create_timer(0.4).timeout
+	var eng_back: bool = _alert_can_engage(foe, me)
+	_ai_say(eng_front and not eng_back,
+			"警戒射擊：同一位置 %.0f px，面朝我＝%s、背對我＝%s（彈道兩種情況都通＝%s）"
+			% [alert_d, "會開火" if eng_front else "不開火",
+			"會開火" if eng_back else "不開火", ballistic])
+
 	# ---------- ⑥ 聲音遮蔽（GDD/15 F3）：牆後的槍聲要變悶 ----------
 	_ai_say(Audio.los_check.is_valid(), "遮蔽悶音的接線存在（Main 有把視線查詢注入 Audio）")
 	var keep: Callable = Audio.los_check
@@ -3344,6 +3362,14 @@ func _selftest() -> void:
 			eu["wx"] = alert_u["wx"] + rng * 0.5
 			eu["wy"] = alert_u["wy"]
 			eu["node"].global_position = _to3d(eu["wx"], eu["wy"])
+			# ⚠ 警戒單位要**面向自己的射界**：迎擊自 2026-08-22 起要求真的看得到目標
+			#   （_alert_can_engage），而這個測試從來沒有指定過朝向，
+			#   等於讓一個可能背對的哨兵去證明「警戒有效」。真人站崗不會背對。
+			alert_u["node"].stop()
+			var a_dir := Vector2(eu["wx"] - alert_u["wx"], eu["wy"] - alert_u["wy"])
+			if a_dir.length() > 0.01:
+				alert_u["node"].rotation.y = atan2(a_dir.x, a_dir.y)
+			await get_tree().create_timer(0.3).timeout
 			eu["node"].visible = true
 			var hp0: float = eu["hp"]
 			_alert_shots = 0
@@ -8443,13 +8469,23 @@ func _intercept_tick(delta: float) -> void:
 			if m["side"] == u["side"]:
 				continue
 			var d: float = up.distance_to(pair[1])
-			if d <= rng and d < bd and _shot_clear_units(u, m):
+			if d <= rng and d < bd and _alert_can_engage(u, m):
 				bd = d
 				best = m
 		if best == null:
 			continue
 		u["_alert_t"] = 0.0
 		_intercept_fire(u, best, bd)
+
+# 警戒單位能不能對這個移動中的目標開火。
+# ★ 2026-08-22 補上 _spots()：先前只驗彈道通不通（_shot_clear_units），
+#   於是**背後**有人跑過去照樣自動開火——那不是警戒，那是後腦杓長眼睛。
+#   鐵律 0② 與 GDD/15 I1（視野扇形）本來就說人看不到背後；迎擊是「看到才打」的行為，
+#   不能自己一套。雙方同一條規則，所以玩家繞到敵人背後迂迴這件事第一次真的有用。
+#   ⚠ 兩道條件都要：看得到但被牆擋住（_spots 過、彈道不過）不能開火，
+#     彈道通但沒發現（背後、草叢、天候）也不能開火。
+func _alert_can_engage(u, m) -> bool:
+	return _spots(u, m) and _shot_clear_units(u, m)
 
 var _alert_shots := 0      # QA 計數：本次迎擊觸發幾次
 
