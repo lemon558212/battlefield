@@ -892,6 +892,62 @@ func _aichk() -> void:
 	_ai_say(String(plan2["why"]) == "無目標→推進主堡",
 			"記憶過期後回到「%s」（應為「無目標→推進主堡」）" % String(plan2["why"]))
 
+	# ---------- ⑤b 移動噪音（GDD/15 J6）：腳步與引擎聲也是情報 ----------
+	# 三段距離都用同一個動作（讓 _noise_tick 自己跑一次），只改姿勢／距離
+	var step_d: float = NOISE_STEP_PX * 0.6
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * step_d, 0))
+	_ai_place(foe, spot.x + sx * step_d, spot.y, spot)
+	foe.erase("noise_t")
+	me["node"].stance_cmd = "stand"
+	await get_tree().create_timer(0.6).timeout
+	# 用真的移動：move_to 一小段，讓 _noise_tick 在「is_moving」時登記
+	me["ap"] = 999999.0
+	me["node"].move_to(me["node"].global_position + me["node"].facing_dir() * 1.5)
+	await get_tree().create_timer(NOISE_TICK + 0.5).timeout
+	_ai_say(_noise_memory(foe) != null,
+			"站姿移動：%.0f px 外（<%.0f）的敵人聽到腳步聲" % [step_d, NOISE_STEP_PX])
+	# 匍匐前進不出聲
+	me["node"].stop()
+	foe.erase("noise_t")
+	me["node"].stance_cmd = "prone"
+	await get_tree().create_timer(1.2).timeout
+	var prone_ok: bool = me["node"]._prone > 0.5
+	me["node"].move_to(me["node"].global_position + me["node"].facing_dir() * 1.5)
+	await get_tree().create_timer(NOISE_TICK + 0.6).timeout
+	_ai_say(prone_ok and _noise_memory(foe) == null,
+			"匍匐前進：同樣距離聽不到（趴姿=%s、記憶=%s）——這正是趴著前進的價值"
+			% [prone_ok, "有" if _noise_memory(foe) != null else "無"])
+	me["node"].stop()
+	me["node"].stance_cmd = "stand"
+	await get_tree().create_timer(0.8).timeout
+
+	# ---------- ⑤c 交戰痕跡（GDD/15 J5）：看得到「這裡死過人」就該提高警覺 ----------
+	foe.erase("noise_t")
+	foe.erase("seen_marks")
+	_battle_marks.clear()
+	# ⚠ 我方單位要先退到角落：第一版把痕跡放在「敵人與我之間」，
+	#   結果我自己的身體擋住了那條視線（人是固體，_shot_clear 連人一起算），
+	#   量到 sight_clear=false ——不是 J5 壞了，是這個測試自己站在中間。
+	_ai_place(me, park.x, park.y)
+	await get_tree().create_timer(0.5).timeout
+	# 在敵人**正前方**近處記一筆「敵方陣營有人死在這」（用它自己的朝向算，不用我的位置）
+	var foe_px := Vector2(float(foe["wx"]), float(foe["wy"]))
+	var fd: Vector3 = foe["node"].facing_dir()
+	var mark_px: Vector2 = foe_px + Vector2(fd.x, fd.z).normalized() * 30.0
+	_battle_marks.append({"px": mark_px.x, "py": mark_px.y, "side": foe["side"],
+			"t": float(Time.get_ticks_msec()) / 1000.0})
+	await get_tree().create_timer(NOISE_TICK + 0.6).timeout
+	var bm = _noise_memory(foe)
+	_ai_say(bm != null and (bm as Vector2).distance_to(mark_px) < 2.0,
+			"同袍陣亡地點在視野內 → 敵人記住了那個位置（誤差 %.2f px）"
+			% [(bm as Vector2).distance_to(mark_px) if bm != null else -1.0])
+	var seen_n: int = (foe.get("seen_marks", []) as Array).size()
+	foe.erase("noise_t")
+	await get_tree().create_timer(NOISE_TICK + 0.6).timeout
+	_ai_say(_noise_memory(foe) == null and seen_n == 1,
+			"★ 同一筆痕跡只驚動一次（已看過 %d 筆、清掉記憶後沒有被重新登記）" % seen_n)
+	_battle_marks.clear()
+
 	# ---------- ⑥ 聲音遮蔽（GDD/15 F3）：牆後的槍聲要變悶 ----------
 	_ai_say(Audio.los_check.is_valid(), "遮蔽悶音的接線存在（Main 有把視線查詢注入 Audio）")
 	var keep: Callable = Audio.los_check
@@ -5586,8 +5642,10 @@ func _count_side(s: int) -> int:
 #   於是 GDD/05 §5「AI 也只用敵方視角視野決策」在 Godot 版根本不存在：
 #   _ai_plan 直接把所有活著的我方單位當 foes，敵人隔著整張圖、隔著牆、在背後都知道你在哪。
 #   抽成一個對稱的函式之後，玩家與 AI 用的是**同一把尺**（鐵律 0：物理對雙方一視同仁）。
+# ⚠ 這裡**不驗 u 活著**：看得到屍體與交戰痕跡也是「看得到」（J5 要用）。
+#   活著與否由呼叫端決定要不要管——_side_sees 與 _refresh_visibility 都有驗。
 func _spots(p, u) -> bool:
-	if not p["alive"] or not u["alive"]:
+	if not p["alive"]:
 		return false
 	# 視野半徑改讀資料（鐵律 3）：class_base.json 每個兵種都寫了 sight
 	# （偵察兵 170、機槍兵 120…），先前全專案寫死 200，兵種差異等於不存在。
@@ -5620,6 +5678,8 @@ func _spots(p, u) -> bool:
 
 # 某一方有沒有任何人看得見這個單位（GDD/05 §5 的 Fog.sideCanSee）
 func _side_sees(side: int, u) -> bool:
+	if not u["alive"]:
+		return false
 	for p in units:
 		if p["side"] != side or not p["alive"]:
 			continue
@@ -5871,6 +5931,7 @@ func _fire(shooter, target, part := "body") -> void:
 			ui.flash_msg("命中%s！" % ("頭部" if part == "head" else "散熱器"), Color(1.0, 0.9, 0.4))
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
+			_add_battle_mark(target)      # 這裡死過人（J5）
 			target["node"].die()          # 淡出傾倒後自我移除
 		elif target["alive"]:
 			target["node"].take_hit()     # 受擊：立繪換 hurt 表情＋紅閃
@@ -6292,6 +6353,81 @@ func _hear_shot(shooter) -> void:
 		if to.length() > 0.05:
 			u["node"].face_towards_sound(to.normalized())
 
+# ---------- 移動噪音與交戰痕跡（GDD/15 J5、J6）----------
+# 先前只有槍聲會產生情報，於是「安靜接近」沒有反面：站著全速跑過去跟蹲著挪過去
+# 對 AI 是同一件事。真實世界裡腳步聲、引擎聲都會暴露位置，只是傳得比槍聲近得多。
+const NOISE_STEP_PX := 120.0      # 站姿走／跑的腳步聲
+const NOISE_CROUCH_PX := 55.0     # 蹲行（Unit 的腳步音效也是在這個條件下轉小聲）
+const NOISE_VEHICLE_PX := 260.0   # 載具引擎與履帶：吵得多，但仍遠不及槍聲 460
+const NOISE_TICK := 0.4           # 每 0.4 秒登記一次（不是每幀，也不必每幀）
+var _noise_acc := 0.0
+# 交戰痕跡：有人陣亡的地點。{px, py, side（陣亡者的陣營）}
+# ⚠ 這不是「屍體模型」——Unit.die() 淡出後會自我移除。這裡記的是「這裡死過人」
+#   這件事本身（血跡、掉落的裝備），看得到那個位置的同袍就該提高警覺。
+#   要真的看到躺在地上的屍體，屬於美術資產（同 GDD/15 G3 車輛殘骸），不是這一層。
+var _battle_marks: Array = []
+
+func _mark_noise_at(px: float, py: float, from_side: int, radius: float) -> void:
+	if radius <= 0.0:
+		return
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	var sp := Vector2(px, py)
+	for u in units:
+		if not u["alive"] or u["side"] == from_side or not is_instance_valid(u["node"]):
+			continue
+		if _live_px(u).distance_to(sp) > radius:
+			continue
+		u["noise_px"] = sp.x
+		u["noise_py"] = sp.y
+		u["noise_t"] = now
+
+# 移動中的人／車會出聲；趴著前進不出聲（這正是匍匐的價值，與 Unit 的腳步音效同一條規則）
+func _move_noise_px(u) -> float:
+	if not is_instance_valid(u["node"]):
+		return 0.0
+	if Unit.is_vehicle_cls(u["cls"]):
+		return NOISE_VEHICLE_PX
+	if u["node"]._prone > 0.5:
+		return 0.0
+	return NOISE_CROUCH_PX if u["node"]._crouch > 0.5 else NOISE_STEP_PX
+
+func _noise_tick(delta: float) -> void:
+	if st != St.CMD and st != St.ENEMY:
+		return
+	_noise_acc += delta
+	if _noise_acc < NOISE_TICK:
+		return
+	_noise_acc = 0.0
+	for u in units:
+		if not u["alive"] or not is_instance_valid(u["node"]) or not u["node"].is_moving():
+			continue
+		var p := _live_px(u)
+		_mark_noise_at(p.x, p.y, u["side"], _move_noise_px(u))
+	# 交戰痕跡：走到看得見的距離才會發現（不是全隊立刻知道——那是無線電，屍體不會自己通報）
+	for mk in _battle_marks:
+		for w in units:
+			if not w["alive"] or w["side"] != int(mk["side"]) or not is_instance_valid(w["node"]):
+				continue
+			# ⚠ 已經看過的痕跡不可以每 0.4 秒再記一次：那會讓記憶永遠不過期，
+			#   AI 會被一具屍體釘在原地。每個人對每一筆痕跡只驚動一次。
+			var seen: Array = w.get("seen_marks", [])
+			if seen.has(mk["t"]):
+				continue
+			if not _spots(w, {"alive": false, "cls": "rifleman", "node": null,
+					"wx": mk["px"], "wy": mk["py"]}):
+				continue
+			seen.append(mk["t"])
+			w["seen_marks"] = seen
+			w["noise_px"] = mk["px"]
+			w["noise_py"] = mk["py"]
+			w["noise_t"] = float(Time.get_ticks_msec()) / 1000.0
+
+# 有人陣亡：在地上留下一筆交戰痕跡（三個死亡入口都要呼叫，漏一個就等於這一類死法沒有痕跡）
+func _add_battle_mark(u) -> void:
+	var p := _live_px(u)
+	_battle_marks.append({"px": p.x, "py": p.y, "side": u["side"],
+			"t": float(Time.get_ticks_msec()) / 1000.0})
+
 # 這個單位還記得的槍聲位置（px）；沒有或已過期回 null
 func _noise_memory(u):
 	if not u.has("noise_t"):
@@ -6361,6 +6497,7 @@ func _splash(shooter, center) -> void:
 		hit_any += 1
 		if u["hp"] <= 0 and u["alive"]:
 			u["alive"] = false
+			_add_battle_mark(u)           # 這裡死過人（J5）
 			u["node"].die()
 		else:
 			u["node"].take_hit()
@@ -6542,6 +6679,7 @@ func _process(delta: float) -> void:
 	_action_tick(delta)
 	_intercept_tick(delta)
 	_look_tick(delta)
+	_noise_tick(delta)
 	if st == St.ENEMY:
 		_enemy_t -= delta
 		_ai_t += delta
@@ -8281,6 +8419,7 @@ func _intercept_fire(shooter, target, dist_px: float) -> void:
 		target["hp"] -= dmg
 		if target["hp"] <= 0 and target["alive"]:
 			target["alive"] = false
+			_add_battle_mark(target)      # 這裡死過人（J5）
 			target["node"].die()
 		elif target["alive"]:
 			target["node"].take_hit()
