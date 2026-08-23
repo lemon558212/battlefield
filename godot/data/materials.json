@@ -1,0 +1,15 @@
+{
+ "_note": "彈道與材質（GDD/15 D5、G4）。pen＝步槍彈穿不穿得過；hit＝穿過一層後的命中率倍率（子彈會偏）；dmg＝穿過一層後的傷害倍率（子彈減速、變形）。厚度不獨立建模，直接反映在這兩個倍率上。障礙沒指定 mat 時，依舊的 pen 布林退回 wood（可穿）或 concrete（不可穿），行為與改動前一致。",
+ "materials": {
+  "wood":        {"pen": true,  "hit": 0.72, "dmg": 0.80, "zh": "木板／木柵欄／木箱"},
+  "sheet_metal": {"pen": true,  "hit": 0.66, "dmg": 0.74, "zh": "鐵皮桶／浪板"},
+  "rubber":      {"pen": true,  "hit": 0.55, "dmg": 0.62, "zh": "輪胎堆"},
+  "canvas":      {"pen": true,  "hit": 0.90, "dmg": 0.95, "zh": "帆布補給堆"},
+  "furniture":   {"pen": true,  "hit": 0.80, "dmg": 0.85, "zh": "室內家具"},
+  "sandbag":     {"pen": false, "hit": 0.0,  "dmg": 0.0,  "zh": "沙包"},
+  "concrete":    {"pen": false, "hit": 0.0,  "dmg": 0.0,  "zh": "混凝土／龍牙／碉堡"},
+  "brick":       {"pen": false, "hit": 0.0,  "dmg": 0.0,  "zh": "磚牆"},
+  "steel":       {"pen": false, "hit": 0.0,  "dmg": 0.0,  "zh": "車體裝甲"},
+  "rock":        {"pen": false, "hit": 0.0,  "dmg": 0.0,  "zh": "岩石"}
+ }
+}

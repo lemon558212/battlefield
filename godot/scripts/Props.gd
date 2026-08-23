@@ -231,7 +231,7 @@ func _fences(m: Dictionary) -> void:
 					continue
 				_box("wood", Vector3(0.12, 1.05, 0.12), Transform3D(Basis(), _pos(p.x, p.y, 0.52)))
 				# 柵欄是連續的橫杆，障礙必須是線段——只登記柱子的話人會從兩柱之間穿過去
-				_blk_seg(p, p + dir * step, 0.14, 1.05, true)   # 木柵欄：擋人不擋彈
+				_blk_seg(p, p + dir * step, 0.14, 1.05, true, "wood")   # 木柵欄：擋人不擋彈
 				var p2: Vector2 = p + dir * step * 0.5
 				var ang: float = atan2(dir.y, dir.x)
 				for hh in [0.55, 0.9]:
@@ -272,7 +272,7 @@ func _poles(m: Dictionary) -> void:
 				# ⚠ 不清 prev_ins：一清就永遠湊不成相鄰桿（實測 4 桿 0 線）。
 				#   拉不拉由 30m 距離檢查決定——電線在 6m 高，跨單層屋頂合理。
 				continue
-			_blk_cir(p, 0.32, 6.2, true)                    # 木電線桿：擋人不擋彈
+			_blk_cir(p, 0.32, 6.2, true, "wood")            # 木電線桿：擋人不擋彈
 			pole_spots.append(p)
 			# 微傾：軸向亂數 1.5~3 度——整排筆直的桿一看就是複製貼上
 			var lean := Basis(Vector3(1, 0, 0), rng.randf_range(-0.04, 0.04)) \
@@ -533,12 +533,12 @@ func _cable_seg(w1: Vector3, w2: Vector3, r := 0.05) -> void:
 
 # 木柵欄、木電線桿擋得住人，但擋不住步槍彈——真實步槍彈輕鬆穿過 2cm 木板。
 # 沙包、混凝土龍牙、車體才是真的擋彈物。
-func _blk_cir(c: Vector2, r_m: float, h_m: float, pen := false) -> void:
+func _blk_cir(c: Vector2, r_m: float, h_m: float, pen := false, mat := "") -> void:
 	# 診斷（2026-08-02）：登記在禁區裡的障礙，碰撞會被 Main._strip_edge_blockers
 	# 剔掉、但視覺已經畫了＝看得到穿得過。這裡**照樣登記**（不可偷偷不登記，
 	# 那會讓 Main 的剔除數變 0＝把問題藏起來），只把呼叫處喊出來以便補守衛。
 	_warn_if_off_limits(c, "cir")
-	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m, "pen": pen})
+	blockers.append({"t": "cir", "c": c, "r": r_m / _ws, "h": h_m, "pen": pen, "mat": mat})
 
 # 只負責喊，不改行為。同一個呼叫處只喊一次，免得洗版。
 # ⚠⚠ 判準只能是「邊界安全帶」，不可以用完整的 _off_limits（2026-08-02 第一版錯在這）：
@@ -568,15 +568,15 @@ func _warn_if_off_limits(p: Vector2, kind: String) -> void:
 # 長條形物件（車輛殘骸）。用圓形近似會讓長軸兩端各有一段完全沒有實體——
 # 卡車殘骸 4.6m 長、圓半徑 1.5m ＝從車頭或車尾走進貨斗裡（使用者 2026-07-27 實測）。
 # ang＝長軸方向（px 平面的角度，與畫幾何用的 Basis(UP, -ang) 一致）。
-func _blk_obb(c: Vector2, ang: float, half_m: Vector2, h_m: float, pen := false) -> void:
+func _blk_obb(c: Vector2, ang: float, half_m: Vector2, h_m: float, pen := false, mat := "") -> void:
 	blockers.append({"t": "obb", "c": c, "ax": Vector2(cos(ang), sin(ang)),
-			"e": half_m / _ws, "r": 0.0, "h": h_m, "pen": pen})
+			"e": half_m / _ws, "r": 0.0, "h": h_m, "pen": pen, "mat": mat})
 
-func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false) -> void:
+func _blk_seg(a: Vector2, b: Vector2, r_m: float, h_m: float, pen := false, mat := "") -> void:
 	_warn_if_off_limits(a, "seg 端點A")
 	_warn_if_off_limits(b, "seg 端點B")
 	# 順手存中點與半長：碰撞時先用它做粗剔除，才不用對每段柵欄都算一次最近點
-	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen,
+	blockers.append({"t": "seg", "a": a, "b": b, "r": r_m / _ws, "h": h_m, "pen": pen, "mat": mat,
 			"m": (a + b) * 0.5, "hl": a.distance_to(b) * 0.5})
 
 
@@ -630,7 +630,7 @@ func _wires(m: Dictionary) -> void:
 					_box("cable", Vector3(diag, 0.03, 0.03),
 							Transform3D(Basis(Vector3.UP, -ang) * Basis(Vector3(0, 0, 1), tilt),
 							_pos(mp.x, mp.y, hgt * 0.59)))
-			_blk_seg(a, b, 0.35, hgt, true)
+			_blk_seg(a, b, 0.35, hgt, true, "wood")
 
 # 機槍堡（碉堡）：混凝土盒 + 射孔帶 + 帽簷。
 # 射孔朝 `face`（度數）：碉堡的正面與背面戰術價值完全不同，玩家要看得出它對著哪邊。
@@ -868,16 +868,16 @@ func _one_clutter(kind: String, p: Vector2, rng: RandomNumberGenerator) -> void:
 						_pos(p.x + rng.randf_range(-0.1, 0.1), p.y + rng.randf_range(-0.1, 0.1),
 						h * 1.45)))
 				top = h * 1.45 + h * 0.45
-			_blk_cir(p, 0.45, top, true)               # 單層＝踩得上去；疊兩層＝擋人。木頭擋不住彈
+			_blk_cir(p, 0.45, top, true, "wood")       # 單層＝踩得上去；疊兩層＝擋人。木頭擋不住彈
 		"drum":             # 油桶：站立或倒下
 			if rng.randf() < 0.68:
 				_box("rust", Vector3(0.58, 0.88, 0.58), Transform3D(b, _pos(p.x, p.y, 0.44)))
-				_blk_cir(p, 0.32, 0.88, true)          # 鐵皮桶擋人不擋步槍彈
+				_blk_cir(p, 0.32, 0.88, true, "sheet_metal")   # 鐵皮桶擋人不擋步槍彈
 			else:
 				_box("rust", Vector3(0.88, 0.56, 0.56),
 						Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3(0, 0, 1), PI * 0.5),
 						_pos(p.x, p.y, 0.28)))
-				_blk_cir(p, 0.34, 0.42, true)
+				_blk_cir(p, 0.34, 0.42, true, "sheet_metal")
 		"tyre":             # 輪胎堆
 			var n: int = rng.randi_range(2, 4)
 			for k in n:
@@ -885,7 +885,7 @@ func _one_clutter(kind: String, p: Vector2, rng: RandomNumberGenerator) -> void:
 						Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
 						_pos(p.x + rng.randf_range(-0.06, 0.06),
 						p.y + rng.randf_range(-0.06, 0.06), 0.10 + float(k) * 0.19)))
-			_blk_cir(p, 0.40, 0.10 + float(n) * 0.19, true)
+			_blk_cir(p, 0.40, 0.10 + float(n) * 0.19, true, "rubber")
 		"pallet":           # 木棧板：平放，踩得過去
 			for k in 4:
 				_box("wood", Vector3(1.05, 0.055, 0.14),
@@ -896,7 +896,7 @@ func _one_clutter(kind: String, p: Vector2, rng: RandomNumberGenerator) -> void:
 			var l: float = rng.randf_range(0.6, 1.3)
 			_box("concrete", Vector3(l, rng.randf_range(0.22, 0.38), rng.randf_range(0.3, 0.5)),
 					Transform3D(b, _pos(p.x, p.y, 0.16)))
-			_blk_cir(p, l * 0.4, 0.34)                 # 混凝土：真的擋彈
+			_blk_cir(p, l * 0.4, 0.34, false, "concrete")   # 混凝土：真的擋彈
 		"canvas":           # 蓋著帆布的補給堆：不規則、最像「有人用過」
 			for k in 3:
 				var sx: float = rng.randf_range(0.5, 1.1)
@@ -905,12 +905,12 @@ func _one_clutter(kind: String, p: Vector2, rng: RandomNumberGenerator) -> void:
 						* Basis(Vector3(1, 0, 0), rng.randf_range(-0.2, 0.2)),
 						_pos(p.x + rng.randf_range(-0.3, 0.3),
 						p.y + rng.randf_range(-0.3, 0.3), 0.18)))
-			_blk_cir(p, 0.55, 0.44, true)
+			_blk_cir(p, 0.55, 0.44, true, "canvas")
 		_:                  # spool 電纜捲軸
 			_box("wood", Vector3(1.0, 0.10, 1.0), Transform3D(b, _pos(p.x, p.y, 0.06)))
 			_box("cable", Vector3(0.62, 0.42, 0.62), Transform3D(b, _pos(p.x, p.y, 0.32)))
 			_box("wood", Vector3(1.0, 0.10, 1.0), Transform3D(b, _pos(p.x, p.y, 0.58)))
-			_blk_cir(p, 0.5, 0.64, true)
+			_blk_cir(p, 0.5, 0.64, true, "wood")
 	# 與地面的過渡：底下壓幾坨土，不然任何物件都像「插進地板」
 	for k2 in 3:
 		var sz: float = rng.randf_range(0.18, 0.4)

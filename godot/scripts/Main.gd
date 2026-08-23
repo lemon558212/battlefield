@@ -983,9 +983,15 @@ func _aichk() -> void:
 			"t": float(Time.get_ticks_msec()) / 1000.0})
 	await get_tree().create_timer(NOISE_TICK + 0.6).timeout
 	var bm = _noise_memory(foe)
-	_ai_say(bm != null and (bm as Vector2).distance_to(mark_px) < 2.0,
-			"同袍陣亡地點在視野內 → 敵人記住了那個位置（誤差 %.2f px）"
-			% [(bm as Vector2).distance_to(mark_px) if bm != null else -1.0])
+	# ⚠ 門檻不可以寫死：J4 上線後記憶本來就會隨時間模糊，而這個容器 2 fps，
+	#   等一次 tick 就過了好幾秒。改成用「當下這筆記憶的年齡」算出容許上限——
+	#   驗的是「有沒有記住那個地方」，不是「引擎跑多快」。
+	var bm_age: float = float(Time.get_ticks_msec()) / 1000.0 - float(foe.get("noise_t", 0.0))
+	var bm_life: float = float(_diff().get("hearMemory", HEAR_MEMORY_SEC))
+	var bm_tol: float = MEM_BLUR_PX * clampf(bm_age / maxf(bm_life, 0.01), 0.0, 1.0) + 2.0
+	_ai_say(bm != null and (bm as Vector2).distance_to(mark_px) < bm_tol,
+			"同袍陣亡地點在視野內 → 敵人記住了那個位置（誤差 %.2f px，記了 %.1fs 的容許值 %.1f）"
+			% [(bm as Vector2).distance_to(mark_px) if bm != null else -1.0, bm_age, bm_tol])
 	var seen_n: int = (foe.get("seen_marks", []) as Array).size()
 	foe.erase("noise_t")
 	await get_tree().create_timer(NOISE_TICK + 0.6).timeout
@@ -1010,6 +1016,101 @@ func _aichk() -> void:
 			"警戒射擊：同一位置 %.0f px，面朝我＝%s、背對我＝%s（彈道兩種情況都通＝%s）"
 			% [alert_d, "會開火" if eng_front else "不開火",
 			"會開火" if eng_back else "不開火", ballistic])
+
+	# ---------- ⑤e 記憶會衰減（GDD/15 J4）----------
+	# 兩態的記憶＝19 秒前的槍聲跟 0.1 秒前一樣精準，那是 GPS 不是記憶。
+	var life_s: float = float(_diff().get("hearMemory", HEAR_MEMORY_SEC))
+	var true_px := Vector2(float(foe["wx"]) + 100.0, float(foe["wy"]) + 60.0)
+	foe["noise_px"] = true_px.x
+	foe["noise_py"] = true_px.y
+	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0
+	var err_fresh: float = (_noise_memory(foe) as Vector2).distance_to(true_px)
+	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0 - life_s * 0.9
+	var m_old1 = _noise_memory(foe)
+	var m_old2 = _noise_memory(foe)
+	var err_old: float = (m_old1 as Vector2).distance_to(true_px)
+	_ai_say(err_fresh < 1.0 and err_old > 10.0 and err_old <= MEM_BLUR_PX + 1.0,
+			"記憶衰減：剛聽到誤差 %.1f px、快忘記時誤差 %.1f px（上限 %.0f）"
+			% [err_fresh, err_old, MEM_BLUR_PX])
+	_ai_say((m_old1 as Vector2).distance_to(m_old2 as Vector2) < 0.001,
+			"★ 同一份模糊記憶連查兩次是同一個點（會跳的話 AI 會追著鬼跑）")
+	foe.erase("noise_t")
+
+	# ---------- ⑤f 高低差讓掩體失效（GDD/15 C10）----------
+	# 站二樓往下打，1.3m 的沙包擋不住什麼——先前站幾樓都照平地判定。
+	var cov_pos := Vector2(0.0, 0.0)
+	var cov_val := 0.0
+	for c in _covers:
+		if String(c.get("type", "")) != "bush":
+			cov_pos = Vector2(float(c["wx"]), float(c["wy"]))
+			cov_val = float(c["val"])
+			break
+	if cov_val > 0.0:
+		var shooter_px := cov_pos + Vector2(200.0, 0.0)
+		var behind := cov_pos + Vector2(-14.0, 0.0)
+		var c_flat: float = cover_at(behind.x, behind.y, shooter_px.x, shooter_px.y, 0.0)
+		var c_2f: float = cover_at(behind.x, behind.y, shooter_px.x, shooter_px.y, 3.2)
+		var c_high: float = cover_at(behind.x, behind.y, shooter_px.x, shooter_px.y, 6.5)
+		_ai_say(c_flat > 0.0 and c_2f < c_flat and c_high <= 0.001,
+				"高低差吃掉遮蔽：平地 %.2f → 高 3.2m（二樓）%.2f → 高 6.5m %.2f"
+				% [c_flat, c_2f, c_high])
+	else:
+		print("[aichk] 場上沒有非草叢掩體，C10 這一項跳過")
+
+	# ---------- ⑤g 視野跟著戰場時刻走（GDD/15 E4）----------
+	var keep_hour: float = clock_hour
+	clock_hour = 12.0
+	var lm_day: float = _light_sight_mul()
+	clock_hour = 19.0
+	var lm_dusk: float = _light_sight_mul()
+	clock_hour = 22.0
+	var lm_night: float = _light_sight_mul()
+	_ai_say(lm_day > lm_dusk and lm_dusk > lm_night,
+			"視野隨時刻：12:00 ×%.2f ＞ 19:00 ×%.2f ＞ 22:00 ×%.2f（時鐘不再只是 HUD 裝飾）"
+			% [lm_day, lm_dusk, lm_night])
+	# 而且要真的影響「看不看得到」，不是只有倍率變了
+	var night_d: float = sight_fo * 0.8
+	_ai_place(me, spot.x, spot.y, spot + Vector2(sx * night_d, 0))
+	_ai_place(foe, spot.x + sx * night_d, spot.y, spot)
+	await get_tree().create_timer(0.4).timeout
+	clock_hour = 12.0
+	var see_day: bool = _spots(foe, me)
+	clock_hour = 22.0
+	var see_night: bool = _spots(foe, me)
+	clock_hour = keep_hour
+	_ai_say(see_day and not see_night,
+			"同樣 %.0f px：白天看得到（%s）、夜裡看不到（%s）" % [night_d, see_day, see_night])
+
+	# ---------- ⑤h 材質決定彈道（GDD/15 D5、G4）----------
+	# 隔離：只留一個障礙才驗得到「材質本身」，否則量到的是場上其他東西
+	var keep_blk: Array = _blockers
+	var mid_pt := Vector2((float(me["wx"]) + float(foe["wx"])) * 0.5,
+			(float(me["wy"]) + float(foe["wy"])) * 0.5)
+	var a_px := Vector2(float(me["wx"]), float(me["wy"]))
+	var b_px := Vector2(float(foe["wx"]), float(foe["wy"]))
+	var mat_res := {}
+	for mm in ["wood", "sheet_metal", "rubber", "canvas", "sandbag", "concrete"]:
+		_blockers = [{"t": "cir", "c": mid_pt, "r": 1.2, "h": 1.6, "mat": mm}]
+		var fx2: Dictionary = _pen_fx(a_px, b_px, 1.4, 1.2)
+		# ⚠ 一定要把兩端的人傳進 ign_a/ign_b：人也是固體（_shot_clear 會算），
+		#   不排除的話量到的是「我自己擋住了自己的彈道」，六種材質全部 false。
+		var thru: bool = _shot_clear(a_px, b_px, 1.4, 1.2, me, foe)
+		mat_res[mm] = {"n": int(fx2["n"]), "hit": float(fx2["hit"]),
+				"dmg": float(fx2["dmg"]), "thru": thru}
+	_blockers = keep_blk
+	for mm in mat_res.keys():
+		print("[aichk]   材質 %-12s 穿得過=%s 層數=%d 命中×%.2f 威力×%.2f"
+				% [mm, mat_res[mm]["thru"], mat_res[mm]["n"], mat_res[mm]["hit"],
+				mat_res[mm]["dmg"]])
+	_ai_say(mat_res["wood"]["thru"] and mat_res["sheet_metal"]["thru"]
+			and not mat_res["sandbag"]["thru"] and not mat_res["concrete"]["thru"],
+			"材質決定穿不穿得過：木板/鐵皮穿得過、沙包/混凝土擋得住（同一個高度、同一條線）")
+	_ai_say(mat_res["canvas"]["hit"] > mat_res["wood"]["hit"]
+			and mat_res["wood"]["hit"] > mat_res["rubber"]["hit"]
+			and mat_res["rubber"]["dmg"] < 1.0,
+			"穿透代價分材質：帆布 ×%.2f ＞ 木板 ×%.2f ＞ 輪胎 ×%.2f（威力 ×%.2f）"
+			% [mat_res["canvas"]["hit"], mat_res["wood"]["hit"], mat_res["rubber"]["hit"],
+			mat_res["rubber"]["dmg"]])
 
 	# ---------- ⑥ 聲音遮蔽（GDD/15 F3）：牆後的槍聲要變悶 ----------
 	_ai_say(Audio.los_check.is_valid(), "遮蔽悶音的接線存在（Main 有把視線查詢注入 Audio）")
@@ -5988,15 +6089,23 @@ func _fire(shooter, target, part := "body") -> void:
 		_refresh_visibility()
 		return
 	# 掩體修正（Phase2）：方向性遮蔽最多削 60% 命中
-	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
+	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"],
+			_unit_elev(shooter) - _unit_elev(target))
 	var hc: float = GameData.hit_chance(_wrap(shooter), _wrap(target), dist_px, part) * (1.0 - cov * 0.6)
-	hc *= pow(0.7, float(_pen_count(_live_px(shooter), _live_px(target),
+	var pen: Dictionary = _pen_fx(_live_px(shooter), _live_px(target),
 			shooter["node"].muzzle_height() if not Unit.is_vehicle_cls(shooter["cls"]) else 1.9,
-			target["node"].torso_height() if not Unit.is_vehicle_cls(target["cls"]) else 1.4)))
+			target["node"].torso_height() if not Unit.is_vehicle_cls(target["cls"]) else 1.4)
+	hc *= float(pen["hit"])
+	if int(pen["n"]) > 0 and shooter["side"] == player_side:
+		ui.flash_msg("穿過 %d 層遮蔽物（命中 ×%.2f、威力 ×%.2f）"
+				% [int(pen["n"]), float(pen["hit"]), float(pen["dmg"])],
+				Color(0.85, 0.85, 0.7))
 	if hc > randf():
 		Audio.impact("metal" if Unit.is_vehicle_cls(target["cls"]) else "wood",
 				target["node"].global_position + Vector3(0, 1.0, 0))
-		target["hp"] -= GameData.damage(_wrap(shooter), _wrap(target), part)
+		# 穿透後的子彈威力會掉（D5）：打穿木箱再命中，傷害不該跟直射一樣
+		target["hp"] -= int(round(float(GameData.damage(_wrap(shooter), _wrap(target), part))
+				* float(pen["dmg"])))
 		_sync_hp(target)
 		if part != "body":
 			ui.flash_msg("命中%s！" % ("頭部" if part == "head" else "散熱器"), Color(1.0, 0.9, 0.4))
@@ -6089,11 +6198,24 @@ func _feed_env_uniforms() -> void:
 			m2.set_shader_parameter("sun_dir", sun_v)
 # 天色對能見度的影響（鐵律 0）：夜裡看不了那麼遠。
 # 先前 sky 只影響畫面色調，戰術上完全沒有差別——夜戰跟白天一樣好打。
+# ★ 2026-08-22：這裡本來只讀 map_data.sky（開戰那一刻的靜態天色），
+#   但專案早就有會走的戰場時鐘 clock_hour（每回合 +hpt 小時，HUD 右上就印著）。
+#   結果是：打到天黑了，視野還是照白天算——時鐘只是 HUD 上的裝飾。
+#   改成以時刻為準（真實世界裡看得見多遠是光線決定的，不是地圖檔決定的）：
+#     20:00~05:00 夜 ×0.45 ／ 05:00~07:00、17:00~20:00 晨昏 ×0.78 ／ 其餘 ×1.0
+#   地圖的 sky 仍決定開戰時刻（_init_clock 依 weather_system.json 的 start_hour 寫進
+#   clock_hour：dawn 6／day 10／dusk 17／night 22），所以夜戰關卡照樣是夜戰。
+#   ⚠ 門檻是**對著那四個 start_hour 挑的**：每張圖的開場倍率與改動前一模一樣
+#     （dawn 6→0.78、day 10→1.0、dusk 17→0.78、night 22→0.45），
+#     改變的只有「打久了天色會變」這件事。不這樣挑的話會偷偷動到平衡：
+#     第一版寫 h >= 18 才算黃昏，dusk 圖開場就從 0.78 變成 1.0。
 func _light_sight_mul() -> float:
-	match String(map_data.get("sky", "day")):
-		"night": return 0.45
-		"dusk", "dawn": return 0.78
-		_: return 1.0
+	var h: float = fposmod(clock_hour, 24.0)
+	if h >= 20.0 or h < 5.0:
+		return 0.45
+	if h < 7.0 or h >= 17.0:
+		return 0.78
+	return 1.0
 
 func weather_sight_mul() -> float:
 	# 查表（GDD/04 天候節）：視野/移動/命中/閃避同一張表，不再各寫各的數字
@@ -6394,6 +6516,9 @@ const HEAR_PX := 460.0        # 聽得到槍聲的距離（比視野遠得多，
 # 聽到的槍聲要記多久（秒）。真人不會聽過就忘，但也不會記一整場：
 # 記憶過期後那個位置就不再值得去看——不然 AI 會一直往一個早就沒人的地方走。
 const HEAR_MEMORY_SEC := 20.0
+# 記憶到期前，位置最多會偏掉多少 px（J4：愈久愈不準）。
+# 45px ≈ 2.2m：足以讓 AI 走到「大概那附近」而不是精準點名，但不會離譜到查看錯地方。
+const MEM_BLUR_PX := 45.0
 func _hear_shot(shooter) -> void:
 	if not is_instance_valid(shooter["node"]):
 		return
@@ -6506,9 +6631,22 @@ func _noise_memory(u):
 	if not u.has("noise_t"):
 		return null
 	var now: float = float(Time.get_ticks_msec()) / 1000.0
-	if now - float(u["noise_t"]) > float(_diff().get("hearMemory", HEAR_MEMORY_SEC)):
+	var age: float = now - float(u["noise_t"])
+	var life: float = float(_diff().get("hearMemory", HEAR_MEMORY_SEC))
+	if age > life:
 		return null
-	return Vector2(float(u["noise_px"]), float(u["noise_py"]))
+	# ★ 記憶會衰減（GDD/15 J4）：先前是「記得／忘記」兩態，於是 19 秒前的槍聲
+	#   跟 0.1 秒前的槍聲一樣精準——那不是記憶，那是 GPS。
+	#   愈久愈不準：偏移量隨經過時間線性長到 MEM_BLUR_PX，方向固定（用聽者與
+	#   時間戳當種子），不是每次查詢都亂跳——同一個人對同一件事的印象要一致，
+	#   否則 AI 會朝著一個每幀都在跳的點走。
+	var frac: float = clampf(age / maxf(life, 0.01), 0.0, 1.0)
+	var blur: float = MEM_BLUR_PX * frac
+	if blur < 1.0:
+		return Vector2(float(u["noise_px"]), float(u["noise_py"]))
+	var seed_v: float = float(u["noise_t"]) * 7.13 + float(u["wx"]) * 0.017
+	return Vector2(float(u["noise_px"]) + cos(seed_v) * blur,
+			float(u["noise_py"]) + sin(seed_v) * blur)
 
 # 這個單位「知道」的敵人＝自己看得見的，加上**通報得到的同袍**看得見的（GDD/05 §5）。
 # ⚠ 不是無條件的全隊共享：通報半徑 relay 讀 data/difficulty.json，
@@ -7744,9 +7882,13 @@ func _shot_clear(a: Vector2, b: Vector2, ya: float, yb: float,
 		if t <= 0.001 or t >= 1.0:
 			continue                  # 貼著障礙開火（t≈0）不算被自己的掩體擋住
 		if lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
-			# 木柵欄／木桿：子彈穿得過去（鐵律 0②材質差異），只是會偏、會減速。
-			# 命中率的懲罰在 _pen_count() 算，這裡只負責「擋不擋」。
-			if bool(bk.get("pen", false)):
+			# 木柵欄／木桿／鐵皮桶：子彈穿得過去（鐵律 0②材質差異），只是會偏、會減速。
+			# ★ 穿不穿得過改查 data/materials.json，不再是障礙自己帶的一個布林——
+			#   同一句話只能有一個真相，而畫出來的網格本來就有材質名（G4 的重點：
+			#   看起來是木板就該像木板，看起來是混凝土就該擋得住）。
+			#   命中率與傷害的懲罰在 _pen_fx() 算，這裡只負責「擋不擋」。
+			if bool(GameData.material(String(bk.get("mat", "")),
+					bool(bk.get("pen", false))).get("pen", false)):
 				continue
 			return false
 	# 單位本身也是固體（鐵律 0①）。射手與目標本身要排除。
@@ -7886,20 +8028,27 @@ func _sight_clear(observer, target) -> bool:
 # 這正是掩體該有的樣子——不是無敵護盾，也不是裝飾。
 # 彈道上穿過幾層「可穿透」障礙（木柵欄、木電線桿）。
 # 穿得過去不代表沒有代價：子彈會偏、會減速，所以每穿一層命中率打七折。
-func _pen_count(a: Vector2, b: Vector2, ya: float, yb: float) -> int:
-	var d1: Vector2 = b - a
-	var l2: float = d1.length_squared()
-	if l2 < 0.0001:
-		return 0
-	var seg_len: float = sqrt(l2)
-	var n := 0
+# 彈道穿過幾層可穿透障礙、代價是多少（GDD/15 D5）。
+# ⚠ 舊版只回傳「層數」，命中率一律每層 ×0.7——於是一張帆布跟一面鐵皮一樣難打，
+#   而「材質」在戰術上完全不存在。現在每層各查自己的 hit／dmg 倍率相乘：
+#   帆布幾乎不影響（0.90），輪胎堆最狠（0.55）。傷害同理（子彈減速、變形）。
+func _pen_fx(a: Vector2, b: Vector2, ya: float, yb: float) -> Dictionary:
+	var out := {"n": 0, "hit": 1.0, "dmg": 1.0, "worst": ""}
+	if (b - a).length_squared() < 0.0001:
+		return out
 	for bk in _blockers:
-		if not bool(bk.get("pen", false)):
+		var m: Dictionary = GameData.material(String(bk.get("mat", "")),
+				bool(bk.get("pen", false)))
+		if not bool(m.get("pen", false)):
 			continue
 		var t: float = _blk_ray_t(bk, a, b)
 		if t > 0.001 and t < 1.0 and lerpf(ya, yb, t) < float(bk.get("h", 1.2)):
-			n += 1
-	return n
+			out["n"] = int(out["n"]) + 1
+			out["hit"] = float(out["hit"]) * float(m.get("hit", 0.7))
+			out["dmg"] = float(out["dmg"]) * float(m.get("dmg", 0.8))
+			if String(out["worst"]) == "" or float(m.get("hit", 0.7)) < 0.7:
+				out["worst"] = String(bk.get("mat", "")) if String(bk.get("mat", "")) != "" else "wood"
+	return out
 
 # 這個單位站得比地形高多少（＝站在幾樓／站在矮牆上）
 func _unit_elev(u) -> float:
@@ -8508,7 +8657,8 @@ func _intercept_fire(shooter, target, dist_px: float) -> void:
 	await get_tree().create_timer(0.32).timeout
 	if not shooter["alive"] or not target["alive"]:
 		return
-	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"])
+	var cov: float = cover_at(target["wx"], target["wy"], shooter["wx"], shooter["wy"],
+			_unit_elev(shooter) - _unit_elev(target))
 	var sh_w := {"weapon": _alert_weapon(shooter), "cls": shooter["cls"]}
 	var hc: float = GameData.hit_chance(_wrap(sh_w), _wrap(target), dist_px) * (1.0 - cov * 0.6)
 	if hc > randf():
@@ -8712,7 +8862,7 @@ func _build_ground() -> void:
 			#     所以收在自己的陣列裡，最後一起併。
 			for sl in bd.solids_local:
 				var sp: Vector2 = bd._local_to_px(Vector2(float(sl[0]), float(sl[1])))
-				_bld_blk.append({"t": "cir", "c": sp, "k": "furniture",
+				_bld_blk.append({"t": "cir", "c": sp, "k": "furniture", "mat": "furniture",
 						"r": float(sl[2]) / WORLD_SCALE,
 						"h": float(sl[3]) if sl.size() > 3 else 0.8, "pen": true})
 			# 掩體：建築本體仍登記一個圓（貼著外牆＝硬掩體），視線改吃牆線段
@@ -8866,7 +9016,11 @@ func _update_cover_state(u) -> void:
 
 # 掩體查詢：目標在 (wx,wy)、射手在 (fx,fy)，回傳遮蔽值 0~1。
 # 方向性：掩體必須位於「目標朝射手」那一側 ±75 度內才有效（背後的沙包擋不了正面來的子彈）。
-func cover_at(wx: float, wy: float, fx: float, fy: float) -> float:
+# elev_diff＝射手比目標高多少公尺（正＝射手在上面）。從二樓、山坡上往下打，
+# 1.3m 的沙包擋不住什麼——這是 GDD/15 C10，先前完全沒有算（站二樓照平地判定）。
+# 幾何很單純：掩體只擋得住「掠過它頂端」的那條線，射手抬高之後入射角變陡，
+# 遮蔽的有效高度就等比例縮水。2m 高差開始明顯衰減，6m 以上（約兩層樓）幾乎歸零。
+func cover_at(wx: float, wy: float, fx: float, fy: float, elev_diff := 0.0) -> float:
 	var best := 0.0
 	var to_shooter := Vector2(fx - wx, fy - wy)
 	if to_shooter.length() < 1.0:
@@ -8880,6 +9034,8 @@ func cover_at(wx: float, wy: float, fx: float, fy: float) -> float:
 		if dist > 1.0 and d.normalized().dot(to_shooter) < 0.26:   # cos75°
 			continue
 		best = maxf(best, float(c["val"]))
+	if elev_diff > 0.5:
+		best *= clampf(1.0 - (elev_diff - 0.5) / 5.5, 0.0, 1.0)
 	return best
 
 # 該單位所在位置是否處於任何掩體旁（不分方向）——決定是否擺蹲姿
@@ -9033,7 +9189,8 @@ func _scatter_rocks(gwp: float, ghp: float) -> void:
 		var rock_r: float = sc * maxf(rx, 1.0) * 1.15             # 水平半徑（含位移上緣）
 		var rock_h: float = sc * (0.28 + 0.62 * ry)               # 露出地面的高度
 		if sc > 0.30:
-			_blockers.append({"t": "cir", "c": tp, "r": rock_r / WORLD_SCALE, "h": rock_h})
+			_blockers.append({"t": "cir", "c": tp, "r": rock_r / WORLD_SCALE, "h": rock_h,
+					"mat": "rock"})
 		# 每顆石頭色偏不同：一整片同色的粉灰色圓球是本專案被指正過的「一片純色」
 		cols_by[pi2].append(Color(rng.randf_range(0.72, 1.16), rng.randf_range(0.74, 1.12),
 				rng.randf_range(0.70, 1.10)))
@@ -9726,7 +9883,9 @@ func _scatter_trees(mw: float, mh: float) -> void:
 				# 樹幹擋人也擋彈道（灌木只隱蔽不擋——鐵律 0②看幾何不看標籤）。
 				# 邊界帶的排除交給 _strip_edge_blockers 統一處理（原本這裡自己寫死
 				# 30px，但沙包/柵欄/岩石也有同樣問題——一條規則只能有一份）。
-				_blockers.append({"t": "cir", "c": tp, "r": trunk_r / WORLD_SCALE, "h": trunk_h})
+				# 樹幹：實心硬木，比木板厚得多——列為不可穿（材質表的 rock 級）
+				_blockers.append({"t": "cir", "c": tp, "r": trunk_r / WORLD_SCALE, "h": trunk_h,
+						"mat": "rock"})
 		placed += 1
 	# 2026-07-28 使用者：「樹木、特別是樹木上的葉子」要更真實。
 	# 換 ShaderMaterial 做三件事：①風搖（整樹低頻搖＋葉面高頻顫）

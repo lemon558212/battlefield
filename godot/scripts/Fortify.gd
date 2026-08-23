@@ -114,7 +114,7 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 		_bag(Vector2(cx, cy), off, Vector3(bag_l, bag_h, bag_w),
 				rng.randf() * TAU, rng.randf_range(-0.5, 0.5), rng)
 		blockers.append({"t": "cir", "c": loose_c,
-				"r": bag_l * 0.5 / _ws, "h": bag_h, "k": "sandbag_loose"})
+				"r": bag_l * 0.5 / _ws, "h": bag_h, "k": "sandbag_loose", "mat": "sandbag"})
 	# 實體：沙包牆是一道牆，人不可能從中間穿過去（使用者 2026-07-26 指正
 	# 「任何的物體都是不能穿越的」）。用線段涵蓋整道牆。
 	var half_len: float = length_m * 0.5 / _ws
@@ -131,6 +131,7 @@ func sandbag_wall(cx: float, cy: float, w_px: float, h_px: float) -> void:
 				+ "中心(%.0f,%.0f)　請改 maps.json 的 sandbags 讓它離邊界遠一點" % [cx, cy])
 	blockers.append({"t": "seg", "a": Vector2(cx, cy) - dpx, "b": Vector2(cx, cy) + dpx,
 			"r": 0.30 / _ws, "h": float(rows) * bag_h * 0.92 + bag_h * 0.5, "k": "sandbag",
+			"mat": "sandbag",
 			"m": Vector2(cx, cy), "hl": half_len})
 	var wall_blk = blockers[blockers.size() - 1]
 	# 底部泥土堆：物件與地面的過渡，沒有這層就是「硬插進地面」

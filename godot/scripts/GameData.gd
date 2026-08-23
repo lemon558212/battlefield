@@ -17,6 +17,7 @@ var weather_sys: Dictionary = {}      # 動態天候系統（GDD/04 天候節）
 var char_look: Dictionary = {}
 var enemy_look: Dictionary = {}       # 敵軍外觀（GDD/06 外觀 v2：敵我基底分池）
 var vehicle_look: Dictionary = {}     # 載具外觀：立繪生成的模型（modly）＋尺度／砲塔切面
+var materials: Dictionary = {}        # 材質的彈道屬性（GDD/15 D5：穿不穿得過、穿過之後偏多少）
 
 func _ready() -> void:
 	nations = _load_json("res://data/nations.json")
@@ -33,6 +34,7 @@ func _ready() -> void:
 	char_look = _load_json("res://data/char_look.json")
 	enemy_look = _load_json("res://data/enemy_look.json")
 	vehicle_look = _load_json("res://data/vehicle_look.json")
+	materials = _load_json("res://data/materials.json")
 	var st = _load_json_any("res://data/story.json")
 	if st is Array:
 		story = st
@@ -214,3 +216,15 @@ func splash_defilade(in_trench: bool, in_crater: bool) -> float:
 	if in_crater:
 		return float(td.get("splash_crater", 0.65))
 	return 1.0
+
+
+# ---------- 材質的彈道屬性（GDD/15 D5、G4）----------
+# 障礙沒寫 mat 時，用舊的 pen 布林退回 wood／concrete——這樣既有的呼叫處
+# 不必全部改完才會動，而且行為與改動前一致（可穿的照穿、不可穿的照擋）。
+func material(name: String, pen_fallback := false) -> Dictionary:
+	var tbl: Dictionary = materials.get("materials", {})
+	if tbl.has(name):
+		return tbl[name]
+	return tbl.get("wood" if pen_fallback else "concrete",
+			{"pen": pen_fallback, "hit": 0.7, "dmg": 0.8})
+
