@@ -1112,6 +1112,77 @@ func _aichk() -> void:
 			% [mat_res["canvas"]["hit"], mat_res["wood"]["hit"], mat_res["rubber"]["hit"],
 			mat_res["rubber"]["dmg"]])
 
+	# ---------- ⑤i 體力與負重（GDD/15 I2）----------
+	# 體力系統本來就有（跑步會掉、靜止會回），但它只影響速度：喘成狗照樣神槍手。
+	me["node"].stamina = 1.0
+	var acc_fresh: float = GameData.hit_chance(_wrap(me), _wrap(foe), 60.0)
+	me["node"].stamina = 0.0
+	var acc_tired: float = GameData.hit_chance(_wrap(me), _wrap(foe), 60.0)
+	me["node"].stamina = 1.0
+	_ai_say(acc_fresh > 0.0 and acc_tired < acc_fresh
+			and absf(acc_tired / maxf(acc_fresh, 0.0001) - 0.85) < 0.02,
+			"體力影響命中：滿體力 %.3f → 見底 %.3f（×%.2f，比傷勢的 0.78 溫和是刻意的）"
+			% [acc_fresh, acc_tired, acc_tired / maxf(acc_fresh, 0.0001)])
+	_ai_say(Unit.load_stamina_k("mg") > Unit.load_stamina_k("sniper")
+			and Unit.load_stamina_k("sniper") > Unit.load_stamina_k("rifleman"),
+			"負重吃體力：重裝(mg) ×%.2f ＞ 步行(sniper) ×%.2f ＞ 偵察(rifleman) ×%.2f"
+			% [Unit.load_stamina_k("mg"), Unit.load_stamina_k("sniper"),
+			Unit.load_stamina_k("rifleman")])
+
+	# ---------- ⑤j 太陽跟著時鐘走（GDD/15 E3）----------
+	var sky_day: Dictionary = Biome.sky_at_hour(10.0)
+	var sky_dusk: Dictionary = Biome.sky_at_hour(17.0)
+	var sky_night: Dictionary = Biome.sky_at_hour(22.0)
+	var pre_day: Dictionary = Biome.sky_preset("day")
+	var pre_dusk: Dictionary = Biome.sky_preset("dusk")
+	_ai_say((sky_day["sun_deg"] as Vector3).distance_to(pre_day["sun_deg"] as Vector3) < 0.01
+			and (sky_dusk["sun_deg"] as Vector3).distance_to(pre_dusk["sun_deg"] as Vector3) < 0.01,
+			"★ 錨點對得上：10:00 與 17:00 的太陽角度與原本的 day／dusk 預設完全相同（開場光照不變）")
+	var noon: Vector3 = Biome.sky_at_hour(13.0)["sun_deg"]
+	var az_10: float = float((sky_day["sun_deg"] as Vector3).y)
+	var az_17: float = float((sky_dusk["sun_deg"] as Vector3).y)
+	var az_22: float = float((sky_night["sun_deg"] as Vector3).y)
+	_ai_say(noon.y > az_10 and noon.y < az_17 and az_17 < az_22,
+			"太陽會西移：10:00 方位 %.0f° → 13:00 %.0f° → 17:00 %.0f° → 22:00(月) %.0f°"
+			% [az_10, noon.y, az_17, az_22])
+	_ai_say(float(sky_night["sun_energy"]) < float(sky_day["sun_energy"]) * 0.5,
+			"夜裡的光源強度 %.2f 遠低於白天 %.2f"
+			% [float(sky_night["sun_energy"]), float(sky_day["sun_energy"])])
+
+	# ---------- ⑤k 載具轉彎要走弧線，不是停下來原地轉（GDD/15 B5）----------
+	var tank = _spawn_unit("tank", 1 - player_side, spot.x + sx * 260.0, spot.y + 200.0, false)
+	if tank == null:
+		print("[aichk] 生不出坦克，B5 這一項跳過")
+	else:
+		var tsave := _shield(tank)
+		await get_tree().create_timer(0.6).timeout
+		# 車頭朝 +x，目標在側面 90 度處：舊碼會先煞停原地轉正，位移幾乎為 0
+		_ai_place(tank, spot.x + sx * 260.0, spot.y + 200.0,
+				Vector2(spot.x + sx * 460.0, spot.y + 200.0))
+		await get_tree().create_timer(0.5).timeout
+		var t_from: Vector3 = tank["node"].global_position
+		var yaw0: float = tank["node"].rotation.y
+		tank["node"].move_to(_to3d(spot.x + sx * 260.0, spot.y + 480.0))
+		var moved_while_turning := 0.0
+		var prev_p: Vector3 = t_from
+		var tt := 0.0
+		while tt < 3.0:
+			await get_tree().process_frame
+			tt += get_process_delta_time()
+			var now_p: Vector3 = tank["node"].global_position
+			var dyaw_now: float = absf(wrapf(tank["node"].rotation.y - yaw0, -PI, PI))
+			if dyaw_now > 0.15 and dyaw_now < 1.40:      # 還在轉的那一段
+				moved_while_turning += Vector2(now_p.x - prev_p.x, now_p.z - prev_p.z).length()
+			prev_p = now_p
+		var turned_deg: float = absf(rad_to_deg(wrapf(tank["node"].rotation.y - yaw0, -PI, PI)))
+		_ai_say(turned_deg > 20.0 and moved_while_turning > 1.0,
+				"載具走弧線：3 秒內轉了 %.0f°，其中「正在轉」的那段位移 %.2fm（>1m＝邊開邊轉，不是原地打轉）"
+				% [turned_deg, moved_while_turning])
+		_unshield(tank, tsave)
+		tank["alive"] = false
+		if is_instance_valid(tank["node"]):
+			tank["node"].queue_free()
+
 	# ---------- ⑥ 聲音遮蔽（GDD/15 F3）：牆後的槍聲要變悶 ----------
 	_ai_say(Audio.los_check.is_valid(), "遮蔽悶音的接線存在（Main 有把視線查詢注入 Audio）")
 	var keep: Callable = Audio.los_check
@@ -4751,7 +4822,13 @@ var _sky_mat: ShaderMaterial = null
 # 天色時段（讀 maps.json 的 sky 欄位）：夜襲章節就該是夜色，黎明搶灘就該是晨光。
 # 先前所有圖共用一組黃昏光——資料裡的 sky 欄位從來沒被讀過。
 func _apply_sky(preset_name: String) -> void:
-	var pr: Dictionary = Biome.sky_preset(preset_name)
+	_apply_sky_pr(Biome.sky_preset(preset_name))
+
+# 依戰場時刻套光照（GDD/15 E3）：每回合推進時間後呼叫，太陽會真的移動。
+func _apply_sky_hour() -> void:
+	_apply_sky_pr(Biome.sky_at_hour(clock_hour))
+
+func _apply_sky_pr(pr: Dictionary) -> void:
 	if _sun != null:
 		_sun.rotation_degrees = pr["sun_deg"]
 		_sun.light_color = pr["sun_color"]
@@ -6248,9 +6325,11 @@ func _advance_time_weather() -> void:
 	var tod0: String = GameData.tod_for_hour(clock_hour)
 	clock_hour += _hpt
 	var tod1: String = GameData.tod_for_hour(clock_hour)
+	# ★ 每回合都重套光照，不是只有跨時段才套（GDD/15 E3）：
+	#   太陽是連續移動的，先前是「啪」地換一組光、中間完全不動。
+	_apply_sky_hour()
+	_feed_env_uniforms()
 	if tod1 != tod0:
-		_apply_sky(tod1)
-		_feed_env_uniforms()
 		ui.flash_msg("時刻 %02d:00——%s" % [int(fposmod(clock_hour, 24.0)),
 				{"dawn": "天亮了", "day": "日上三竿", "dusk": "暮色四合", "night": "夜幕降臨"}.get(tod1, "")],
 				Color(0.95, 0.88, 0.6))
@@ -6810,6 +6889,7 @@ class _UW:
 	var stance_acc := 1.0
 	var moving := false
 	var hp_ratio := 1.0
+	var stamina := 1.0            # 體力（GDD/15 I2）：跑久了會喘，喘著射擊會抖
 	# 地形事實（GDD/01 §4b）：涉水深度／坡度／地面高度／是否在彈坑
 	var wade := 0.0
 	var slope := 0.0
@@ -6826,6 +6906,7 @@ class _UW:
 			# 臥射 1.25 / 蹲姿 1.12 / 站姿 1.0——支撐點越多越穩
 			stance_acc = 1.0 + 0.25 * n._prone + 0.12 * n._crouch * (1.0 - n._prone)
 			moving = n.is_moving()
+			stamina = float(n.stamina)
 		var hp_max: float = float(GameData.class_base.get(cls, {}).get("hp", 100))
 		hp_ratio = clampf(float(u.get("hp", hp_max)) / maxf(hp_max, 1.0), 0.0, 1.0)
 

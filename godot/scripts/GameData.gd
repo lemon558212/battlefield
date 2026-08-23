@@ -115,6 +115,9 @@ func hit_chance(shooter, target, dist_px: float, part := "body") -> float:
 	if shooter.moving:
 		c *= 0.55
 	c *= 0.78 + 0.22 * clampf(shooter.hp_ratio, 0.0, 1.0)
+	# 體力（GDD/15 I2）：喘著射擊會抖。滿體力 1.0、見底 0.85——
+	# 影響比傷勢小（0.78）是刻意的：累是暫時的，傷是永久的。
+	c *= 0.85 + 0.15 * clampf(shooter.stamina, 0.0, 1.0)
 	# 地形修正（GDD/01 §4b）：射手穩定度 × 目標閃避。數值查 terrain_combat.json。
 	# 載具不吃「涉水不穩／陡坡據槍」——它們沒有「據槍」這回事；高低差照吃。
 	var ts: Dictionary = terrain_combat.get("shooter", {})

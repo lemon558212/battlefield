@@ -172,6 +172,8 @@ const PRONE_SPEED := 0.8     # 匍匐前進速度（實際軍事匍匐約 0.7~1 
 const CRAWL_RATE := 3.4      # 匍匐擺動頻率（每公尺約一個循環）
 const VEH_SPEED := 4.2       # 履帶車速（比步兵快，但轉向慢）
 const VEH_TURN := 1.8        # 履帶車轉向速率（步兵 12，坦克要笨重）
+# 超過這個角度差才停車原地迴轉（履帶車真的會這樣調頭）；以下都是邊開邊轉的弧線。
+const NEUTRAL_STEER_ANG := 1.75   # 約 100°
 const CROUCH_WALK_MAX := 4.0 # 掩體區內移動幾公尺以內用蹲行（再遠就站起來跑）
 const SHOTS_PER_MAG := 3     # 打幾發換一次彈匣
 var _shots := 0
@@ -1926,11 +1928,23 @@ const STAM_REGEN := 0.10       # 每秒恢復（靜止時）
 func stamina_mul() -> float:
 	return 0.72 + 0.28 * clampf(stamina, 0.0, 1.0)
 
+# 負重對體力消耗的倍率（GDD/15 I2）。分級沿用 class_base 的 mobility，
+# 與移動速度用的是同一份資料——不要為了同一件事在兩個地方各寫一組數字（鐵律 3）。
+static func load_stamina_k(p_cls: String) -> float:
+	match String(GameData.class_base.get(p_cls, {}).get("mobility", "foot")):
+		"heavy": return 1.35
+		"scout": return 0.85
+	return 1.0
+
 func _tick_stamina(delta: float, running: bool) -> void:
 	if _dead:
 		return
 	if running and _prone < 0.5 and _crouch < 0.5:
-		stamina = maxf(0.0, stamina - STAM_DRAIN * delta * maxf(1.0, speed_mul))
+		# 負重（GDD/15 I2）：重裝兵扛的東西多，同樣的跑法掉體力更快。
+		# 倍率沿用 class_base 的 mobility 分級，與移動速度用的是同一份資料
+		# （鐵律 3：不要為了同一件事在兩個地方各寫一組數字）。
+		stamina = maxf(0.0, stamina - STAM_DRAIN * delta * maxf(1.0, speed_mul)
+				* load_stamina_k(cls))
 	else:
 		stamina = minf(1.0, stamina + STAM_REGEN * delta)
 
@@ -2834,7 +2848,19 @@ func _vehicle_process(delta: float) -> void:
 		var turn_rate: float = VEH_TURN / (1.0 + _veh_spd * 0.55)
 		rotation.y = lerp_angle(rotation.y, yaw, minf(1.0, turn_rate * delta))
 		var ang := absf(wrapf(yaw - rotation.y, -PI, PI))
-		var want: float = (VEH_SPEED * speed_mul) if ang < 0.35 else 0.0
+		# ★ 轉彎不是「停下來轉正再開」（GDD/15 B5）。舊碼只要角度差 >0.35rad(20°)
+		#   就把目標速度打成 0：畫面上是坦克每次改方向都先煞停、原地打轉、再起步，
+		#   而且因為速度=0 時 turn_rate 最大，它轉得比開著的時候還快——完全反過來。
+		#   真的履帶車是邊開邊轉，畫出一條弧線；轉向半徑 r = v / ω 自然浮現。
+		#   只有大角度（>NEUTRAL_STEER_ANG，約 100°）才停下來原地轉——
+		#   那也是真的：履帶車調頭確實會停車做原地迴轉。
+		var want: float = 0.0
+		if ang < 0.35:
+			want = VEH_SPEED * speed_mul
+		elif ang < NEUTRAL_STEER_ANG:
+			# 角度愈大開得愈慢（過彎減速），但不歸零：0.35rad→0.85 倍、100°→0.25 倍
+			want = VEH_SPEED * speed_mul * lerpf(0.85, 0.25,
+					(ang - 0.35) / maxf(NEUTRAL_STEER_ANG - 0.35, 0.01))
 		var rate: float = VEH_ACCEL if want > _veh_spd else VEH_DECEL
 		_veh_spd = move_toward(_veh_spd, want, rate * delta)
 		if _veh_spd > 0.01:

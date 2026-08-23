@@ -72,6 +72,42 @@ static func of(map_data: Dictionary) -> Dictionary:
 # 天色時段（讀 maps.json 的 sky 欄位：day/dawn/dusk/night）。
 # 回傳太陽角度/色溫/能量與環境參數，由 Main 套用——同一張圖的光照要跟資料一致，
 # 夜襲章節（harbor）就該是夜色，不是每張都黃昏。
+# 時刻 → 天色（GDD/15 E3）。
+# ⚠ 這裡**不是**用天文公式算太陽高度角：那會把正午拉成頂光，直接推翻美術上
+#   「斜射拉長影子」的既定選擇（見 Main._build_static 的註解）。
+#   改成把四個既有預設當**錨點**，依時刻在它們之間內插：
+#     06:00 dawn ／ 10:00 day ／ 17:00 dusk ／ 22:00 night ／ 隔天 06:00 dawn
+#   這四個時刻正是 weather_system.json 的 start_hour，所以**每張圖開場的光照
+#   與改動前一模一樣**，改變的只有「打久了太陽會移動、天色會漸變」。
+#   先前是時段跨界才「啪」地換一組光，中間完全不動。
+const SKY_ANCHORS := [[6.0, "dawn"], [10.0, "day"], [17.0, "dusk"], [22.0, "night"], [30.0, "dawn"]]
+
+static func sky_at_hour(h: float) -> Dictionary:
+	var hh: float = fposmod(h, 24.0)
+	if hh < 6.0:
+		hh += 24.0                      # 00:00~06:00 落在 night→dawn 這一段
+	var a: Array = SKY_ANCHORS[0]
+	var b: Array = SKY_ANCHORS[1]
+	for i in range(SKY_ANCHORS.size() - 1):
+		if hh >= float(SKY_ANCHORS[i][0]) and hh <= float(SKY_ANCHORS[i + 1][0]):
+			a = SKY_ANCHORS[i]
+			b = SKY_ANCHORS[i + 1]
+			break
+	var t: float = clampf((hh - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.01), 0.0, 1.0)
+	var pa: Dictionary = SKY_PRESETS[String(a[1])]
+	var pb: Dictionary = SKY_PRESETS[String(b[1])]
+	var out := {}
+	for k in pa.keys():
+		var va = pa[k]
+		var vb = pb[k]
+		if va is Vector3:
+			out[k] = (va as Vector3).lerp(vb as Vector3, t)
+		elif va is Color:
+			out[k] = (va as Color).lerp(vb as Color, t)
+		else:
+			out[k] = lerpf(float(va), float(vb), t)
+	return out
+
 const SKY_PRESETS := {
 	"day":  {"sun_deg": Vector3(-38, 128, 0), "sun_color": Color(1.0, 0.95, 0.86), "sun_energy": 1.2,
 			"ambient": 0.30, "top": Color(0.24, 0.44, 0.74), "horizon": Color(0.80, 0.85, 0.88),
