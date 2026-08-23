@@ -886,11 +886,56 @@ func _aichk() -> void:
 			"★ 循聲查看時沒有鎖定目標（看不到的人不可以被鎖定）")
 
 	# ---------- ⑤ 記憶會過期：不可以永遠往同一個點走 ----------
-	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0 - HEAR_MEMORY_SEC - 1.0
-	_ai_say(_noise_memory(foe) == null, "槍聲記憶超過 %.0fs 後失效" % HEAR_MEMORY_SEC)
+	# ⚠ 用本章實際的記憶秒數，不要用常數：HEAR_MEMORY_SEC 只是 difficulty.json
+	#   缺欄位時的後備值，拿它當門檻等於斷言與實際規則各說各的。
+	var mem_sec: float = float(_diff().get("hearMemory", HEAR_MEMORY_SEC))
+	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0 - mem_sec - 1.0
+	_ai_say(_noise_memory(foe) == null, "槍聲記憶超過本章的 %.0fs 後失效" % mem_sec)
 	var plan2: Dictionary = _ai_plan(foe)
 	_ai_say(String(plan2["why"]) == "無目標→推進主堡",
 			"記憶過期後回到「%s」（應為「無目標→推進主堡」）" % String(plan2["why"]))
+
+	# ---------- ⑤a 難度旋鈕：情報流通速度（data/difficulty.json）----------
+	# 高難度不是血更厚，是「知道得更多、記得更久」。這裡驗兩個旋鈕真的被讀到。
+	var dif_now: Dictionary = _diff()
+	_ai_say(dif_now.has("hearMemory") and dif_now.has("relay"),
+			"第 %d 章的情報參數：記憶 %s 秒、通報半徑 %s px（兩個都要在 difficulty.json 裡）"
+			% [chapter, str(dif_now.get("hearMemory", "缺")), str(dif_now.get("relay", "缺"))])
+	# 記憶秒數確實吃資料：把 noise_t 撥到「剛好超過本章記憶」就該失效
+	var mem_s: float = float(dif_now.get("hearMemory", HEAR_MEMORY_SEC))
+	foe["noise_px"] = float(foe["wx"])
+	foe["noise_py"] = float(foe["wy"])
+	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0 - mem_s * 0.5
+	var mem_half: bool = _noise_memory(foe) != null
+	foe["noise_t"] = float(Time.get_ticks_msec()) / 1000.0 - mem_s - 1.0
+	var mem_over: bool = _noise_memory(foe) == null
+	_ai_say(mem_half and mem_over,
+			"記憶時間跟著資料走：過了 %.0fs 還記得、過了 %.0fs 就忘了" % [mem_s * 0.5, mem_s + 1.0])
+	# 通報半徑：把第三個人放在「看得到我、但離 foe 超過 relay」的地方，
+	# foe 不該因此知道我在哪（低章節的部隊沒有那麼靈通的無線電）
+	var relay_px: float = float(dif_now.get("relay", 9999.0))
+	if relay_px < 3000.0:
+		var mate = null
+		for u2 in units:
+			if u2["alive"] and u2["side"] == foe["side"] and u2 != foe:
+				mate = u2
+				break
+		if mate != null:
+			# 我方擺遠處、mate 站在我旁邊（看得到我）、foe 在 relay 之外
+			var mate_spot := Vector2(spot.x + sx * (relay_px + 260.0), spot.y)
+			_ai_place(me, mate_spot.x, mate_spot.y, mate_spot + Vector2(sx * 40.0, 0))
+			_ai_place(mate, mate_spot.x + sx * 30.0, mate_spot.y, mate_spot)
+			_ai_place(foe, spot.x, spot.y, spot + Vector2(sx * 40.0, 0))
+			await get_tree().create_timer(0.5).timeout
+			var mate_sees: bool = _spots(mate, me)
+			var foe_knows: bool = _known_foes(foe).size() > 0
+			_ai_say(mate_sees and not foe_knows,
+					"通報半徑 %.0f px：同袍看得到我（%s），但隔了 %.0f px 的 foe 不知道（已知數 %d）"
+					% [relay_px, mate_sees, mate_spot.distance_to(spot), _known_foes(foe).size()])
+			_ai_place(mate, park.x, park.y)          # 用完送回角落，不要干擾後面的量測
+			await get_tree().create_timer(0.3).timeout
+	else:
+		print("[aichk] 本章 relay=%.0f（全隊共享），通報半徑那一項不適用" % relay_px)
 
 	# ---------- ⑤b 移動噪音（GDD/15 J6）：腳步與引擎聲也是情報 ----------
 	# 三段距離都用同一個動作（讓 _noise_tick 自己跑一次），只改姿勢／距離
@@ -6428,23 +6473,39 @@ func _add_battle_mark(u) -> void:
 	_battle_marks.append({"px": p.x, "py": p.y, "side": u["side"],
 			"t": float(Time.get_ticks_msec()) / 1000.0})
 
-# 這個單位還記得的槍聲位置（px）；沒有或已過期回 null
+# 這個單位還記得的槍聲／陣亡地點（px）；沒有或已過期回 null。
+# 記多久改讀 data/difficulty.json 的 hearMemory（鐵律 3：數值只准放 data/）——
+# 這是難度分級的一環：高難度的部隊記得久，不是血更厚（部門文件明訓「更聰明不是更硬」）。
 func _noise_memory(u):
 	if not u.has("noise_t"):
 		return null
 	var now: float = float(Time.get_ticks_msec()) / 1000.0
-	if now - float(u["noise_t"]) > HEAR_MEMORY_SEC:
+	if now - float(u["noise_t"]) > float(_diff().get("hearMemory", HEAR_MEMORY_SEC)):
 		return null
 	return Vector2(float(u["noise_px"]), float(u["noise_py"]))
 
-# 這個單位「知道」的敵人＝我方陣營現在看得見的（GDD/05 §5）。
-# ⚠ 不是「他自己看得見的」：同一陣營會互相通報，一個人看到全隊都知道，
-#   這也是原本 JS 版 Fog.sideCanSee 的語意。
+# 這個單位「知道」的敵人＝自己看得見的，加上**通報得到的同袍**看得見的（GDD/05 §5）。
+# ⚠ 不是無條件的全隊共享：通報半徑 relay 讀 data/difficulty.json，
+#   低章節 120px（幾乎只有自己與身邊的人），高章節 9999（全隊即時共享）。
+#   這是難度的第二個旋鈕——高難度＝情報流通快，不是數值膨脹。
+#   （玩家自己的迷霧 _refresh_visibility 仍用全隊聯集：那是 UI，玩家有上帝視角的地圖。）
 func _known_foes(e) -> Array:
+	var relay: float = float(_diff().get("relay", 9999.0))
+	var ep := Vector2(float(e["wx"]), float(e["wy"]))
+	var eyes: Array = []
+	for p in units:
+		if p["side"] != e["side"] or not p["alive"]:
+			continue
+		if p == e or ep.distance_to(_live_px(p)) <= relay:
+			eyes.append(p)
 	var out: Array = []
 	for x in units:
-		if x["alive"] and x["side"] != e["side"] and _side_sees(e["side"], x):
-			out.append(x)
+		if not x["alive"] or x["side"] == e["side"]:
+			continue
+		for p in eyes:
+			if _spots(p, x):
+				out.append(x)
+				break
 	return out
 
 # 看得見的最近敵人（沒有就 null）。舊的 _nearest_foe 是全知的，只准用在

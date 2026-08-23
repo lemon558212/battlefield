@@ -1,5 +1,5 @@
 {
- "_note": "章節難度曲線。1~5 章靠解鎖新單位給成長感；6~15 章不解鎖新東西，改靠敵人數量、地形複雜度、AI 行為（掩體/集火/側翼/撤退）爬升。cover/focus/flank 是機率(0~1)；terrain 是額外地形物件的倍率。",
+ "_note": "章節難度曲線。1~5 章靠解鎖新單位給成長感；6~15 章不解鎖新東西，改靠敵人數量、地形複雜度、AI 行為（掩體/集火/側翼/撤退）爬升。cover/focus/flank 是機率(0~1)；terrain 是額外地形物件的倍率。 hearMemory＝聽到的槍聲／看到的陣亡地點記多久（秒），relay＝同袍之間的通報半徑（px，9999＝全隊即時共享）。這兩個是「情報流通速度」，不是數值膨脹——高難度＝知道得更多更久，不是血更厚。",
  "tiers": [
   {
    "ch": 1,
@@ -10,7 +10,9 @@
    "flank": 0.0,
    "alertK": 1.0,
    "retreatHp": 0.3,
-   "terrain": 0.0
+   "terrain": 0.0,
+   "hearMemory": 8,
+   "relay": 120
   },
   {
    "ch": 2,
@@ -21,7 +23,9 @@
    "flank": 0.0,
    "alertK": 1.0,
    "retreatHp": 0.3,
-   "terrain": 0.0
+   "terrain": 0.0,
+   "hearMemory": 8,
+   "relay": 120
   },
   {
    "ch": 3,
@@ -32,7 +36,9 @@
    "flank": 0.0,
    "alertK": 1.0,
    "retreatHp": 0.3,
-   "terrain": 0.15
+   "terrain": 0.15,
+   "hearMemory": 12,
+   "relay": 220
   },
   {
    "ch": 4,
@@ -43,7 +49,9 @@
    "flank": 0.0,
    "alertK": 1.0,
    "retreatHp": 0.3,
-   "terrain": 0.15
+   "terrain": 0.15,
+   "hearMemory": 12,
+   "relay": 220
   },
   {
    "ch": 5,
@@ -54,7 +62,9 @@
    "flank": 0.0,
    "alertK": 1.05,
    "retreatHp": 0.32,
-   "terrain": 0.25
+   "terrain": 0.25,
+   "hearMemory": 12,
+   "relay": 220
   },
   {
    "ch": 6,
@@ -65,7 +75,9 @@
    "flank": 0.06,
    "alertK": 1.08,
    "retreatHp": 0.34,
-   "terrain": 0.33
+   "terrain": 0.33,
+   "hearMemory": 16,
+   "relay": 320
   },
   {
    "ch": 7,
@@ -76,7 +88,9 @@
    "flank": 0.12,
    "alertK": 1.12,
    "retreatHp": 0.35,
-   "terrain": 0.4
+   "terrain": 0.4,
+   "hearMemory": 16,
+   "relay": 320
   },
   {
    "ch": 8,
@@ -87,7 +101,9 @@
    "flank": 0.18,
    "alertK": 1.16,
    "retreatHp": 0.37,
-   "terrain": 0.47
+   "terrain": 0.47,
+   "hearMemory": 16,
+   "relay": 320
   },
   {
    "ch": 9,
@@ -98,7 +114,9 @@
    "flank": 0.24,
    "alertK": 1.19,
    "retreatHp": 0.38,
-   "terrain": 0.55
+   "terrain": 0.55,
+   "hearMemory": 16,
+   "relay": 320
   },
   {
    "ch": 10,
@@ -109,7 +127,9 @@
    "flank": 0.3,
    "alertK": 1.23,
    "retreatHp": 0.4,
-   "terrain": 0.62
+   "terrain": 0.62,
+   "hearMemory": 20,
+   "relay": 460
   },
   {
    "ch": 11,
@@ -120,7 +140,9 @@
    "flank": 0.36,
    "alertK": 1.26,
    "retreatHp": 0.42,
-   "terrain": 0.7
+   "terrain": 0.7,
+   "hearMemory": 20,
+   "relay": 460
   },
   {
    "ch": 12,
@@ -131,7 +153,9 @@
    "flank": 0.42,
    "alertK": 1.29,
    "retreatHp": 0.43,
-   "terrain": 0.77
+   "terrain": 0.77,
+   "hearMemory": 20,
+   "relay": 460
   },
   {
    "ch": 13,
@@ -142,7 +166,9 @@
    "flank": 0.48,
    "alertK": 1.33,
    "retreatHp": 0.45,
-   "terrain": 0.85
+   "terrain": 0.85,
+   "hearMemory": 26,
+   "relay": 9999
   },
   {
    "ch": 14,
@@ -153,7 +179,9 @@
    "flank": 0.54,
    "alertK": 1.36,
    "retreatHp": 0.46,
-   "terrain": 0.93
+   "terrain": 0.93,
+   "hearMemory": 26,
+   "relay": 9999
   },
   {
    "ch": 15,
@@ -164,7 +192,9 @@
    "flank": 0.6,
    "alertK": 1.4,
    "retreatHp": 0.48,
-   "terrain": 1.0
+   "terrain": 1.0,
+   "hearMemory": 26,
+   "relay": 9999
   }
  ]
 }
